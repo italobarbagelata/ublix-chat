@@ -11,14 +11,8 @@ from app.resources.constants import (
     PROJECTS_TABLE,
     CONVERSATION_DATA_TABLE,
     MEMORY_STATES_TABLE,
-    PSQL_DATABASE_URL,
-    PSQL_DATABASE_NAME,
-    PSQL_DATABASE_USER,
-    PSQL_DATABASE_PASSWORD,
 )
 from uuid import uuid4
-import psycopg2
-import traceback
 import threading
 
 class Persist(object):
