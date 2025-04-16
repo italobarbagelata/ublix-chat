@@ -1,0 +1,40 @@
+uvicorn main:app --host 0.0.0.0 --port 8000
+
+git pull
+sudo systemctl restart fastapi
+sudo journalctl -u fastapi -f
+
+
+
+time
+
+step 1
+
+sudo nano /etc/systemd/system/fastapi.service
+
+[Unit]
+Description=FastAPI app
+After=network.target
+
+[Service]
+User=root
+WorkingDirectory=/root/ublix-back
+
+ExecStart=/usr/local/bin/gunicorn main:app \
+  -k uvicorn.workers.UvicornWorker \
+  --bind 127.0.0.1:8000 \
+  --workers 3 \
+  --timeout 3600 \
+  --log-level info
+  --limit-request-line 8190 \
+  --limit-request-field_size 8190 \
+  --limit-request-fields 100 \
+  --env UVICORN_CMD_ARGS="--limit-max-request-size 100"
+
+Restart=always
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
+

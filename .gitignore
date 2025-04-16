@@ -1,0 +1,27 @@
+# Ignorar entornos virtuales en cualquier subdirectorio
+**/venv/
+
+# Archivos de configuración de entorno
+.env.local
+.env.*.local
+
+# Archivos de caché de Python
+__pycache__/
+*.py[cod]
+*.pyc
+
+# Archivos de log
+*.log
+
+# Archivos de configuración de IDEs
+.vscode/
+.idea/
+
+# Archivos de sistema
+.DS_Store
+Thumbs.db
+
+# Archivos de paquetes
+*.egg-info/
+dist/
+build/
