@@ -1,7 +1,4 @@
 fastapi
-azure-functions
-azure-search-documents==11.4.0
-azure-identity
 langchain==0.3.1
 langchain-core==0.3.10
 langchain-openai==0.2.1
@@ -11,12 +8,9 @@ langchain-community==0.3.1
 tiktoken
 pymongo
 requests
-azure-search
 lxml
 setuptools==69.0.2
 wheel==0.42.0
-PureCloudPlatformClientV2==191.0.0
-azure-storage-blob
 pandas
 numpy
 spacy
