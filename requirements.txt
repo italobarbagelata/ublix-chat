@@ -23,6 +23,7 @@ python-dotenv
 python-jose
 PyPDF2==3.0.1
 uvicorn
+gunicorn
 langgraph
 langchain_anthropic
 tavily-python
