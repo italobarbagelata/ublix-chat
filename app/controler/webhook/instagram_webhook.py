@@ -1,4 +1,3 @@
-
 import logging
 import json
 import os
@@ -203,7 +202,7 @@ async def process_instagram_message(message: Dict[str, Any]):
         if not project_id:
             logger.warning(f"No se encontró proyecto para IG Recipient ID: {recipient_id}")
             db = SupabaseDatabase()
-            instagram_configs = db.select(INSTAGRAM_COLLECTION, {"instagram_page_id": None})
+            instagram_configs = db.select(INSTAGRAM_COLLECTION, {"instagram_page_id": "is.null"}, order_by="created_at", order_desc=True)
             logger.info(f"Instagram configs: {json.dumps(instagram_configs, indent=2)}")
             for instagram_config in instagram_configs:
                 token = instagram_config.get("user_access_token")
@@ -220,8 +219,8 @@ async def process_instagram_message(message: Dict[str, Any]):
         logger.info(f"Obteniendo información detallada del usuario: {sender_id}")
         
         #obtener el username y el user_id del usuario de instagram
-        user = await get_instagram_user_info(instagram_id=sender_id,access_token=token)
-        logger.info(f"User: {json.dumps(user, indent=2)}")
+        #user = await get_instagram_user_info(instagram_id=sender_id,access_token=token)
+        #logger.info(f"User: {json.dumps(user, indent=2)}")
         username = "Instagram User"
         user_id = sender_id
       
