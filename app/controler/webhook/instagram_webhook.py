@@ -4,7 +4,8 @@ import json
 import os
 import httpx
 from typing import Dict, Any, List, Optional
-from fastapi import Request
+from fastapi import Request, HTTPException
+from fastapi.responses import PlainTextResponse
 from dotenv import load_dotenv
 from app.controler.chat.store.persistence import SupabaseDatabase
 from app.controler.chat.core.graph import Graph
@@ -24,6 +25,39 @@ load_dotenv()
 INSTAGRAM_COLLECTION = "integration_instagram"
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
 
+
+########################################################
+# Verificación de webhook de Instagram
+########################################################
+async def verify_webhook_instagram(request: Request):
+    """Verifica el webhook de Instagram cuando Facebook/Meta lo configura inicialmente."""
+    logger.info("Iniciando verificación de webhook de Instagram")
+    params = request.query_params
+    verify_token = os.getenv("INSTAGRAM_VERIFY_TOKEN")
+    
+    logger.debug(f"Parámetros recibidos: {params}")
+    logger.debug(f"Verify token configurado: {'Sí' if verify_token else 'No'}")
+    
+    if not verify_token:
+        logger.error("INSTAGRAM_VERIFY_TOKEN no está configurado")
+        raise HTTPException(status_code=500, detail="Error interno: Verify token no configurado")
+    
+    mode = params.get("hub.mode")
+    token = params.get("hub.verify_token")
+    challenge = params.get("hub.challenge")
+    
+    logger.debug(f"Mode: {mode}, Token: {token}, Challenge: {challenge}")
+    
+    if not all([mode, token, challenge]):
+        logger.warning("Faltan parámetros en la verificación del webhook")
+        raise HTTPException(status_code=400, detail="Faltan parámetros")
+    
+    if mode == "subscribe" and token == verify_token:
+        logger.info("Webhook de Instagram verificado exitosamente")
+        return PlainTextResponse(content=str(challenge), status_code=200)
+    else:
+        logger.warning(f"Fallo en verificación de webhook de Instagram. Mode: {mode}, Token recibido: {token}")
+        raise HTTPException(status_code=403, detail="Verificación fallida")
 
 
 ########################################################
