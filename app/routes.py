@@ -3,7 +3,7 @@ from app.controler.chat import chat
 from app.controler.webhook.instagram_webhook import process_webhook_instagram, verify_webhook_instagram
 
 chat_router = APIRouter(prefix="/api/chat", tags=["chat"])
-webhook_router = APIRouter(prefix="/api/webhook", tags=["webhook"])
+webhook_router = APIRouter(prefix="/api/instagram", tags=["instagram"])
 
 ##########################
 # Chat
