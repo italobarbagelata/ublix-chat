@@ -202,7 +202,7 @@ async def process_instagram_message(message: Dict[str, Any]):
         if not project_id:
             logger.warning(f"No se encontró proyecto para IG Recipient ID: {recipient_id}")
             db = SupabaseDatabase()
-            instagram_configs = db.select(INSTAGRAM_COLLECTION, {"instagram_page_id": "is.null"}, order_by="created_at", order_desc=True)
+            instagram_configs = db.select(INSTAGRAM_COLLECTION, {"instagram_page_id": "is.null"})
             logger.info(f"Instagram configs: {json.dumps(instagram_configs, indent=2)}")
             for instagram_config in instagram_configs:
                 token = instagram_config.get("user_access_token")
