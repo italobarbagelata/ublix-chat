@@ -8,12 +8,9 @@ from .routes import (chat_router, webhook_router)
 
 load_dotenv()
 
-app = FastAPI()
-
-
 def create_app():
     """Crear la aplicación FastAPI"""
-
+    app = FastAPI()
     app.title = "Ublix Enterprise"
     app.description = "PrivateAPI Ublix Enterprise"
     app.version = "1.0.0"
@@ -39,6 +36,3 @@ def create_app():
     app.include_router(chat_router)
     app.include_router(webhook_router)
     return app
-
-
-app = create_app()

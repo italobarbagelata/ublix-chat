@@ -2,7 +2,7 @@ import multiprocessing
 
 # Configuración base
 workers = 1  # Reducido para Azure App Service
-timeout = 120
+timeout = 3600
 worker_class = "uvicorn.workers.UvicornWorker"
 bind = "0.0.0.0:8000"  # Cambiado para escuchar en todas las interfaces
 accesslog = "-"
