@@ -9,6 +9,7 @@ DATASOURCES_COLLECTION = "datasources"
 PROJECTS_COLLECTION = 'projects'
 APIS_COLLECTION = 'apis'
 AI_MESSAGE_TABLE = "message_ai_metadata"
+INSTAGRAM_COLLECTION = 'instagram_messages'
 
 
 
