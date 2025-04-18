@@ -253,21 +253,18 @@ async def process_webhook_instagram(request: Request) -> Dict[str, Any]:
         # Guardar el webhook para referencia
         await save_webhook_to_file(body)
         
-            
         extracted_msgs = extract_instagram_messages(body)
         logger.info(f"Se extrajeron {len(extracted_msgs)} mensajes del webhook")
         
-        recipient_id = extracted_msgs[0].get("recipient_id")
-        logger.info(f"Recipient ID: {recipient_id}")
-        
+        if not extracted_msgs:
+            logger.info("No hay mensajes para procesar (posiblemente un mensaje de eco)")
+            return {"status": "ok", "processed": 0, "total": 0}
         
         processed_count = 0
         for msg in extracted_msgs:
             try:
-                #logger.info(f"Procesando mensaje: {json.dumps(msg, indent=2)}")
                 await process_instagram_message(msg)
                 processed_count += 1
-                #logger.info(f"Mensaje procesado exitosamente. Total procesados: {processed_count}")
             except Exception as msg_err:
                 logger.error(f"Error procesando mensaje: {msg_err}", exc_info=True)
                 
