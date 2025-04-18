@@ -91,27 +91,34 @@ def extract_instagram_messages(body: Dict[str, Any]) -> List[Dict[str, Any]]:
             logger.info(f"Procesando entry ID: {entry_id}")
             
             for event in entry.get("messaging", []):
-                if "message" in event:
-                    message_obj = event["message"]
-                    sender_id = event.get("sender", {}).get("id")
-                    recipient_id = event.get("recipient", {}).get("id")
-                    timestamp = event.get("timestamp")
-                    message_id = message_obj.get("mid")
+                if "message" not in event:
+                    continue
                     
-                    logger.debug(f"Mensaje encontrado - Sender: {sender_id}, Recipient: {recipient_id}, Message ID: {message_id}")
+                message_obj = event["message"]
+                # Ignorar mensajes que son ecos
+                if message_obj.get("is_echo", False):
+                    logger.debug(f"Ignorando mensaje eco - Sender: {event.get('sender', {}).get('id')}, Recipient: {event.get('recipient', {}).get('id')}")
+                    continue
                     
-                    if "text" in message_obj:
-                        message_data = {
-                            "recipient_id": recipient_id,
-                            "sender_id": sender_id,
-                            "type": "text",
-                            "text": message_obj.get("text", ""),
-                            "timestamp": timestamp,
-                            "message_id": message_id,
-                            "entry_id": entry_id
-                        }
-                        logger.debug(f"Agregando mensaje de texto: {json.dumps(message_data, indent=2)}")
-                        messages.append(message_data)
+                sender_id = event.get("sender", {}).get("id")
+                recipient_id = event.get("recipient", {}).get("id")
+                timestamp = event.get("timestamp")
+                message_id = message_obj.get("mid")
+                
+                logger.debug(f"Mensaje encontrado - Sender: {sender_id}, Recipient: {recipient_id}, Message ID: {message_id}")
+                
+                if "text" in message_obj:
+                    message_data = {
+                        "recipient_id": recipient_id,
+                        "sender_id": sender_id,
+                        "type": "text",
+                        "text": message_obj.get("text", ""),
+                        "timestamp": timestamp,
+                        "message_id": message_id,
+                        "entry_id": entry_id
+                    }
+                    logger.debug(f"Agregando mensaje de texto: {json.dumps(message_data, indent=2)}")
+                    messages.append(message_data)
     except Exception as e:
         logger.error(f"Error extrayendo mensajes IG: {e}", exc_info=True)
     return messages
@@ -200,7 +207,8 @@ async def process_instagram_message(message: Dict[str, Any]):
         logger.info(f"Buscando project_id para el mensaje")
         project_id = await get_project_id_for_instagram(recipient_id, sender_id)
         if not project_id:
-            logger.warning(f"No se encontró proyecto para IG Recipient ID: {recipient_id}")
+            logger.error(f"No se encontró project_id válido para IG Recipient ID: {recipient_id}")
+            return
 
         # Inicializar el adaptador de Instagram para obtener información del usuario
         instagram_adapter = InstagramAdapter(project_id, recipient_id)
@@ -214,7 +222,6 @@ async def process_instagram_message(message: Dict[str, Any]):
         username = "Instagram User"
         user_id = sender_id
       
-            
         # Procesar mensaje con Graph
         logger.info(f"Procesando mensaje con Graph para project_id: {project_id} y user_id: {user_id}")
         graph = Graph(project_id, user_id, username, "no igsid", "instagram")
