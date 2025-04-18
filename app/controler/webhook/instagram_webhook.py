@@ -91,34 +91,32 @@ def extract_instagram_messages(body: Dict[str, Any]) -> List[Dict[str, Any]]:
             logger.info(f"Procesando entry ID: {entry_id}")
             
             for event in entry.get("messaging", []):
-                if "message" not in event:
-                    continue
+                if "message" in event:
+                    message_obj = event["message"]
+                    # Ignorar mensajes que son ecos
+                    if message_obj.get("is_echo", False):
+                        logger.debug("Ignorando mensaje eco")
+                        continue
+                        
+                    sender_id = event.get("sender", {}).get("id")
+                    recipient_id = event.get("recipient", {}).get("id")
+                    timestamp = event.get("timestamp")
+                    message_id = message_obj.get("mid")
                     
-                message_obj = event["message"]
-                # Ignorar mensajes que son ecos
-                if message_obj.get("is_echo", False):
-                    logger.debug(f"Ignorando mensaje eco - Sender: {event.get('sender', {}).get('id')}, Recipient: {event.get('recipient', {}).get('id')}")
-                    continue
+                    logger.debug(f"Mensaje encontrado - Sender: {sender_id}, Recipient: {recipient_id}, Message ID: {message_id}")
                     
-                sender_id = event.get("sender", {}).get("id")
-                recipient_id = event.get("recipient", {}).get("id")
-                timestamp = event.get("timestamp")
-                message_id = message_obj.get("mid")
-                
-                logger.debug(f"Mensaje encontrado - Sender: {sender_id}, Recipient: {recipient_id}, Message ID: {message_id}")
-                
-                if "text" in message_obj:
-                    message_data = {
-                        "recipient_id": recipient_id,
-                        "sender_id": sender_id,
-                        "type": "text",
-                        "text": message_obj.get("text", ""),
-                        "timestamp": timestamp,
-                        "message_id": message_id,
-                        "entry_id": entry_id
-                    }
-                    logger.debug(f"Agregando mensaje de texto: {json.dumps(message_data, indent=2)}")
-                    messages.append(message_data)
+                    if "text" in message_obj:
+                        message_data = {
+                            "recipient_id": recipient_id,
+                            "sender_id": sender_id,
+                            "type": "text",
+                            "text": message_obj.get("text", ""),
+                            "timestamp": timestamp,
+                            "message_id": message_id,
+                            "entry_id": entry_id
+                        }
+                        logger.debug(f"Agregando mensaje de texto: {json.dumps(message_data, indent=2)}")
+                        messages.append(message_data)
     except Exception as e:
         logger.error(f"Error extrayendo mensajes IG: {e}", exc_info=True)
     return messages
