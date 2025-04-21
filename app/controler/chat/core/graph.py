@@ -158,8 +158,12 @@ class Graph():
             from app.controler.chat.core.nodes import get_date_range, TIMEZONE 
             import datetime
             import pytz
-            now = datetime.datetime.now(TIMEZONE)
-            utc_now_str = now.astimezone(pytz.UTC).isoformat()
+            
+            # Obtener la hora actual en UTC y convertir a zona horaria de Chile
+            utc_now = datetime.datetime.now(pytz.UTC)
+            now = utc_now.astimezone(TIMEZONE)
+            utc_now_str = now.isoformat()
+            
             date_range = get_date_range()
             date_range_str = ", ".join(date_range)
             date_time_tokens += self.token_counter.count_tokens(utc_now_str)

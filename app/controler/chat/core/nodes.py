@@ -73,21 +73,26 @@ def create_agent(user_id, name, number_phone_agent, source):
         date_range = get_date_range()
         date_range_str = ", ".join(date_range)
         prompt_general_skeleton += f"\nConsidera que las fechas de referencia son: {date_range_str}"
+        # INSTRUCCIÓN REFORZADA:
+        prompt_general_skeleton += "\nMUY IMPORTANTE: Cualquier cálculo, agendamiento, o referencia a fechas y horas DEBE basarse estrictamente en la fecha y hora proporcionada aquí: {utc_now} (Zona Horaria: America/Santiago). NUNCA uses UTC u otra zona horaria a menos que el usuario lo pida explícitamente."
 
         # Obtiene la fecha actual en la zona horaria de Chile
-        now = datetime.datetime.now(TIMEZONE)
-        utc_now = now.astimezone(pytz.UTC).isoformat()
-
+        utc_now = datetime.datetime.now(pytz.UTC)
+        now = utc_now.astimezone(TIMEZONE)
+        formatted_date = now.strftime('%d de %B de %Y, %H:%M:%S')
+        
         # Formatea el prompt general con los valores específicos del proyecto
         PROMPT_GENERAL = prompt_general_skeleton.format(
             name=project_name,
             personality=personality_prompt,
             instructions=instructions,
-            utc_now=utc_now,
+            utc_now=now.isoformat(),
             date_range_str=date_range_str
         )
-
-        logging.info("Prompt general configurado")
+        
+        logging.info("************************************************")
+        logging.info(f"Prompt general configurado: {PROMPT_GENERAL}")
+        logging.info("************************************************")
         
         # Inserta el prompt general como mensaje del sistema al inicio
         messages.insert(0, SystemMessage(content=PROMPT_GENERAL))
@@ -117,7 +122,10 @@ def get_date_range() -> list:
     Returns:
         list: Lista de fechas como strings en formato YYYY-MM-DD
     """
-    today = datetime.datetime.now(TIMEZONE).date()
+    utc_now = datetime.datetime.now(pytz.UTC)
+    now = utc_now.astimezone(TIMEZONE)
+    today = now.date()
+    
     date_range = [(today + datetime.timedelta(days=x)).strftime('%Y-%m-%d') for x in range(15)]
     return date_range
 
