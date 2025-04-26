@@ -198,9 +198,14 @@ async def send_messenger_message(project_id: str, recipient_id: str, message_tex
             return
         
         access_token = config.get("access_token")
+        page_id = config.get("page_id")  # Asegurarse de que este campo existe en la tabla meta_configs
+        
+        if not access_token or not page_id:
+            logger.error("Faltan access_token o page_id en la configuración")
+            return
         
         # Enviar mensaje usando la API de Messenger
-        url = f"https://graph.facebook.com/v22.0/me/messages"
+        url = f"https://graph.facebook.com/v22.0/{page_id}/messages"
         
         headers = {
             "Content-Type": "application/json"
@@ -221,7 +226,10 @@ async def send_messenger_message(project_id: str, recipient_id: str, message_tex
             response = await client.post(url, json=data, headers=headers)
             
             if response.status_code != 200:
-                logger.error(f"Error enviando mensaje de Messenger: {response.json()}")
+                error_data = response.json()
+                logger.error(f"Error enviando mensaje de Messenger: {error_data}")
+                if error_data.get("error", {}).get("code") == 190:
+                    logger.error("El token de acceso ha expirado o es inválido")
                 return
             
             logger.info(f"Mensaje enviado exitosamente a {recipient_id}")
