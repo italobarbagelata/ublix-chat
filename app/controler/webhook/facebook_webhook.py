@@ -166,11 +166,20 @@ async def process_message(message: Dict[str, Any]):
         # Obtener el ID del proyecto asociado con esta página de Facebook
         db = SupabaseDatabase()
         logger.info(f"Buscando configuración para page_id: {message['page_id']}")
-        config = db.find_one("meta_configs", {
+        
+        # Buscar todas las configuraciones activas de Messenger
+        configs = db.find("meta_configs", {
             "integration_type": "messenger", 
-            "active": True,
-            "page_id": message["page_id"]
+            "active": True
         })
+        
+        # Buscar la configuración que tenga el page_id en su array pages
+        config = None
+        for cfg in configs:
+            pages = cfg.get("pages", [])
+            if any(page.get("id") == message["page_id"] for page in pages):
+                config = cfg
+                break
         
         if not config:
             logger.warning(f"No se encontró configuración activa de Messenger para page_id: {message['page_id']}")
@@ -211,22 +220,36 @@ async def send_messenger_message(project_id: str, recipient_id: str, message_tex
         
         # Obtener la configuración de Messenger
         db = SupabaseDatabase()
-        logger.info(f"Buscando configuración para project_id: {project_id}, page_id: {page_id}")
-        config = db.find_one("meta_configs", {
+        logger.info(f"Buscando configuración para project_id: {project_id}")
+        configs = db.find("meta_configs", {
             "project_id": project_id, 
-            "integration_type": "messenger",
-            "page_id": page_id
+            "integration_type": "messenger"
         })
+        
+        # Buscar la configuración que tenga el page_id en su array pages
+        config = None
+        for cfg in configs:
+            pages = cfg.get("pages", [])
+            if any(page.get("id") == page_id for page in pages):
+                config = cfg
+                break
         
         if not config:
             logger.error(f"No se encontró configuración de Messenger para project_id: {project_id}, page_id: {page_id}")
             return
         
         logger.info(f"Configuración encontrada: {json.dumps(config, indent=2)}")
-        access_token = config.get("access_token")
         
+        # Obtener el access_token del array pages
+        pages = config.get("pages", [])
+        page_config = next((page for page in pages if page.get("id") == page_id), None)
+        if not page_config:
+            logger.error(f"No se encontró configuración de página para page_id: {page_id}")
+            return
+            
+        access_token = page_config.get("access_token")
         if not access_token:
-            logger.error("Falta access_token en la configuración")
+            logger.error("Falta access_token en la configuración de la página")
             return
         
         # Enviar mensaje usando la API de Messenger
