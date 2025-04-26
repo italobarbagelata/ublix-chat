@@ -4,7 +4,7 @@ import logging
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .routes import (chat_router, webhook_router)
+from .routes import (chat_router, webhook_router, webhook_router_facebook)
 
 load_dotenv()
 
@@ -35,4 +35,5 @@ def create_app():
     # Incluir las rutas
     app.include_router(chat_router)
     app.include_router(webhook_router)
+    app.include_router(webhook_router_facebook)
     return app
