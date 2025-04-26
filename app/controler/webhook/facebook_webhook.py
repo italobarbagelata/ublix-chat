@@ -177,6 +177,14 @@ async def process_message(message: Dict[str, Any]):
         config = None
         for cfg in configs:
             pages = cfg.get("pages", [])
+            # Si pages es una cadena, intentar parsearla como JSON
+            if isinstance(pages, str):
+                try:
+                    pages = json.loads(pages)
+                except json.JSONDecodeError:
+                    logger.error(f"Error parseando pages como JSON: {pages}")
+                    continue
+            
             if any(page.get("id") == message["page_id"] for page in pages):
                 config = cfg
                 break
@@ -230,6 +238,14 @@ async def send_messenger_message(project_id: str, recipient_id: str, message_tex
         config = None
         for cfg in configs:
             pages = cfg.get("pages", [])
+            # Si pages es una cadena, intentar parsearla como JSON
+            if isinstance(pages, str):
+                try:
+                    pages = json.loads(pages)
+                except json.JSONDecodeError:
+                    logger.error(f"Error parseando pages como JSON: {pages}")
+                    continue
+            
             if any(page.get("id") == page_id for page in pages):
                 config = cfg
                 break
@@ -242,6 +258,14 @@ async def send_messenger_message(project_id: str, recipient_id: str, message_tex
         
         # Obtener el access_token del array pages
         pages = config.get("pages", [])
+        # Si pages es una cadena, intentar parsearla como JSON
+        if isinstance(pages, str):
+            try:
+                pages = json.loads(pages)
+            except json.JSONDecodeError:
+                logger.error(f"Error parseando pages como JSON: {pages}")
+                return
+        
         page_config = next((page for page in pages if page.get("id") == page_id), None)
         if not page_config:
             logger.error(f"No se encontró configuración de página para page_id: {page_id}")
