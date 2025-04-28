@@ -188,6 +188,7 @@ class Persist(object):
                             "has_context": len(tool_messages) > 0,
                             "created_at": message.additional_kwargs["end_timestamp"]
                         }
+                        # Insertar mensaje AI primero para obtener su ID
                         response = database.insert(MESSAGES_TABLE, ai_message)
                         ai_message_id = response["id"] if response and "id" in response else None
                     else:
@@ -207,25 +208,43 @@ class Persist(object):
             # Insertar mensajes en batch si es posible
             if messages_to_insert:
                 try:
-                    database.batch_insert(MESSAGES_TABLE, messages_to_insert)
+                    # Dividir en lotes más pequeños para evitar problemas de tamaño
+                    batch_size = 50
+                    for i in range(0, len(messages_to_insert), batch_size):
+                        batch = messages_to_insert[i:i + batch_size]
+                        database.batch_insert(MESSAGES_TABLE, batch)
                 except Exception as e:
                     logging.error(f"Error inserting messages batch: {e}")
-                    # Fallback a inserción individual
+                    # Fallback a inserción individual solo si el batch falla
                     for msg in messages_to_insert:
-                        database.insert(MESSAGES_TABLE, msg)
+                        try:
+                            database.insert(MESSAGES_TABLE, msg)
+                        except Exception as e:
+                            logging.error(f"Error inserting individual message: {e}")
+                            continue
             
-            # Insertar tool messages en batch
+            # Insertar tool messages en batch si hay un ID de mensaje AI
             if tool_messages and ai_message_id:
                 try:
+                    # Preparar tool messages con el ID del mensaje AI
                     for tool_message in tool_messages:
                         tool_message["message_id"] = ai_message_id
                         tool_message["id"] = str(uuid4())
-                    database.batch_insert(AI_MESSAGE_TABLE, tool_messages)
+                    
+                    # Dividir en lotes más pequeños
+                    batch_size = 50
+                    for i in range(0, len(tool_messages), batch_size):
+                        batch = tool_messages[i:i + batch_size]
+                        database.batch_insert(AI_MESSAGE_TABLE, batch)
                 except Exception as e:
                     logging.error(f"Error inserting tool messages batch: {e}")
-                    # Fallback a inserción individual
+                    # Fallback a inserción individual solo si el batch falla
                     for tool_message in tool_messages:
-                        database.insert(AI_MESSAGE_TABLE, tool_message)
+                        try:
+                            database.insert(AI_MESSAGE_TABLE, tool_message)
+                        except Exception as e:
+                            logging.error(f"Error inserting individual tool message: {e}")
+                            continue
                         
             logging.info(f"Persistencia de conversación completada para ID: {conversation_id}")
                         
