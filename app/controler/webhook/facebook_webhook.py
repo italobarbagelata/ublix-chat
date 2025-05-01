@@ -11,7 +11,7 @@ import httpx
 
 logger = logging.getLogger("root")
 
-async def verify_webhook(request: Request):
+async def verify_webhook_facebook(request: Request):
     """
     Verifica la suscripción del webhook de Messenger enviada por Meta.
 
@@ -47,7 +47,7 @@ async def verify_webhook(request: Request):
         logger.warning("Fallo en la verificación del webhook: token inválido o modo incorrecto")
         raise HTTPException(status_code=403, detail="Verificación fallida")
 
-async def process_webhook(request: Request) -> Dict[str, Any]:
+async def process_webhook_facebook(request: Request) -> Dict[str, Any]:
     """
     Procesa los eventos entrantes del webhook de Messenger.
     
