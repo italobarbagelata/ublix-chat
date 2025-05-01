@@ -17,6 +17,9 @@ from app.controler.chat.store.persistence import Persist
 from app.controler.chat.store.persistence_state import MemoryStatePersistence
 import uuid
 import concurrent.futures
+import logging
+
+logger = logging.getLogger("root")
 
 class Graph():
     state: ChatState

@@ -4,7 +4,7 @@ import os
 from typing import Dict, Any, List
 from fastapi import Request, HTTPException
 from fastapi.responses import PlainTextResponse
-from app.resources.constants import STATUS_BAD_REQUEST, STATUS_UNAUTHORIZED
+from app.resources.constants import STATUS_BAD_REQUEST
 from app.controler.chat.core.graph import Graph
 from app.resources.postgresql import SupabaseDatabase
 import httpx
@@ -45,7 +45,7 @@ async def process_webhook_whatsapp(request: Request) -> Dict[str, Any]:
     Procesa los eventos entrantes del webhook de WhatsApp.
     """
     # Log inicial para verificar si la función se está ejecutando para POST
-    logger.info(f"Recibida solicitud {request.method} en /api/whatsapp/webhook")
+    logger.info(f"Recibida solicitud {request} en /api/whatsapp/webhook")
     try:
         # Verificar si es un método POST antes de intentar leer el body
         if request.method != "POST":
