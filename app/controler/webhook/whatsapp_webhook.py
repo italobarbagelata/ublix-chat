@@ -44,41 +44,79 @@ async def process_webhook(request: Request) -> Dict[str, Any]:
     """
     Procesa los eventos entrantes del webhook de WhatsApp.
     """
+    # Log inicial para verificar si la función se está ejecutando para POST
+    logger.info(f"Recibida solicitud {request.method} en /api/whatsapp/webhook")
     try:
+        # Verificar si es un método POST antes de intentar leer el body
+        if request.method != "POST":
+            logger.warning(f"Método no permitido: {request.method}")
+            raise HTTPException(status_code=405, detail="Method Not Allowed")
+
         body = await request.json()
         logger.info(f"Webhook recibido: {json.dumps(body, indent=2)}")
-        
+
         # Verificar si es un mensaje válido de WhatsApp
         if not is_valid_whatsapp_message(body):
-            logger.info("No es un mensaje válido de WhatsApp")
+            logger.info("No es un mensaje válido de WhatsApp o no contiene cambios procesables.")
             return {"status": "ok"}
-        
+
         # Extraer mensajes del webhook
         messages = extract_messages(body)
+        if not messages:
+            logger.info("No se extrajeron mensajes del webhook.")
+            return {"status": "ok"}
+
         logger.info(f"Mensajes extraídos: {json.dumps(messages, indent=2)}")
-        
+
         for message in messages:
             # Procesar cada mensaje
             logger.info(f"Procesando mensaje: {json.dumps(message, indent=2)}")
             await process_message(message)
-        
+
         return {"status": "ok"}
+    except json.JSONDecodeError:
+        logger.error("Error al decodificar JSON del cuerpo de la solicitud POST")
+        # Leer el cuerpo como texto para inspección si falla el JSON
+        try:
+            raw_body = await request.body()
+            logger.info(f"Cuerpo crudo recibido (no JSON válido): {raw_body.decode()}")
+        except Exception as read_err:
+            logger.error(f"No se pudo leer el cuerpo crudo de la solicitud: {read_err}")
+        raise HTTPException(status_code=STATUS_BAD_REQUEST, detail="Cuerpo de solicitud no es JSON válido")
     except Exception as e:
         logger.error(f"Error procesando webhook: {e}", exc_info=True)
         raise HTTPException(status_code=STATUS_BAD_REQUEST, detail=str(e))
 
 def is_valid_whatsapp_message(body: Dict[str, Any]) -> bool:
     """
-    Verifica si el webhook contiene un mensaje válido de WhatsApp.
+    Verifica si el webhook contiene un mensaje válido de WhatsApp
+    con cambios procesables (como mensajes).
     """
-    logger.info(f"Validando mensaje de WhatsApp. Object: {body.get('object')}, Entry: {body.get('entry')}")
-    return (
+    logger.info(f"Validando mensaje de WhatsApp. Object: {body.get('object')}, Entry: {bool(body.get('entry'))}")
+    if not (
         body.get("object") == "whatsapp_business_account" and
         body.get("entry") and
-        len(body["entry"]) > 0 and
-        body["entry"][0].get("changes") and
-        len(body["entry"][0]["changes"]) > 0
-    )
+        isinstance(body["entry"], list) and
+        len(body["entry"]) > 0
+    ):
+        logger.info("Validación fallida: 'object' no es 'whatsapp_business_account' o 'entry' está ausente/vacío.")
+        return False
+
+    # Verificar si hay 'changes' y si contienen 'messages' o 'statuses' (podrías querer manejar statuses también)
+    try:
+        change = body["entry"][0].get("changes", [{}])[0]
+        value = change.get("value", {})
+        if "messages" in value or "statuses" in value:
+             logger.info("Validación exitosa: Se encontraron 'messages' o 'statuses' en 'changes'.")
+             return True
+        else:
+            logger.info("Validación fallida: No se encontraron 'messages' ni 'statuses' en 'value'.")
+            # Loguear qué contenía 'value' para depuración
+            logger.debug(f"Contenido de 'value': {json.dumps(value)}")
+            return False
+    except (IndexError, KeyError, TypeError) as e:
+        logger.warning(f"Error estructural al validar el mensaje: {e}. Body: {json.dumps(body)}")
+        return False
 
 def extract_messages(body: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
