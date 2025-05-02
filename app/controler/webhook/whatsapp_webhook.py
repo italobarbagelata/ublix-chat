@@ -208,13 +208,13 @@ async def process_message(message: Dict[str, Any]):
         
         # Enviar la respuesta de vuelta a WhatsApp
         logger.info(f"Enviando respuesta a WhatsApp para user_id: {user_id}")
-        await send_whatsapp_message(project_id, user_id, response["response"], message["phone_number_id"])
+        await send_whatsapp_message(project_id, user_id, entry_id, response["response"], message["phone_number_id"])
         
         logger.info(f"Mensaje procesado de {user_id} y respuesta enviada")
     except Exception as e:
         logger.error(f"Error procesando mensaje: {e}", exc_info=True)
 
-async def send_whatsapp_message(project_id: str, recipient_id: str, message_text: str, phone_number_id: str):
+async def send_whatsapp_message(project_id: str, recipient_id: str, entry_id: str, message_text: str, phone_number_id: str):
     """
     Envía un mensaje a través de WhatsApp.
     """
@@ -226,7 +226,7 @@ async def send_whatsapp_message(project_id: str, recipient_id: str, message_text
         logger.info(f"Buscando configuración para project_id: {project_id}")
         configs = db.select("meta_configs", {
             "project_id": project_id,
-            "phone_number_id": phone_number_id,
+            "whatsapp_account_id": entry_id,
             "active": True,
             "integration_type": "whatsapp"
         }, limit=1)
