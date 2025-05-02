@@ -224,51 +224,19 @@ async def send_whatsapp_message(project_id: str, recipient_id: str, message_text
         # Obtener la configuración de WhatsApp
         db = SupabaseDatabase()
         logger.info(f"Buscando configuración para project_id: {project_id}")
-        configs = db.find("meta_configs", {
-            "project_id": project_id, 
+        configs = db.select("meta_configs", {
+            "project_id": project_id,
+            "phone_number_id": phone_number_id,
+            "active": True,
             "integration_type": "whatsapp"
-        })
+        }, limit=1)
         
-        # Buscar la configuración que tenga el phone_number_id en su array pages
-        config = None
-        for cfg in configs:
-            pages = cfg.get("pages", [])
-            # Si pages es una cadena, intentar parsearla como JSON
-            if isinstance(pages, str):
-                try:
-                    pages = json.loads(pages)
-                except json.JSONDecodeError:
-                    logger.error(f"Error parseando pages como JSON: {pages}")
-                    continue
+        logger.info(f"Configuraciones encontradas: {configs}")
+        
             
-            if any(page.get("id") == phone_number_id for page in pages):
-                config = cfg
-                break
-        
-        if not config:
-            logger.error(f"No se encontró configuración de WhatsApp para project_id: {project_id}, phone_number_id: {phone_number_id}")
-            return
-        
-        logger.info(f"Configuración encontrada: {json.dumps(config, indent=2)}")
-        
-        # Obtener el access_token del array pages
-        pages = config.get("pages", [])
-        # Si pages es una cadena, intentar parsearla como JSON
-        if isinstance(pages, str):
-            try:
-                pages = json.loads(pages)
-            except json.JSONDecodeError:
-                logger.error(f"Error parseando pages como JSON: {pages}")
-                return
-        
-        page_config = next((page for page in pages if page.get("id") == phone_number_id), None)
-        if not page_config:
-            logger.error(f"No se encontró configuración de página para phone_number_id: {phone_number_id}")
-            return
-            
-        access_token = page_config.get("access_token")
+        access_token = configs.get("access_token")
         if not access_token:
-            logger.error("Falta access_token en la configuración de la página")
+            logger.error("Falta access_token en la configuración")
             return
         
         # Enviar mensaje usando la API de WhatsApp
