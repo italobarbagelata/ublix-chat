@@ -145,7 +145,8 @@ def extract_messages(body: Dict[str, Any]) -> List[Dict[str, Any]]:
                         "type": message_type,
                         "text": message.get("text", {}).get("body", ""),
                         "timestamp": message.get("timestamp"),
-                        "message_id": message.get("id")
+                        "message_id": message.get("id"),
+                        "entry_id": entry.get("id")
                     })
                 elif message_type in ["image", "audio", "document", "video"]:
                     # Manejar mensajes multimedia
@@ -155,7 +156,8 @@ def extract_messages(body: Dict[str, Any]) -> List[Dict[str, Any]]:
                         "type": message_type,
                         "media_id": message.get(message_type, {}).get("id"),
                         "timestamp": message.get("timestamp"),
-                        "message_id": message.get("id")
+                        "message_id": message.get("id"),
+                        "entry_id": entry.get("id")
                     })
     except Exception as e:
         logger.error(f"Error extrayendo mensajes: {e}")
@@ -178,30 +180,18 @@ async def process_message(message: Dict[str, Any]):
         db = SupabaseDatabase()
         logger.info(f"Buscando configuración para phone_number_id: {message['phone_number_id']}")
         
-        # Buscar todas las configuraciones activas de WhatsApp
+        # Buscar la configuración activa de WhatsApp
         configs = db.find("meta_configs", {
-            "integration_type": "whatsapp", 
+            "integration_type": "whatsapp",
+            "whatsapp_account_id": message["entry_id"],
             "active": True
-        })
+        }, limit=1)
         
-        # Buscar la configuración que tenga el phone_number_id en su array pages
-        config = None
-        for cfg in configs:
-            pages = cfg.get("pages", [])
-            # Si pages es una cadena, intentar parsearla como JSON
-            if isinstance(pages, str):
-                try:
-                    pages = json.loads(pages)
-                except json.JSONDecodeError:
-                    logger.error(f"Error parseando pages como JSON: {pages}")
-                    continue
-            
-            if any(page.get("id") == message["phone_number_id"] for page in pages):
-                config = cfg
-                break
+        # Obtener la primera configuración si existe
+        config = configs[0] if configs else None
         
         if not config:
-            logger.warning(f"No se encontró configuración activa de WhatsApp para phone_number_id: {message['phone_number_id']}")
+            logger.warning(f"No se encontró configuración activa de WhatsApp para entry_id: {message['entry_id']}")
             return
         
         logger.info(f"Configuración encontrada: {json.dumps(config, indent=2)}")
