@@ -181,7 +181,7 @@ async def process_message(message: Dict[str, Any]):
         logger.info(f"Buscando configuración para phone_number_id: {message['phone_number_id']}")
         
         # Buscar la configuración activa de WhatsApp
-        configs = db.find("meta_configs", {
+        configs = db.select("meta_configs", {
             "integration_type": "whatsapp",
             "whatsapp_account_id": message["entry_id"],
             "active": True
