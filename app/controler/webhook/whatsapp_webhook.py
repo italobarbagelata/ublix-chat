@@ -234,8 +234,12 @@ async def send_whatsapp_message(project_id: str, recipient_id: str, entry_id: st
         
         logger.info(f"Configuraciones encontradas: {configs}")
         
+        if not configs:
+            logger.error("No se encontró configuración de WhatsApp")
+            return
             
-        access_token = configs.get("access_token")
+        config = configs[0]  # Tomar la primera configuración
+        access_token = config.get("access_token")
         if not access_token:
             logger.error("Falta access_token en la configuración")
             return
