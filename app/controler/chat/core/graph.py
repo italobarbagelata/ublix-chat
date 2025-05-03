@@ -25,6 +25,7 @@ class Graph():
     state: ChatState
     workflow: StateGraph
     database: Persist
+    _executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
         
     def __init__(self, project_id, user_id, name, number_phone_agent, source):
         self.logger = logging.getLogger(f"{project_id}_{user_id}")
@@ -108,17 +109,22 @@ class Graph():
                  final_memory_state_dict[''] = nested_dict
                  self.state.state = final_memory_state_dict
 
-        background_executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
-
+        # Ejecutar tareas en segundo plano
+        futures = []
         try:
-            background_executor.submit(self.database_state.save_state, self.state)
+            futures.append(self._executor.submit(self.database_state.save_state, self.state))
+            futures.append(self._executor.submit(self.database.update_summary, final_state))
         except Exception as e:
-             self.logger.error(f"Error guardando estado: {e}", exc_info=True)
+            self.logger.error(f"Error al programar tareas en segundo plano: {e}", exc_info=True)
 
-        try:
-            background_executor.submit(self.database.update_summary, final_state)
-        except Exception as e:
-            self.logger.error(f"Error actualizando resumen: {e}", exc_info=True)
+        # Esperar a que las tareas se completen
+        for future in futures:
+            try:
+                future.result(timeout=5)  # Timeout de 5 segundos
+            except concurrent.futures.TimeoutError:
+                self.logger.warning("Tarea en segundo plano excedió el tiempo límite")
+            except Exception as e:
+                self.logger.error(f"Error en tarea en segundo plano: {e}", exc_info=True)
 
         conversation = final_state.get("messages", [])
         ai_response = conversation[-1] if conversation and isinstance(conversation[-1], SystemMessage) else None
