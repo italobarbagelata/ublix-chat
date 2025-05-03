@@ -126,6 +126,7 @@ def extract_messages(body: Dict[str, Any]) -> List[Dict[str, Any]]:
     
     try:
         entry = body["entry"][0]
+        entry_id = entry["id"]  # Obtener el ID de la entrada
         change = entry["changes"][0]
         value = change.get("value", {})
         
@@ -146,7 +147,7 @@ def extract_messages(body: Dict[str, Any]) -> List[Dict[str, Any]]:
                         "text": message.get("text", {}).get("body", ""),
                         "timestamp": message.get("timestamp"),
                         "message_id": message.get("id"),
-                        "entry_id": entry.get("id")
+                        "entry_id": entry_id  # Usar el entry_id extraído
                     })
                 elif message_type in ["image", "audio", "document", "video"]:
                     # Manejar mensajes multimedia
@@ -157,7 +158,7 @@ def extract_messages(body: Dict[str, Any]) -> List[Dict[str, Any]]:
                         "media_id": message.get(message_type, {}).get("id"),
                         "timestamp": message.get("timestamp"),
                         "message_id": message.get("id"),
-                        "entry_id": entry.get("id")
+                        "entry_id": entry_id  # Usar el entry_id extraído
                     })
     except Exception as e:
         logger.error(f"Error extrayendo mensajes: {e}")
@@ -208,7 +209,7 @@ async def process_message(message: Dict[str, Any]):
         
         # Enviar la respuesta de vuelta a WhatsApp
         logger.info(f"Enviando respuesta a WhatsApp para user_id: {user_id}")
-        await send_whatsapp_message(project_id, user_id, entry_id, response["response"], message["phone_number_id"])
+        await send_whatsapp_message(project_id, user_id, message["entry_id"], response["response"], message["phone_number_id"])
         
         logger.info(f"Mensaje procesado de {user_id} y respuesta enviada")
     except Exception as e:
