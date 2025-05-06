@@ -11,6 +11,8 @@ import httpx
 
 logger = logging.getLogger("root")
 
+TABLE_INTEGRATION = "integration_whatsapp"
+
 async def verify_webhook_whatsapp(request: Request):
     """
     Verifica la suscripción del webhook de WhatsApp enviada por Meta.
@@ -182,7 +184,7 @@ async def process_message(message: Dict[str, Any]):
         logger.info(f"Buscando configuración para phone_number_id: {message['phone_number_id']}")
         
         # Buscar la configuración activa de WhatsApp
-        configs = db.select("meta_configs", {
+        configs = db.select(TABLE_INTEGRATION, {
             "integration_type": "whatsapp",
             "whatsapp_account_id": message["entry_id"],
             "active": True
@@ -225,7 +227,7 @@ async def send_whatsapp_message(project_id: str, recipient_id: str, entry_id: st
         # Obtener la configuración de WhatsApp
         db = SupabaseDatabase()
         logger.info(f"Buscando configuración para project_id: {project_id}")
-        configs = db.select("meta_configs", {
+        configs = db.select(TABLE_INTEGRATION, {
             "project_id": project_id,
             "whatsapp_account_id": entry_id,
             "active": True,

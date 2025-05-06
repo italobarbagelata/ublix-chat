@@ -11,6 +11,8 @@ import httpx
 
 logger = logging.getLogger("root")
 
+TABLE_INTEGRATION = "integration_messenger"
+
 async def verify_webhook_facebook(request: Request):
     """
     Verifica la suscripción del webhook de Messenger enviada por Meta.
@@ -168,7 +170,7 @@ async def process_message(message: Dict[str, Any]):
         logger.info(f"Buscando configuración para page_id: {message['page_id']}")
         
         # Buscar todas las configuraciones activas de Messenger
-        configs = db.find("meta_configs", {
+        configs = db.find(TABLE_INTEGRATION, {
             "integration_type": "messenger", 
             "active": True
         })
@@ -229,7 +231,7 @@ async def send_messenger_message(project_id: str, recipient_id: str, message_tex
         # Obtener la configuración de Messenger
         db = SupabaseDatabase()
         logger.info(f"Buscando configuración para project_id: {project_id}")
-        configs = db.find("meta_configs", {
+        configs = db.find(TABLE_INTEGRATION, {
             "project_id": project_id, 
             "integration_type": "messenger"
         })
