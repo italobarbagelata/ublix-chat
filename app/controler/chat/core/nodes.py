@@ -21,13 +21,6 @@ logging.basicConfig(level=logging.INFO,
 # Zona horaria para Chile (Santiago)
 TIMEZONE = pytz.timezone('America/Santiago')
 
-# Pre-calcular el rango de fechas una sola vez
-utc_now = datetime.datetime.now(pytz.UTC)
-now = utc_now.astimezone(TIMEZONE)
-date_range = [(now.date() + datetime.timedelta(days=x)).strftime('%Y-%m-%d') for x in range(15)]
-date_range_str = ", ".join(date_range)
-formatted_date = now.strftime('%d de %B de %Y, %H:%M:%S')
-
 # Cache para modelos LLM
 _model_cache = {}
 
@@ -54,6 +47,12 @@ def create_agent(user_id, name, number_phone_agent, source):
         Returns:
             dict: Diccionario con la respuesta del agente
         """
+        # Calcular fechas actualizadas en cada interacción
+        utc_now = datetime.datetime.now(pytz.UTC)
+        now = utc_now.astimezone(TIMEZONE)
+        date_range = [(now.date() + datetime.timedelta(days=x)).strftime('%Y-%m-%d') for x in range(15)]
+        date_range_str = ", ".join(date_range)
+
         project_id = state["project"].id
         project = state["project"]
         MODEL_CHATBOT = project.model if project else MODEL_CHATBOT
