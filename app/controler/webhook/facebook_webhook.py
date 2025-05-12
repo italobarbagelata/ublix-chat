@@ -8,10 +8,12 @@ from app.resources.constants import STATUS_BAD_REQUEST, STATUS_UNAUTHORIZED
 from app.controler.chat.core.graph import Graph
 from app.resources.postgresql import SupabaseDatabase
 import httpx
+from datetime import datetime
 
 logger = logging.getLogger("root")
 
 TABLE_INTEGRATION = "integration_messenger"
+TABLE_CONVERSATION_STATES = "messenger_conversation_states"
 
 async def verify_webhook_facebook(request: Request):
     """
@@ -197,6 +199,34 @@ async def process_message(message: Dict[str, Any]):
         
         logger.info(f"Configuración encontrada: {json.dumps(config, indent=2)}")
         project_id = config.get("project_id")
+        
+        # Verificar si el mensaje viene del dueño de la página
+        if message["sender_id"] == message["page_id"]:
+            logger.info("Mensaje viene del dueño de la página - desactivando el bot para este usuario")
+            # Actualizar o crear el estado de la conversación
+            conversation_state = {
+                "project_id": project_id,
+                "page_id": message["page_id"],
+                "user_id": message["recipient_id"],  # El ID del usuario con el que está hablando el dueño
+                "bot_active": False,
+                "last_updated": datetime.utcnow().isoformat()
+            }
+            db.upsert(TABLE_CONVERSATION_STATES, 
+                     {"project_id": project_id, "page_id": message["page_id"], "user_id": message["recipient_id"]},
+                     conversation_state)
+            return
+        
+        # Verificar si el bot está desactivado para este usuario
+        conversation_state = db.find_one(TABLE_CONVERSATION_STATES, {
+            "project_id": project_id,
+            "page_id": message["page_id"],
+            "user_id": message["sender_id"],
+            "bot_active": False
+        })
+        
+        if conversation_state:
+            logger.info("Bot desactivado para este usuario - omitiendo procesamiento")
+            return
         
         # Crear una instancia de Graph y procesar el mensaje
         user_id = message["sender_id"]
