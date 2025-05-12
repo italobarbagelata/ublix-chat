@@ -9,6 +9,7 @@ from app.controler.chat.core.graph import Graph
 from app.resources.postgresql import SupabaseDatabase
 import httpx
 from datetime import datetime
+import asyncio
 
 logger = logging.getLogger("root")
 
@@ -72,14 +73,16 @@ async def process_webhook_facebook(request: Request) -> Dict[str, Any]:
         
         # Extraer mensajes del webhook
         messages = extract_messages(body)
-        logger.info(f"Mensajes extraídos: {json.dumps(messages, indent=2)}")
         
+        # Responder inmediatamente a Facebook
+        response = {"status": "ok"}
+        
+        # Procesar mensajes de forma asíncrona
         for message in messages:
-            # Procesar cada mensaje
-            logger.info(f"Procesando mensaje: {json.dumps(message, indent=2)}")
-            await process_message(message)
+            # Usar asyncio.create_task para procesar el mensaje sin bloquear
+            asyncio.create_task(process_message(message))
         
-        return {"status": "ok"}
+        return response
     except Exception as e:
         logger.error(f"Error procesando webhook: {e}", exc_info=True)
         raise HTTPException(status_code=STATUS_BAD_REQUEST, detail=str(e))
