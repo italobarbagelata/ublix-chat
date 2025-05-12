@@ -106,7 +106,11 @@ def get_date_range() -> list:
     Returns:
         list: Lista de fechas como strings en formato YYYY-MM-DD
     """
-    return date_range
+    utc_now = datetime.datetime.now(pytz.UTC)
+    now = utc_now.astimezone(TIMEZONE)
+    date_range = [(now.date() + datetime.timedelta(days=x)).strftime('%Y-%m-%d') for x in range(15)]
+    date_range_str = ", ".join(date_range)
+    return date_range_str
 
 def summarize_conversation(state: CustomState):
     """

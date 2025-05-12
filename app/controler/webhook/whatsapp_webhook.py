@@ -185,8 +185,7 @@ async def process_message(message: Dict[str, Any]):
         
         # Buscar la configuración activa de WhatsApp
         configs = db.select(TABLE_INTEGRATION, {
-            "integration_type": "whatsapp",
-            "whatsapp_account_id": message["entry_id"],
+            "business_account_id": message["entry_id"],
             "active": True
         }, limit=1)
         
@@ -229,9 +228,8 @@ async def send_whatsapp_message(project_id: str, recipient_id: str, entry_id: st
         logger.info(f"Buscando configuración para project_id: {project_id}")
         configs = db.select(TABLE_INTEGRATION, {
             "project_id": project_id,
-            "whatsapp_account_id": entry_id,
+            "business_account_id": entry_id,
             "active": True,
-            "integration_type": "whatsapp"
         }, limit=1)
         
         logger.info(f"Configuraciones encontradas: {configs}")
