@@ -234,7 +234,7 @@ async def process_instagram_message(message: Dict[str, Any]):
       
         # Procesar mensaje con Graph
         logger.info(f"Procesando mensaje con Graph para project_id: {project_id} y user_id: {user_id}")
-        graph = Graph(project_id, user_id, username, "no igsid", "instagram")
+        graph = Graph(project_id, user_id, username, user_id, recipient_id, "instagram")
         response = await graph.execute(text_message)
         logger.info(f"Respuesta de Graph: {json.dumps(response, indent=2)}")
 

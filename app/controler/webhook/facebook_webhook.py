@@ -219,7 +219,7 @@ async def process_message(message: Dict[str, Any]):
         text_message = message["text"]
         
         logger.info(f"Creando instancia de Graph con project_id: {project_id}, user_id: {user_id}")
-        graph = Graph(project_id, user_id, "Facebook User", "no number", "messenger")
+        graph = Graph(project_id, user_id, "Facebook User", user_id, message['page_id'], "messenger")
         response = await graph.execute(text_message)
         logger.info(f"Respuesta de Graph: {json.dumps(response, indent=2)}")
         

@@ -131,6 +131,9 @@ class Persist(object):
         try:
             project_id = conversation["project"].id
             phone_number = conversation["user_id"]
+            username = conversation["username"]
+            source_id = conversation["source_id"]
+            source = conversation["source"]
             database = SupabaseDatabase()
             tool_messages = []
             conversation_id = conversation["conversation_id"]
@@ -169,6 +172,9 @@ class Persist(object):
                         "conversation_id": conversation_id,
                         "project_id": project_id,
                         "phone_number": phone_number,
+                        "username": username,
+                        "source_id": source_id,
+                        "source": source,
                         "type": "human",
                         "content": message.content,
                         "latency": execution_duration,
@@ -182,6 +188,9 @@ class Persist(object):
                             "conversation_id": conversation_id,
                             "project_id": project_id,
                             "phone_number": phone_number,
+                            "username": username,
+                            "source_id": source_id,
+                            "source": source,
                             "type": "ai",
                             "content": message.content,
                             "latency": execution_duration,

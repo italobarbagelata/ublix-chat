@@ -19,11 +19,12 @@ async def chat(request: Request):
 
         name = req_body.get("name", "no name")
         number_phone_agent = req_body.get("number_phone_agent", "no number")
-        source = req_body.get("source", "default")
+        source_id = req_body.get("source", "default")
+        source = req_body.get("source_name", "default")
 
     except ValidationException as e:
         raise HTTPException(status_code=STATUS_BAD_REQUEST, detail=str(e))
 
-    graph = Graph(project_id, user_id, name, number_phone_agent, source)
+    graph = Graph(project_id, user_id, name, number_phone_agent, source_id, source)
     response = await graph.execute(message)
     return JSONResponse(status_code=200, content=response)

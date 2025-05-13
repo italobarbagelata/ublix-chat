@@ -11,4 +11,7 @@ class CustomState(TypedDict):
     messages: Annotated[Sequence[BaseMessage], add_messages]
     summary: str
     conversation_id: str
+    username: str
+    source_id: str
+    source: str
 
