@@ -128,6 +128,8 @@ class Persist(object):
         Método interno que se ejecuta en un hilo separado para persistir la conversación.
         Contiene la lógica original de persist_conversation.
         """
+        
+        logging.info(f"Persisting conversation: {conversation}")
         try:
             project_id = conversation["project"].id
             phone_number = conversation["user_id"]

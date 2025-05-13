@@ -205,7 +205,10 @@ class Graph():
                     "user_id": user_id,
                     "project": project,
                     "exec_init": initial_time,
-                    "conversation_id": conversation_id
+                    "conversation_id": conversation_id,
+                    "username": self.username,
+                    "source_id": self.source_id,
+                    "source": self.source
                 },
                 config={"configurable": {"thread_id": user_id}}
             )
