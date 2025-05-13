@@ -208,6 +208,18 @@ async def process_instagram_message(message: Dict[str, Any]):
             logger.error(f"No se encontró project_id válido para IG Recipient ID: {recipient_id}")
             return
 
+        # Verificar si el bot está desactivado para este usuario
+        db = SupabaseDatabase()
+        conversation_state = db.find_one("instagram_conversation_states", {
+            "project_id": project_id,
+            "instagram_page_id": recipient_id,
+            "instagram_user_id": sender_id
+        })
+        
+        if conversation_state and not conversation_state.get("bot_active", True):
+            logger.info("Bot desactivado para este usuario de Instagram - omitiendo procesamiento")
+            return
+
         # Inicializar el adaptador de Instagram para obtener información del usuario
         instagram_adapter = InstagramAdapter(project_id, recipient_id)
         

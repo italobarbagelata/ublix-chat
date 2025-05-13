@@ -198,6 +198,18 @@ async def process_message(message: Dict[str, Any]):
         
         logger.info(f"Configuración encontrada: {json.dumps(config, indent=2)}")
         project_id = config.get("project_id")
+
+        # Verificar si el bot está desactivado para este usuario
+        conversation_state = db.find_one("whatsapp_conversation_states", {
+            "project_id": project_id,
+            "business_account_id": message["entry_id"],
+            "phone_number_id": message["phone_number_id"],
+            "user_id": message["from_number"]
+        })
+        
+        if conversation_state and not conversation_state.get("bot_active", True):
+            logger.info("Bot desactivado para este usuario de WhatsApp - omitiendo procesamiento")
+            return
         
         # Crear una instancia de Graph y procesar el mensaje
         user_id = message["from_number"]
