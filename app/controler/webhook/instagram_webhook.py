@@ -216,7 +216,17 @@ async def process_instagram_message(message: Dict[str, Any]):
             "instagram_user_id": sender_id
         })
         
-        if conversation_state and not conversation_state.get("bot_active", True):
+        if not conversation_state:
+            # Si no existe el registro, crear uno nuevo con el bot activado
+            conversation_state = {
+                "project_id": project_id,
+                "instagram_page_id": recipient_id,
+                "instagram_user_id": sender_id,
+                "bot_active": True
+            }
+            db.insert("instagram_conversation_states", conversation_state)
+            logger.info("Nuevo estado de conversación de Instagram creado con bot activado")
+        elif not conversation_state.get("bot_active", True):
             logger.info("Bot desactivado para este usuario de Instagram - omitiendo procesamiento")
             return
 

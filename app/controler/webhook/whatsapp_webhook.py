@@ -207,7 +207,18 @@ async def process_message(message: Dict[str, Any]):
             "user_id": message["from_number"]
         })
         
-        if conversation_state and not conversation_state.get("bot_active", True):
+        if not conversation_state:
+            # Si no existe el registro, crear uno nuevo con el bot activado
+            conversation_state = {
+                "project_id": project_id,
+                "business_account_id": message["entry_id"],
+                "phone_number_id": message["phone_number_id"],
+                "user_id": message["from_number"],
+                "bot_active": True
+            }
+            db.insert("whatsapp_conversation_states", conversation_state)
+            logger.info("Nuevo estado de conversación de WhatsApp creado con bot activado")
+        elif not conversation_state.get("bot_active", True):
             logger.info("Bot desactivado para este usuario de WhatsApp - omitiendo procesamiento")
             return
         

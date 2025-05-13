@@ -210,7 +210,17 @@ async def process_message(message: Dict[str, Any]):
             "user_id": message["sender_id"]
         })
         
-        if conversation_state and not conversation_state.get("bot_active", True):
+        if not conversation_state:
+            # Si no existe el registro, crear uno nuevo con el bot activado
+            conversation_state = {
+                "project_id": project_id,
+                "page_id": message["page_id"],
+                "user_id": message["sender_id"],
+                "bot_active": True
+            }
+            db.insert(TABLE_CONVERSATION_STATES, conversation_state)
+            logger.info("Nuevo estado de conversación creado con bot activado")
+        elif not conversation_state.get("bot_active", True):
             logger.info("Bot desactivado para este usuario - omitiendo procesamiento")
             return
         
