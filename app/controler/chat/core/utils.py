@@ -2,24 +2,6 @@ import datetime
 import logging
 from langchain_core.messages import BaseMessage, RemoveMessage, ToolMessage, AIMessage, HumanMessage
 from typing import Union, List, Dict, Any
-from app.controler.chat.classes.chat_state import ChatState
-from app.controler.chat.classes.project import Project
-from app.controler.chat.core.state import CustomState
-from app.controler.chat.core.utils import calculate_execution_duration
-from app.resources.postgresql import SupabaseDatabase
-from app.resources.constants import (
-    AI_MESSAGE_TABLE,
-    MESSAGES_TABLE,
-    PROJECTS_TABLE,
-    CONVERSATION_DATA_TABLE,
-    MEMORY_STATES_TABLE,
-)
-from uuid import uuid4
-import threading
-import pytz
-
-# Zona horaria para Chile (Santiago)
-TIMEZONE = pytz.timezone('America/Santiago')
 
 def filter_and_prepare_messages_for_agent_node(state):
     """Filters and prepares the messages for agent answer"""
@@ -123,10 +105,7 @@ def calculate_execution_duration(initial_date: datetime.datetime, end_date: date
 
 def decorate_message(message: BaseMessage, initial_date: datetime.datetime, conversation_id: str):
     """ Decorate the message with the execution time """
-    # Obtener la fecha actual en UTC y convertirla a la zona horaria de Chile
-    utc_now = datetime.datetime.now(pytz.UTC)
-    chile_now = utc_now.astimezone(TIMEZONE)
-    message.additional_kwargs["end_timestamp"] = chile_now
+    message.additional_kwargs["end_timestamp"] = datetime.datetime.now()
     message.additional_kwargs["end_time_seconds"] = get_execution_time(
         initial_date)
     message.additional_kwargs["conversation_id"] = conversation_id

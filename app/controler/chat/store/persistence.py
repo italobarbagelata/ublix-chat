@@ -14,11 +14,6 @@ from app.resources.constants import (
 )
 from uuid import uuid4
 import threading
-import datetime
-import pytz
-
-# Zona horaria para Chile (Santiago)
-TIMEZONE = pytz.timezone('America/Santiago')
 
 class Persist(object):
 
@@ -175,12 +170,6 @@ class Persist(object):
                 last_execution = message.additional_kwargs["end_timestamp"]
                 
                 if isinstance(message, HumanMessage):
-                    # Asegurar que la fecha esté en la zona horaria correcta
-                    end_timestamp = message.additional_kwargs["end_timestamp"]
-                    if not end_timestamp.tzinfo:
-                        end_timestamp = pytz.UTC.localize(end_timestamp)
-                    chile_timestamp = end_timestamp.astimezone(TIMEZONE)
-                    
                     messages_to_insert.append({
                         "conversation_id": conversation_id,
                         "project_id": project_id,
@@ -191,18 +180,12 @@ class Persist(object):
                         "type": "human",
                         "content": message.content,
                         "latency": execution_duration,
-                        "created_at": chile_timestamp
+                        "created_at": message.additional_kwargs["end_timestamp"]
                     })
                     
                 elif isinstance(message, AIMessage):
                     is_ai_response = i == len(conversation["messages"]) - 1
                     if is_ai_response:
-                        # Asegurar que la fecha esté en la zona horaria correcta
-                        end_timestamp = message.additional_kwargs["end_timestamp"]
-                        if not end_timestamp.tzinfo:
-                            end_timestamp = pytz.UTC.localize(end_timestamp)
-                        chile_timestamp = end_timestamp.astimezone(TIMEZONE)
-                        
                         ai_message = {
                             "conversation_id": conversation_id,
                             "project_id": project_id,
@@ -214,7 +197,7 @@ class Persist(object):
                             "content": message.content,
                             "latency": execution_duration,
                             "has_context": len(tool_messages) > 0,
-                            "created_at": chile_timestamp
+                            "created_at": message.additional_kwargs["end_timestamp"]
                         }
                         response = database.insert(MESSAGES_TABLE, ai_message)
                         ai_message_id = response["id"] if response and "id" in response else None
