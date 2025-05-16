@@ -98,7 +98,6 @@ class Graph():
 
         return memory
 
-
     async def execute(self, message):
         """ Execute the graph with the given message and return response """
         try:
