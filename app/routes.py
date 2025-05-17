@@ -26,9 +26,9 @@ async def chat_with_agent(request: Request, background_tasks: BackgroundTasks):
 # Instagram
 ##########################
 @webhook_router.post("/webhook", operation_id="process_instagram_webhook")
-async def process_instagram_webhook(request: Request):
+async def process_instagram_webhook(request: Request, background_tasks: BackgroundTasks):
     """Procesa el webhook de Instagram."""
-    return await process_webhook_instagram(request)
+    return await process_webhook_instagram(request, background_tasks)
 
 @webhook_router.get("/webhook", operation_id="verify_instagram_webhook")
 async def instagram_verify(request: Request):
@@ -40,9 +40,9 @@ async def instagram_verify(request: Request):
 # Facebook
 ##########################
 @webhook_router_facebook.post("/webhook", operation_id="process_facebook_webhook")
-async def process_facebook_webhook(request: Request):
+async def process_facebook_webhook(request: Request, background_tasks: BackgroundTasks):
     """Procesa el webhook de Facebook."""
-    return await process_webhook_facebook(request)
+    return await process_webhook_facebook(request, background_tasks)
 
 @webhook_router_facebook.get("/webhook", operation_id="verify_facebook_webhook")
 async def facebook_verify(request: Request):
@@ -54,9 +54,9 @@ async def facebook_verify(request: Request):
 # WhatsApp
 ##########################
 @webhook_router_whatsapp.post("/webhook", operation_id="process_whatsapp_webhook")
-async def process_whatsapp_webhook(request: Request):
+async def process_whatsapp_webhook(request: Request, background_tasks: BackgroundTasks):
     """Procesa el webhook de WhatsApp."""
-    return await process_webhook_whatsapp(request)
+    return await process_webhook_whatsapp(request, background_tasks)
 
 @webhook_router_whatsapp.get("/webhook", operation_id="verify_whatsapp_webhook")
 async def whatsapp_verify(request: Request):
