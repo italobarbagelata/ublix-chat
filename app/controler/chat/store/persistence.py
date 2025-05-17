@@ -191,7 +191,7 @@ class Persist(object):
                         "type": "human",
                         "content": message.content,
                         "latency": execution_duration,
-                        "created_at": chile_timestamp.isoformat()
+                        "created_at": chile_timestamp
                     })
                     
                 elif isinstance(message, AIMessage):
@@ -215,7 +215,7 @@ class Persist(object):
                         "content": message.content,
                         "latency": execution_duration,
                         "has_context": len(tool_messages) > 0,
-                        "created_at": chile_timestamp.isoformat()
+                        "created_at": chile_timestamp
                     }
                     
                     if is_ai_response:
