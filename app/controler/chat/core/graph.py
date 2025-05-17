@@ -26,6 +26,7 @@ from fastapi import BackgroundTasks
 
 import asyncio
 import datetime
+import pytz
 
 class Graph():
     state: ChatState
@@ -145,7 +146,7 @@ class Graph():
                 # El datetime.datetime.now() aquí era naive, y TIMEZONE.astimezone se encargaba.
                 # Replicando la lógica original vista en la primera lectura para ser consistente.
                 # Aunque un `now(pytz.UTC).astimezone(TIMEZONE)` sería más robusto, se revierte al original.
-                now_in_timezone = datetime.datetime.now().astimezone(TIMEZONE)
+                now_in_timezone = datetime.datetime.now(pytz.UTC).astimezone(TIMEZONE)
                 now_str = now_in_timezone.isoformat()
                 
                 date_range = get_date_range() # get_date_range de nodes
@@ -173,7 +174,7 @@ class Graph():
     async def execute(self, message, background_tasks: BackgroundTasks):
         """Execute the graph with the given message and return response"""
         try:
-            initial_time = datetime.datetime.now()
+            initial_time = datetime.datetime.now(pytz.UTC).astimezone(TIMEZONE)
             conversation_id = str(uuid.uuid4())
             user_id = self.state.user_id
             project = self.database.find_project(self.state.project_id)
