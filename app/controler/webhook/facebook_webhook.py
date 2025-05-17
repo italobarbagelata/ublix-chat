@@ -2,7 +2,7 @@ import logging
 import json
 import os
 from typing import Dict, Any, List
-from fastapi import Request, HTTPException
+from fastapi import Request, HTTPException, BackgroundTasks
 from fastapi.responses import PlainTextResponse
 from app.resources.constants import STATUS_BAD_REQUEST, STATUS_UNAUTHORIZED
 from app.controler.chat.core.graph import Graph
@@ -52,12 +52,13 @@ async def verify_webhook_facebook(request: Request):
         logger.warning("Fallo en la verificación del webhook: token inválido o modo incorrecto")
         raise HTTPException(status_code=403, detail="Verificación fallida")
 
-async def process_webhook_facebook(request: Request) -> Dict[str, Any]:
+async def process_webhook_facebook(request: Request, background_tasks: BackgroundTasks) -> Dict[str, Any]:
     """
     Procesa los eventos entrantes del webhook de Messenger.
     
     Args:
         request: El objeto Request de FastAPI
+        background_tasks: Tareas en segundo plano de FastAPI
         
     Returns:
         Respuesta indicando el procesamiento exitoso
@@ -80,7 +81,7 @@ async def process_webhook_facebook(request: Request) -> Dict[str, Any]:
         # Procesar mensajes de forma asíncrona
         for message in messages:
             # Usar asyncio.create_task para procesar el mensaje sin bloquear
-            asyncio.create_task(process_message(message))
+            asyncio.create_task(process_message(message, background_tasks))
         
         return response
     except Exception as e:
@@ -155,12 +156,13 @@ def extract_messages(body: Dict[str, Any]) -> List[Dict[str, Any]]:
     
     return messages
 
-async def process_message(message: Dict[str, Any]):
+async def process_message(message: Dict[str, Any], background_tasks: BackgroundTasks):
     """
     Procesa un mensaje individual de Messenger.
     
     Args:
         message: El objeto de mensaje
+        background_tasks: Tareas en segundo plano de FastAPI
     """
     try:
         logger.info(f"Iniciando procesamiento de mensaje: {json.dumps(message, indent=2)}")
@@ -230,7 +232,7 @@ async def process_message(message: Dict[str, Any]):
         
         logger.info(f"Creando instancia de Graph con project_id: {project_id}, user_id: {user_id}")
         graph = Graph(project_id, user_id, "facebook", user_id, message['page_id'], "messenger")
-        response = await graph.execute(text_message)
+        response = await graph.execute(text_message, background_tasks)
         logger.info(f"Respuesta de Graph: {json.dumps(response, indent=2)}")
         
         # Enviar la respuesta de vuelta a Messenger

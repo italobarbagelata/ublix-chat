@@ -3,7 +3,7 @@ import json
 import os
 import httpx
 from typing import Dict, Any, List, Optional
-from fastapi import Request, HTTPException
+from fastapi import Request, HTTPException, BackgroundTasks
 from fastapi.responses import PlainTextResponse
 from dotenv import load_dotenv
 from app.controler.chat.store.persistence import SupabaseDatabase
@@ -189,7 +189,7 @@ async def get_instagram_user_info(instagram_id: str, access_token: str) -> Dict[
 ########################################################
 # Procesamiento de mensaje de Instagram
 ########################################################
-async def process_instagram_message(message: Dict[str, Any]):
+async def process_instagram_message(message: Dict[str, Any], background_tasks: BackgroundTasks):
     """Procesa un mensaje de Instagram y envía respuesta a través del adapter."""
     try:
         logger.info(f"Iniciando procesamiento de mensaje: {json.dumps(message, indent=2)}")
@@ -236,16 +236,13 @@ async def process_instagram_message(message: Dict[str, Any]):
         # Obtener información detallada del usuario de Instagram
         logger.info(f"Obteniendo información detallada del usuario: {sender_id}")
         
-        #obtener el username y el user_id del usuario de instagram
-        #user = await get_instagram_user_info(instagram_id=sender_id,access_token=token)
-        #logger.info(f"User: {json.dumps(user, indent=2)}")
         username = "Instagram User"
         user_id = sender_id
       
         # Procesar mensaje con Graph
         logger.info(f"Procesando mensaje con Graph para project_id: {project_id} y user_id: {user_id}")
         graph = Graph(project_id, user_id, username, user_id, recipient_id, "instagram")
-        response = await graph.execute(text_message)
+        response = await graph.execute(text_message, background_tasks)
         logger.info(f"Respuesta de Graph: {json.dumps(response, indent=2)}")
 
         # Enviar respuesta usando InstagramAdapter
@@ -265,7 +262,7 @@ async def process_instagram_message(message: Dict[str, Any]):
 ########################################################
 # Procesamiento de webhook de Instagram
 ########################################################
-async def process_webhook_instagram(request: Request) -> Dict[str, Any]:
+async def process_webhook_instagram(request: Request, background_tasks: BackgroundTasks) -> Dict[str, Any]:
     """Procesa los mensajes de webhook entrantes de Instagram."""
     try:
         logger.info("Iniciando procesamiento de webhook de Instagram")
@@ -285,7 +282,7 @@ async def process_webhook_instagram(request: Request) -> Dict[str, Any]:
         processed_count = 0
         for msg in extracted_msgs:
             try:
-                await process_instagram_message(msg)
+                await process_instagram_message(msg, background_tasks)
                 processed_count += 1
             except Exception as msg_err:
                 logger.error(f"Error procesando mensaje: {msg_err}", exc_info=True)
