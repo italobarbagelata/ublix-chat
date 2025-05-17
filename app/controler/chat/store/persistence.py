@@ -14,6 +14,11 @@ from app.resources.constants import (
 )
 from uuid import uuid4
 import threading
+import datetime
+import pytz
+
+# Zona horaria para Chile (Santiago)
+TIMEZONE = pytz.timezone('America/Santiago')
 
 class Persist(object):
 
@@ -129,7 +134,7 @@ class Persist(object):
         Contiene la lógica original de persist_conversation.
         """
         
-        logging.info(f"Persisting conversation: {conversation}")
+        logging.info(f"Persisting conversation")
         try:
             project_id = conversation["project"].id
             phone_number = conversation["user_id"]
@@ -170,6 +175,12 @@ class Persist(object):
                 last_execution = message.additional_kwargs["end_timestamp"]
                 
                 if isinstance(message, HumanMessage):
+                    # Asegurar que la fecha esté en la zona horaria correcta
+                    end_timestamp = message.additional_kwargs["end_timestamp"]
+                    if not end_timestamp.tzinfo:
+                        end_timestamp = pytz.UTC.localize(end_timestamp)
+                    chile_timestamp = end_timestamp.astimezone(TIMEZONE)
+                    
                     messages_to_insert.append({
                         "conversation_id": conversation_id,
                         "project_id": project_id,
@@ -180,40 +191,57 @@ class Persist(object):
                         "type": "human",
                         "content": message.content,
                         "latency": execution_duration,
-                        "created_at": message.additional_kwargs["end_timestamp"]
+                        "created_at": chile_timestamp
                     })
                     
                 elif isinstance(message, AIMessage):
                     is_ai_response = i == len(conversation["messages"]) - 1
+                    
+                    # Asegurar que la fecha esté en la zona horaria correcta
+                    end_timestamp = message.additional_kwargs["end_timestamp"]
+                    if not end_timestamp.tzinfo:
+                        end_timestamp = pytz.UTC.localize(end_timestamp)
+                    chile_timestamp = end_timestamp.astimezone(TIMEZONE)
+                    
+                    # Restaurado: ai_message_payload original sin las métricas extra
+                    ai_message_payload = {
+                        "conversation_id": conversation_id,
+                        "project_id": project_id,
+                        "phone_number": phone_number,
+                        "username": username,
+                        "source_id": source_id,
+                        "source": source,
+                        "type": "ai",
+                        "content": message.content,
+                        "latency": execution_duration,
+                        "has_context": len(tool_messages) > 0,
+                        "created_at": chile_timestamp
+                    }
+                    
                     if is_ai_response:
-                        ai_message = {
-                            "conversation_id": conversation_id,
-                            "project_id": project_id,
-                            "phone_number": phone_number,
-                            "username": username,
-                            "source_id": source_id,
-                            "source": source,
-                            "type": "ai",
-                            "content": message.content,
-                            "latency": execution_duration,
-                            "has_context": len(tool_messages) > 0,
-                            "created_at": message.additional_kwargs["end_timestamp"]
-                        }
-                        response = database.insert(MESSAGES_TABLE, ai_message)
-                        ai_message_id = response["id"] if response and "id" in response else None
+                        response_db = database.insert(MESSAGES_TABLE, ai_message_payload)
+                        # Restaurar lógica original de ai_message_id, asumiendo que response_db es un dict o None
+                        ai_message_id = response_db.get("id") if response_db and isinstance(response_db, dict) else None
+                        # Si Supabase devuelve una lista, tomar el primero
+                        if isinstance(response_db, list) and len(response_db) > 0 and isinstance(response_db[0], dict):
+                            ai_message_id = response_db[0].get("id")
+
                     else:
                         tool_call = self.get_tool_call(message)
-                        token_usage = self.get_token_usage(message)
-                        tool_messages.append({
-                            "conversation_id": conversation_id,
-                            "type": "ai_tool",
-                            "content": tool_call.get("arguments"),
-                            "tool": tool_call.get("name"),
-                            "call_timestamp": last_execution.isoformat(),
-                            "input_tokens": token_usage.get("prompt_tokens"),
-                            "output_tokens": token_usage.get("completion_tokens"),
-                            "duration": execution_duration
-                        })
+                        if tool_call:
+                            token_usage = self.get_token_usage(message)
+                            tool_messages.append({
+                                "conversation_id": conversation_id,
+                                "type": "ai_tool",
+                                "content": tool_call.get("arguments"),
+                                "tool": tool_call.get("name"),
+                                "call_timestamp": last_execution.isoformat(),
+                                "input_tokens": token_usage.get("prompt_tokens"),
+                                "output_tokens": token_usage.get("completion_tokens"),
+                                "duration": execution_duration
+                            })
+                        else: # AIMessage no final y no herramienta
+                           messages_to_insert.append(ai_message_payload)
             
             # Insertar mensajes en batch si es posible
             if messages_to_insert:

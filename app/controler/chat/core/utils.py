@@ -1,5 +1,6 @@
 import datetime
 import logging
+# import pytz # Se eliminará pytz
 from langchain_core.messages import BaseMessage, RemoveMessage, ToolMessage, AIMessage, HumanMessage
 from typing import Union, List, Dict, Any
 
@@ -94,7 +95,7 @@ def get_execution_time(initial_date: datetime.datetime) -> float:
     Returns:
         float: Duration in seconds
     """
-    end_time = datetime.datetime.now()
+    end_time = datetime.datetime.now() # Restaurado a naive
     return (end_time - initial_date).total_seconds()
 
 
@@ -105,7 +106,7 @@ def calculate_execution_duration(initial_date: datetime.datetime, end_date: date
 
 def decorate_message(message: BaseMessage, initial_date: datetime.datetime, conversation_id: str):
     """ Decorate the message with the execution time """
-    message.additional_kwargs["end_timestamp"] = datetime.datetime.now()
+    message.additional_kwargs["end_timestamp"] = datetime.datetime.now() # Restaurado a naive
     message.additional_kwargs["end_time_seconds"] = get_execution_time(
         initial_date)
     message.additional_kwargs["conversation_id"] = conversation_id

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Request, FastAPI
+from fastapi import APIRouter, Request, FastAPI, BackgroundTasks
 from app.controler.chat import chat
 from app.controler.webhook.instagram_webhook import process_webhook_instagram, verify_webhook_instagram
 from app.controler.webhook.facebook_webhook import verify_webhook_facebook, process_webhook_facebook
@@ -13,9 +13,9 @@ webhook_router_whatsapp = APIRouter(prefix="/api/whatsapp", tags=["whatsapp"])
 # Chat
 ##########################
 @chat_router.post("/message", operation_id="send_chat_message")
-async def chat_with_agent(request: Request):
+async def chat_with_agent(request: Request, background_tasks: BackgroundTasks):
     """Chat with the server."""
-    return await chat(request)
+    return await chat(request, background_tasks)
 
 
 ##########################

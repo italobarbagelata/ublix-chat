@@ -10,6 +10,7 @@ PROJECTS_COLLECTION = 'projects'
 APIS_COLLECTION = 'apis'
 AI_MESSAGE_TABLE = "message_ai_metadata"
 INSTAGRAM_COLLECTION = 'integration_instagram'
+TOKEN_METRICS_TABLE = "token_metrics"
 
 
 

@@ -5,12 +5,12 @@ from app.resources.validations import (
     validate_json_body,
     validate_required_body_param,
 )
-from fastapi import HTTPException, Request
+from fastapi import HTTPException, Request, BackgroundTasks
 from fastapi.responses import JSONResponse
 from .core.graph import Graph
 
 
-async def chat(request: Request):
+async def chat(request: Request, background_tasks: BackgroundTasks):
     try:
         req_body = await validate_json_body(request)
         message = await validate_required_body_param(req_body, "message")
@@ -26,5 +26,5 @@ async def chat(request: Request):
         raise HTTPException(status_code=STATUS_BAD_REQUEST, detail=str(e))
 
     graph = Graph(project_id, user_id, name, number_phone_agent, source_id, source)
-    response = await graph.execute(message)
+    response = await graph.execute(message, background_tasks)
     return JSONResponse(status_code=200, content=response)

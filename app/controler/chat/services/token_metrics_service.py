@@ -1,16 +1,40 @@
 from datetime import datetime
+import logging
 from typing import List, Dict
 from app.controler.chat.classes.token_metrics import TokenMetrics
 from app.controler.chat.store.persistence_state import MemoryStatePersistence
 
 class TokenMetricsService:
     def __init__(self):
-        self.db = MemoryStatePersistence()
-        self.collection = "token_metrics"
+        self.logger = logging.getLogger(__name__)
+        try:
+            self.db = MemoryStatePersistence()
+        except Exception as e:
+            self.logger.error(f"Error al inicializar TokenMetricsService: {e}")
+            raise
 
-    def save_metrics(self, metrics: TokenMetrics):
-        """Guarda las métricas de tokens en la base de datos"""
-        return self.db.save_token_metrics(metrics)
+    def save_metrics(self, metrics: TokenMetrics) -> bool:
+        """
+        Guarda las métricas de tokens en la base de datos
+        
+        Returns:
+            bool: True si se guardó exitosamente, False en caso contrario
+        """
+        try:
+            if not metrics:
+                self.logger.error("Se intentó guardar métricas nulas")
+                return False
+                
+            result = self.db.save_token_metrics(metrics)
+            
+            if not result:
+                self.logger.error(f"Error al guardar métricas para conversation_id: {metrics.conversation_id}")
+                
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"Error en save_metrics: {str(e)}", exc_info=True)
+            return False
 
     def get_project_metrics(self, project_id: str) -> List[TokenMetrics]:
         """Obtiene todas las métricas de un proyecto"""

@@ -1,18 +1,30 @@
 import os
 import base64
 import msgpack
+import logging
 from supabase import create_client, Client
 from app.controler.chat.classes.chat_state import ChatState
 from typing import List
 from app.controler.chat.classes.token_metrics import TokenMetrics
+from app.resources.constants import TOKEN_METRICS_TABLE
 
 
 class MemoryStatePersistence:
     def __init__(self):
         """Inicializa la conexión con Supabase"""
+        self.logger = logging.getLogger(__name__)
         supabase_url = os.getenv("SUPABASE_URL")
         supabase_key = os.getenv("SUPABASE_KEY")
-        self.client: Client = create_client(supabase_url, supabase_key)
+        
+        if not supabase_url or not supabase_key:
+            self.logger.error("Faltan variables de entorno SUPABASE_URL o SUPABASE_KEY")
+            raise ValueError("Faltan variables de entorno para Supabase")
+            
+        try:
+            self.client: Client = create_client(supabase_url, supabase_key)
+        except Exception as e:
+            self.logger.error(f"Error al conectar con Supabase: {e}")
+            raise
 
     def save_state(self, state: ChatState) -> None:
         """Guarda o actualiza el estado del chat en Supabase"""
@@ -56,11 +68,24 @@ class MemoryStatePersistence:
 
     def save_token_metrics(self, metrics: TokenMetrics):
         """Guarda las métricas de tokens en Supabase"""
-        data = metrics.dict()
-        # Convertir el datetime a ISO format
-        if 'timestamp' in data:
-            data['timestamp'] = data['timestamp'].isoformat()
-        return self.client.table("token_metrics").insert(data).execute()
+        try:
+            data = metrics.dict()
+            
+            # Convertir el datetime a ISO format
+            if 'timestamp' in data:
+                data['timestamp'] = data['timestamp'].isoformat()
+                
+            response = self.client.table(TOKEN_METRICS_TABLE).insert(data).execute()
+            
+            if hasattr(response, 'error') and response.error:
+                self.logger.error(f"Error de Supabase al guardar métricas: {response.error}")
+                return False
+                
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Error al guardar métricas: {str(e)}")
+            return False
 
     def get_project_token_metrics(self, project_id: str) -> List[TokenMetrics]:
         """Obtiene todas las métricas de un proyecto"""
