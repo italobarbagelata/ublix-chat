@@ -17,8 +17,18 @@ import threading
 import datetime
 import pytz
 
-# Zona horaria para Chile (Santiago)
+# Zona horaria para Chile (Santiago) con manejo de horario de verano
 TIMEZONE = pytz.timezone('America/Santiago')
+
+def get_chile_time(timestamp):
+    """
+    Convierte un timestamp a la hora de Chile considerando el horario de verano.
+    """
+    if not timestamp.tzinfo:
+        timestamp = pytz.UTC.localize(timestamp)
+    chile_time = timestamp.astimezone(TIMEZONE)
+    logging.info(f"Timestamp original: {timestamp}, Timestamp Chile: {chile_time}, DST: {chile_time.dst()}")
+    return chile_time
 
 class Persist(object):
 
@@ -177,11 +187,7 @@ class Persist(object):
                 if isinstance(message, HumanMessage):
                     # Asegurar que la fecha esté en la zona horaria correcta
                     end_timestamp = message.additional_kwargs["end_timestamp"]
-                    if not end_timestamp.tzinfo:
-                        end_timestamp = pytz.UTC.localize(end_timestamp)
-                    # Forzar la conversión a la zona horaria de Chile
-                    chile_timestamp = end_timestamp.astimezone(TIMEZONE)
-                    logging.info(f"Timestamp original: {end_timestamp}, Timestamp Chile: {chile_timestamp}")
+                    chile_timestamp = get_chile_time(end_timestamp)
                     
                     messages_to_insert.append({
                         "conversation_id": conversation_id,
@@ -201,11 +207,7 @@ class Persist(object):
                     
                     # Asegurar que la fecha esté en la zona horaria correcta
                     end_timestamp = message.additional_kwargs["end_timestamp"]
-                    if not end_timestamp.tzinfo:
-                        end_timestamp = pytz.UTC.localize(end_timestamp)
-                    # Forzar la conversión a la zona horaria de Chile
-                    chile_timestamp = end_timestamp.astimezone(TIMEZONE)
-                    logging.info(f"Timestamp original: {end_timestamp}, Timestamp Chile: {chile_timestamp}")
+                    chile_timestamp = get_chile_time(end_timestamp)
                     
                     # Restaurado: ai_message_payload original sin las métricas extra
                     ai_message_payload = {
