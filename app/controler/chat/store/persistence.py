@@ -270,7 +270,6 @@ class Persist(object):
                         
         except Exception as e:
             logging.error(f"Error in persist_conversation: {e}")
-            # No propagamos la excepción para no interrumpir el hilo
 
     def get_tool_call(self, message):
         try:
@@ -306,11 +305,9 @@ class Persist(object):
         Actualiza el resumen de la conversación. 
         Se ejecuta en segundo plano para no bloquear el flujo principal.
         """
-        # Ejecutar la actualización en un nuevo hilo
         threading.Thread(target=self._update_summary_thread, 
                          args=(conversation,), 
                          daemon=True).start()
-        # Retorna inmediatamente sin esperar el resultado
         return None
         
     def _update_summary_thread(self, conversation: CustomState):
@@ -337,4 +334,3 @@ class Persist(object):
             logging.info(f"Actualización de resumen completada para proyecto: {conversation['project'].id}, usuario: {conversation['user_id']}")
         except Exception as e:
             logging.error(f"Error updating summary: {e}")
-            # No propagamos la excepción para no interrumpir el hilo

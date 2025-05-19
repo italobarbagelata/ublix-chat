@@ -97,7 +97,6 @@ class Graph():
 
     async def _calculate_tokens_async(self, message, project, user_id):
         """Calcula tokens en segundo plano"""
-        # Esta es la versión original de _calculate_tokens_async de la primera lectura
         try:
             system_prompt = project.instructions if project and hasattr(project, 'instructions') else ""
             system_tokens = self.token_counter.count_system_prompt_tokens(system_prompt)
@@ -148,7 +147,7 @@ class Graph():
                 now_in_timezone = datetime.datetime.now().astimezone(TIMEZONE)
                 now_str = now_in_timezone.isoformat()
                 
-                date_range = get_date_range() # get_date_range de nodes
+                date_range = get_date_range()
                 date_range_str = ", ".join(date_range)
                 date_time_tokens += self.token_counter.count_tokens(now_str, 'low')
                 date_time_tokens += self.token_counter.count_tokens(date_range_str, 'low')
