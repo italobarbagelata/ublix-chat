@@ -15,20 +15,6 @@ from app.resources.constants import (
 from uuid import uuid4
 import threading
 import datetime
-import pytz
-
-# Zona horaria para Chile (Santiago) con manejo de horario de verano
-TIMEZONE = pytz.timezone('America/Santiago')
-
-def get_chile_time(timestamp):
-    """
-    Convierte un timestamp a la hora de Chile considerando el horario de verano.
-    """
-    if not timestamp.tzinfo:
-        timestamp = pytz.UTC.localize(timestamp)
-    chile_time = timestamp.astimezone(TIMEZONE)
-    logging.info(f"Timestamp original: {timestamp}, Timestamp Chile: {chile_time}, DST: {chile_time.dst()}")
-    return chile_time
 
 class Persist(object):
 
@@ -185,10 +171,6 @@ class Persist(object):
                 last_execution = message.additional_kwargs["end_timestamp"]
                 
                 if isinstance(message, HumanMessage):
-                    # Asegurar que la fecha esté en la zona horaria correcta
-                    end_timestamp = message.additional_kwargs["end_timestamp"]
-                    chile_timestamp = get_chile_time(end_timestamp)
-                    
                     messages_to_insert.append({
                         "conversation_id": conversation_id,
                         "project_id": project_id,
@@ -198,18 +180,12 @@ class Persist(object):
                         "source": source,
                         "type": "human",
                         "content": message.content,
-                        "latency": execution_duration,
-                        "created_at": chile_timestamp
+                        "latency": execution_duration
                     })
                     
                 elif isinstance(message, AIMessage):
                     is_ai_response = i == len(conversation["messages"]) - 1
                     
-                    # Asegurar que la fecha esté en la zona horaria correcta
-                    end_timestamp = message.additional_kwargs["end_timestamp"]
-                    chile_timestamp = get_chile_time(end_timestamp)
-                    
-                    # Restaurado: ai_message_payload original sin las métricas extra
                     ai_message_payload = {
                         "conversation_id": conversation_id,
                         "project_id": project_id,
@@ -220,8 +196,7 @@ class Persist(object):
                         "type": "ai",
                         "content": message.content,
                         "latency": execution_duration,
-                        "has_context": len(tool_messages) > 0,
-                        "created_at": chile_timestamp
+                        "has_context": len(tool_messages) > 0
                     }
                     
                     if is_ai_response:
