@@ -179,7 +179,9 @@ class Persist(object):
                     end_timestamp = message.additional_kwargs["end_timestamp"]
                     if not end_timestamp.tzinfo:
                         end_timestamp = pytz.UTC.localize(end_timestamp)
+                    # Forzar la conversión a la zona horaria de Chile
                     chile_timestamp = end_timestamp.astimezone(TIMEZONE)
+                    logging.info(f"Timestamp original: {end_timestamp}, Timestamp Chile: {chile_timestamp}")
                     
                     messages_to_insert.append({
                         "conversation_id": conversation_id,
@@ -201,7 +203,9 @@ class Persist(object):
                     end_timestamp = message.additional_kwargs["end_timestamp"]
                     if not end_timestamp.tzinfo:
                         end_timestamp = pytz.UTC.localize(end_timestamp)
+                    # Forzar la conversión a la zona horaria de Chile
                     chile_timestamp = end_timestamp.astimezone(TIMEZONE)
+                    logging.info(f"Timestamp original: {end_timestamp}, Timestamp Chile: {chile_timestamp}")
                     
                     # Restaurado: ai_message_payload original sin las métricas extra
                     ai_message_payload = {
