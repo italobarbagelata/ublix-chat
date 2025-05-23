@@ -145,6 +145,7 @@ class Persist(object):
             # Optimización: Preparar todos los mensajes antes de insertar
             messages_to_insert = []
             ai_message_id = None
+            last_ai_message_index = None  # Para rastrear el índice del último mensaje de IA
             
             for i, message in enumerate(conversation["messages"]):
                 if message.additional_kwargs.get("saved", False):
@@ -199,14 +200,10 @@ class Persist(object):
                         "has_context": len(tool_messages) > 0
                     }
                     
+                    # Agregar todos los mensajes de IA a la lista, incluyendo el último
                     if is_ai_response:
-                        response_db = database.insert(MESSAGES_TABLE, ai_message_payload)
-                        # Restaurar lógica original de ai_message_id, asumiendo que response_db es un dict o None
-                        ai_message_id = response_db.get("id") if response_db and isinstance(response_db, dict) else None
-                        # Si Supabase devuelve una lista, tomar el primero
-                        if isinstance(response_db, list) and len(response_db) > 0 and isinstance(response_db[0], dict):
-                            ai_message_id = response_db[0].get("id")
-
+                        last_ai_message_index = len(messages_to_insert)  # Guardar el índice
+                        messages_to_insert.append(ai_message_payload)
                     else:
                         tool_call = self.get_tool_call(message)
                         if tool_call:
@@ -224,15 +221,31 @@ class Persist(object):
                         else: # AIMessage no final y no herramienta
                            messages_to_insert.append(ai_message_payload)
             
-            # Insertar mensajes en batch si es posible
+            # Insertar mensajes en batch manteniendo el orden
             if messages_to_insert:
                 try:
-                    database.batch_insert(MESSAGES_TABLE, messages_to_insert)
+                    # Insertar todos los mensajes en orden
+                    inserted_messages = database.batch_insert(MESSAGES_TABLE, messages_to_insert)
+                    
+                    # Obtener el ID del último mensaje de IA si existe
+                    if last_ai_message_index is not None and inserted_messages:
+                        if isinstance(inserted_messages, list) and len(inserted_messages) > last_ai_message_index:
+                            ai_message_id = inserted_messages[last_ai_message_index].get("id")
+                        elif isinstance(inserted_messages, dict):
+                            # Si batch_insert devuelve un solo dict, es probable que sea el último insertado
+                            ai_message_id = inserted_messages.get("id")
+                            
                 except Exception as e:
                     logging.error(f"Error inserting messages batch: {e}")
-                    # Fallback a inserción individual
-                    for msg in messages_to_insert:
-                        database.insert(MESSAGES_TABLE, msg)
+                    # Fallback a inserción individual manteniendo el orden
+                    for i, msg in enumerate(messages_to_insert):
+                        result = database.insert(MESSAGES_TABLE, msg)
+                        # Si es el último mensaje de IA, guardar su ID
+                        if i == last_ai_message_index and result:
+                            if isinstance(result, list) and len(result) > 0:
+                                ai_message_id = result[0].get("id")
+                            elif isinstance(result, dict):
+                                ai_message_id = result.get("id")
             
             # Insertar tool messages en batch
             if tool_messages and ai_message_id:
