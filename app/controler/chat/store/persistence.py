@@ -146,7 +146,6 @@ class Persist(object):
             messages_to_insert = []
             ai_message_id = None
             
-            # Primero procesamos los mensajes humanos
             for i, message in enumerate(conversation["messages"]):
                 if message.additional_kwargs.get("saved", False):
                     continue
@@ -181,16 +180,10 @@ class Persist(object):
                         "source": source,
                         "type": "human",
                         "content": message.content,
-                        "latency": execution_duration,
-                        "created_at": message.additional_kwargs["end_timestamp"].isoformat()
+                        "latency": execution_duration
                     })
-            
-            # Luego procesamos los mensajes de IA
-            for i, message in enumerate(conversation["messages"]):
-                if message.additional_kwargs.get("saved", False):
-                    continue
-
-                if isinstance(message, AIMessage):
+                    
+                elif isinstance(message, AIMessage):
                     is_ai_response = i == len(conversation["messages"]) - 1
                     
                     ai_message_payload = {
@@ -203,8 +196,7 @@ class Persist(object):
                         "type": "ai",
                         "content": message.content,
                         "latency": execution_duration,
-                        "has_context": len(tool_messages) > 0,
-                        "created_at": message.additional_kwargs["end_timestamp"].isoformat()
+                        "has_context": len(tool_messages) > 0
                     }
                     
                     if is_ai_response:
