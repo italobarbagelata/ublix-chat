@@ -2,8 +2,9 @@ from langchain.tools import tool
 
 from app.controler.chat.core.tools.api_tool import create_api_tools
 #from app.controler.chat.core.tools.mongo_tool import mongo_db_tool
-from app.controler.chat.core.tools.retriever_tool import retriever
-from app.controler.chat.core.tools.products_tool import search_products
+from app.controler.chat.core.tools.retriever_tool import document_retriever
+from app.controler.chat.core.tools.products_fallback_tool import search_products_unified
+from app.controler.chat.core.tools.openai_vector_tool import openai_vector_search, list_openai_vector_stores
 import logging
 
 # Import calendar tool safely
@@ -37,9 +38,10 @@ def agent_tools(project_id, user_id, name, number_phone_agent, project=None):
     # Mapeo de nombres de herramientas a funciones
     tool_mapping = {
         "api": create_api_tools,
-        "retriever": lambda *args: [retriever],
-        "products_search": lambda *args: [search_products],
-        "calendar": lambda *args: [google_calendar_tool] if CALENDAR_TOOL_AVAILABLE else []
+        "products_search": lambda *args: [search_products_unified],
+        "calendar": lambda *args: [google_calendar_tool] if CALENDAR_TOOL_AVAILABLE else [],
+        "openai_vector": lambda *args: [openai_vector_search, list_openai_vector_stores],
+        "retriever": lambda *args: [document_retriever]
     }
     
     # Cargar solo las herramientas habilitadas

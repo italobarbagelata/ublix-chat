@@ -47,3 +47,4 @@ pydantic==2.7.4
 beautifulsoup4
 playwright
 redis==5.0.1
+httpx
