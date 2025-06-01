@@ -83,14 +83,16 @@ class Graph():
         """Load the memory of recent chats from the database if exists, with Redis cache."""
         self.logger.info("init memory")
         memory = MemorySaver()
+        self.logger.info(f"Buscando estado de memoria para project_id: {self.state.project_id}, user_id: {self.state.user_id}")
         state = self.database_state.fetch_state(
             self.state.project_id, self.state.user_id)
         if state:
+            self.logger.info(f"Estado recuperado: {type(state)}, keys: {list(state.keys()) if isinstance(state, dict) else 'N/A'}")
             if isinstance(state.get("state"), dict):
                  memory.storage[self.state.user_id] = state["state"]
-                 self.logger.info(f"Loaded state from DB for user {self.state.user_id}")
+                 self.logger.info(f"Loaded state from DB for user {self.state.user_id}, memory keys: {list(state['state'].keys())}")
             else:
-                 self.logger.warning(f"Formato de estado inválido recuperado para {self.state.user_id}. Iniciando memoria vacía.")
+                 self.logger.warning(f"Formato de estado inválido recuperado para {self.state.user_id}. Tipo: {type(state.get('state'))}")
         else:
             self.logger.info(f"No previous state found for user {self.state.user_id}. Starting with empty memory.")
         return memory
@@ -105,6 +107,7 @@ class Graph():
             current_checkpoints = self.graph.checkpointer.get({"configurable": {"thread_id": user_id}})
             context_tokens = 0
             previous_summary_content = ""
+            previous_summary_tokens = 0  # Inicializar al principio para evitar UnboundLocalError
             
             if current_checkpoints:
                 state_values_for_context = current_checkpoints.values if hasattr(current_checkpoints, 'values') else current_checkpoints
@@ -261,7 +264,7 @@ class Graph():
         """Procesa tareas en segundo plano usando BackgroundTasks"""
         try:
             # Optimizar estado de memoria
-            final_memory_state_dict = self.graph.checkpointer.storage.get(self.user_id)
+            final_memory_state_dict = self.graph.checkpointer.storage.get(self.state.user_id)
             if final_memory_state_dict:
                 state_to_optimize = final_memory_state_dict.get('', {})
                 if isinstance(state_to_optimize, dict):
@@ -269,9 +272,14 @@ class Graph():
                     while len(nested_dict) > self.MAX_KEYS:
                         nested_dict.popitem(last=False)
                     final_memory_state_dict[''] = nested_dict
-                    chat_state_to_save = ChatState(project_id=self.project_id, user_id=self.user_id)
+                    chat_state_to_save = ChatState(project_id=self.state.project_id, user_id=self.state.user_id)
                     chat_state_to_save.state = final_memory_state_dict
                     await asyncio.to_thread(self.database_state.save_state, chat_state_to_save)
+                    self.logger.info(f"Estado de memoria guardado para user {self.state.user_id}")
+                else:
+                    self.logger.warning(f"Estado de memoria no válido para user {self.state.user_id}")
+            else:
+                self.logger.warning(f"No se encontró estado de memoria final para user {self.state.user_id}")
 
             # Procesar métricas si están disponibles
             if token_metrics_result and ai_response_obj:
@@ -300,7 +308,7 @@ class Graph():
                 
                 metrics_obj = TokenMetrics(
                     project_id=self.state.project_id,
-                    user_id=self.user_id,
+                    user_id=self.state.user_id,
                     conversation_id=conversation_id,
                     message_id="message_id",
                     timestamp=initial_time,
