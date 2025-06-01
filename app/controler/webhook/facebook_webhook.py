@@ -80,8 +80,8 @@ async def process_webhook_facebook(request: Request, background_tasks: Backgroun
         
         # Procesar mensajes de forma asíncrona
         for message in messages:
-            # Usar asyncio.create_task para procesar el mensaje sin bloquear
-            asyncio.create_task(process_message(message, background_tasks))
+            # Procesar cada mensaje (cambiar create_task por await)
+            await process_message(message, background_tasks)
         
         return response
     except Exception as e:
