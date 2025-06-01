@@ -263,21 +263,33 @@ class Graph():
     async def _process_background_tasks(self, final_state, token_metrics_result, ai_response_obj, model_name, initial_time, conversation_id):
         """Procesa tareas en segundo plano usando BackgroundTasks"""
         try:
+            self.logger.info(f"Iniciando _process_background_tasks para user {self.state.user_id}")
+            
             # Optimizar estado de memoria
+            self.logger.info(f"Obteniendo estado de memoria de checkpointer storage...")
             final_memory_state_dict = self.graph.checkpointer.storage.get(self.state.user_id)
+            self.logger.info(f"Estado de memoria obtenido: {type(final_memory_state_dict)}, keys: {list(final_memory_state_dict.keys()) if isinstance(final_memory_state_dict, dict) else 'N/A'}")
+            
             if final_memory_state_dict:
                 state_to_optimize = final_memory_state_dict.get('', {})
+                self.logger.info(f"Estado a optimizar: {type(state_to_optimize)}, keys: {list(state_to_optimize.keys()) if isinstance(state_to_optimize, dict) else 'N/A'}")
+                
                 if isinstance(state_to_optimize, dict):
                     nested_dict = OrderedDict(state_to_optimize)
+                    original_keys = len(nested_dict)
                     while len(nested_dict) > self.MAX_KEYS:
                         nested_dict.popitem(last=False)
+                    self.logger.info(f"Optimización completada: {original_keys} -> {len(nested_dict)} keys")
+                    
                     final_memory_state_dict[''] = nested_dict
                     chat_state_to_save = ChatState(project_id=self.state.project_id, user_id=self.state.user_id)
                     chat_state_to_save.state = final_memory_state_dict
+                    
+                    self.logger.info(f"Guardando estado de memoria...")
                     await asyncio.to_thread(self.database_state.save_state, chat_state_to_save)
-                    self.logger.info(f"Estado de memoria guardado para user {self.state.user_id}")
+                    self.logger.info(f"Estado de memoria guardado exitosamente para user {self.state.user_id}")
                 else:
-                    self.logger.warning(f"Estado de memoria no válido para user {self.state.user_id}")
+                    self.logger.warning(f"Estado de memoria no válido para user {self.state.user_id}. Tipo: {type(state_to_optimize)}")
             else:
                 self.logger.warning(f"No se encontró estado de memoria final para user {self.state.user_id}")
 
