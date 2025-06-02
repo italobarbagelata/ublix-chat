@@ -48,3 +48,5 @@ beautifulsoup4
 playwright
 redis==5.0.1
 httpx
+dateparser
+holidays
