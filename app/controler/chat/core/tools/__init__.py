@@ -5,6 +5,7 @@ from app.controler.chat.core.tools.api_tool import create_api_tools
 from app.controler.chat.core.tools.retriever_tool import document_retriever
 from app.controler.chat.core.tools.products_fallback_tool import search_products_unified
 from app.controler.chat.core.tools.openai_vector_tool import openai_vector_search, list_openai_vector_stores
+from app.controler.chat.core.tools.chile_holidays_tool import check_chile_holiday_tool, next_chile_holidays_tool
 import logging
 
 # Import calendar tool safely
@@ -41,7 +42,8 @@ def agent_tools(project_id, user_id, name, number_phone_agent, project=None):
         "products_search": lambda *args: [search_products_unified],
         "calendar": lambda *args: [google_calendar_tool] if CALENDAR_TOOL_AVAILABLE else [],
         "openai_vector": lambda *args: [openai_vector_search, list_openai_vector_stores],
-        "retriever": lambda *args: [document_retriever]
+        "retriever": lambda *args: [document_retriever],
+        "chile_holidays": lambda *args: [check_chile_holiday_tool, next_chile_holidays_tool]
     }
     
     # Cargar solo las herramientas habilitadas
