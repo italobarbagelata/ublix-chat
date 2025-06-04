@@ -20,7 +20,11 @@ class ProductStoreRetriever:
         self.table_name = table_name
         
         # Initialize OpenAI and embeddings
-        self.embeddings = OpenAIEmbeddings(model=self.model, chunk_size=25)
+        self.embeddings = OpenAIEmbeddings(
+            model="text-embedding-3-small",
+            dimensions=384,
+            chunk_size=25
+        )
         self.client_openai = OpenAI()
         
         # Initialize Supabase client
@@ -39,7 +43,11 @@ class ProductStoreRetriever:
 
     def _process_embedding(self, query: str):
         """Get metadata of query embedded"""
-        return self.client_openai.embeddings.create(input=[query], model=self.model)
+        return self.client_openai.embeddings.create(
+            input=[query], 
+            model="text-embedding-3-small",
+            dimensions=384
+        )
 
     def retrieve(self, query: str, filters: dict = None) -> tuple[List[dict], List[int]]:
         """Apply vector similarity search and retrieve relevant products.

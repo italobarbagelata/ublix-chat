@@ -81,7 +81,10 @@ def document_retriever(query: str, state: Annotated[dict, InjectedState], filena
 
         # Inicializar embeddings de OpenAI
         logger.info("Inicializando embeddings de OpenAI")
-        embeddings = OpenAIEmbeddings()
+        embeddings = OpenAIEmbeddings(
+            model="text-embedding-3-small",
+            dimensions=384
+        )
 
         # Extraer palabras clave de la consulta
         search_keywords = extract_keywords(query)
@@ -98,7 +101,7 @@ def document_retriever(query: str, state: Annotated[dict, InjectedState], filena
             'match_documents_v20',
             {
                 'query_embedding': query_embedding,
-                'match_count': 20,
+                'match_count': 40,
                 'project_id_filter': project.id,
                 'type_filter': 'document',
                 'category_filter': None,

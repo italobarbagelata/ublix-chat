@@ -20,7 +20,10 @@ logger.setLevel(logging.INFO)
 
 class AgenteProducto:
     def __init__(self):
-        self.embeddings = OpenAIEmbeddings()
+        self.embeddings = OpenAIEmbeddings(
+            model="text-embedding-3-small",
+            dimensions=384
+        )
         self.web_tool = WebScrapingTool()
         self.vector_store = SupabaseVectorStore(
             client=self.web_tool.supabase,
