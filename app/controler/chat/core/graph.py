@@ -1,273 +1,126 @@
 import logging
-from collections import OrderedDict
+import asyncio
+import datetime
+import uuid
 from langgraph.checkpoint.memory import MemorySaver
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 from langgraph.graph import StateGraph
 from langgraph.graph.graph import END, START
-from app.controler.chat.classes.chat_state import ChatState
-from app.controler.chat.core.edge import invoke_tools_summary
-from app.controler.chat.core.nodes import (
-    create_agent,
-    summarize_conversation,
-    tools_node,
-    get_date_range, 
-    TIMEZONE
-)
-from app.controler.chat.core.state import CustomState
-from app.controler.chat.core.utils import decorate_message
-from app.controler.chat.store.persistence import Persist
-from app.controler.chat.store.persistence_state import MemoryStatePersistence
-import uuid
-from app.controler.chat.classes.token_metrics import TokenMetrics
-from app.controler.chat.services.token_metrics_service import TokenMetricsService
-from app.controler.chat.classes.token_counter import TokenCounter
-from app.controler.chat.classes.model_costs import ModelCosts
 from fastapi import BackgroundTasks
 
-import asyncio
-import datetime
-from functools import lru_cache
+from app.controler.chat.classes.chat_state import ChatState
+from app.controler.chat.core.edge import invoke_tools_summary
+from app.controler.chat.core.nodes import create_agent, summarize_conversation, tools_node
+from app.controler.chat.core.state import CustomState
+from app.controler.chat.core.utils import decorate_message
+from app.controler.chat.services.graph_config_service import GraphConfigService
+from app.controler.chat.services.token_calculation_service import TokenCalculationService
+from app.controler.chat.services.memory_optimization_service import MemoryOptimizationService
+from app.controler.chat.services.background_processing_service import BackgroundProcessingService
+from app.controler.chat.services.streaming_service import StreamingService
 
 class Graph():
-    state: ChatState
-    workflow: StateGraph
-    database: Persist
-    MAX_KEYS = 5
-
+    """Grafo simplificado enfocado en orquestación según LangGraph mejores prácticas"""
+    
     def __init__(self, project_id: str, user_id: str, username: str, number_phone_agent: str, source_id: str, source: str):
         self.logger = logging.getLogger(__name__)
-        logging.info("init graph for project_id: %s and user_id: %s", project_id, user_id)
+        self.logger.info("Initializing graph for project_id: %s and user_id: %s", project_id, user_id)
+        
+        # Propiedades básicas
         self.state = ChatState(project_id, user_id)
-        self.workflow = StateGraph(CustomState)
-        self.database = Persist()
-        self.database_state = MemoryStatePersistence()
         self.project_id = project_id
         self.user_id = user_id
         self.username = username
         self.number_phone_agent = number_phone_agent
         self.source_id = source_id
         self.source = source
-        self.token_counter = TokenCounter()
-        self.token_metrics_service = TokenMetricsService()
-        self.model_costs = ModelCosts()
         
-        # Cache para proyecto para evitar consultas repetidas
-        self._project_cache = None
-        self._project_cache_time = None
-        self._cache_ttl = 300  # 5 minutos
+        # Servicios especializados
+        self.config_service = GraphConfigService()
+        self.token_service = TokenCalculationService()
+        self.memory_service = MemoryOptimizationService()
+        self.background_service = BackgroundProcessingService()
+        self.streaming_service = StreamingService()
         
-        memory = self.__set_memory()
-        self.__set_nodes()
-        self.__set_edges()
+        # Configuración del grafo
+        self.workflow = StateGraph(CustomState)
+        self._setup_graph()
+    
+    def _setup_graph(self):
+        """Configura el grafo con nodos, aristas y memoria"""
+        memory = self._setup_memory()
+        self._setup_nodes()
+        self._setup_edges()
         self.graph = self.workflow.compile(checkpointer=memory)
 
-    def __set_nodes(self):
-        """ Define the nodes of the graph and set the entry point"""
-        self.logger.info("init nodes")
+    def _setup_nodes(self):
+        """Define los nodos del grafo"""
+        self.logger.info("Setting up nodes")
+        
+        # Configurar nodos con parámetros específicos
         tools_node_set = tools_node(
             self.state.project_id, 
             self.state.user_id, 
             self.username, 
-            self.number_phone_agent)
-        self.logger.info("init agent")
-        agent = create_agent(self.state.user_id, self.username,
-                             self.number_phone_agent,self.source_id)
-        workflow = self.workflow
-        workflow.add_node("agent", agent)
-        workflow.add_node("tools", tools_node_set)
-        workflow.add_node("summarize_conversation", summarize_conversation)
+            self.number_phone_agent
+        )
+        
+        agent = create_agent(
+            self.state.user_id, 
+            self.username,
+            self.number_phone_agent,
+            self.source_id
+        )
+        
+        # Agregar nodos al workflow
+        self.workflow.add_node("agent", agent)
+        self.workflow.add_node("tools", tools_node_set)
+        self.workflow.add_node("summarize_conversation", summarize_conversation)
 
-    def __set_edges(self):
-        """ Define the edges and conditionals of the graph"""
-        self.logger.info("init edges")
-        workflow = self.workflow
-        workflow.add_edge(START, "agent")
-        workflow.add_conditional_edges("agent", invoke_tools_summary)
-        workflow.add_edge("tools", "agent")
-        workflow.add_edge("summarize_conversation", END)
+    def _setup_edges(self):
+        """Define las aristas y condicionales del grafo"""
+        self.logger.info("Setting up edges")
+        
+        self.workflow.add_edge(START, "agent")
+        self.workflow.add_conditional_edges("agent", invoke_tools_summary)
+        self.workflow.add_edge("tools", "agent")
+        self.workflow.add_edge("summarize_conversation", END)
 
-    def __set_memory(self):
-        """Load the memory of recent chats from the database if exists, with Redis cache."""
-        self.logger.info("init memory")
+    def _setup_memory(self):
+        """Configura la memoria con estado inicial desde la base de datos"""
+        self.logger.info("Setting up memory")
+        
         memory = MemorySaver()
-        state = self.database_state.fetch_state(
-            self.state.project_id, self.state.user_id)
-        if state:
-            if isinstance(state.get("state"), dict):
-                 memory.storage[self.state.user_id] = state["state"]
-                 self.logger.info(f"Loaded state from DB for user {self.state.user_id}")
-            else:
-                 self.logger.warning(f"Formato de estado inválido recuperado para {self.state.user_id}")
+        
+        # Cargar estado inicial usando el servicio de memoria
+        initial_state = self.memory_service.load_initial_state(
+            self.state.project_id, 
+            self.state.user_id
+        )
+        
+        if initial_state:
+            memory.storage.update(initial_state)
+            
         return memory
 
-    async def _get_project_cached(self):
-        """Obtiene el proyecto con cache para evitar consultas repetidas"""
-        now = datetime.datetime.now()
-        
-        # Verificar si tenemos cache válido
-        if (self._project_cache and self._project_cache_time and 
-            (now - self._project_cache_time).total_seconds() < self._cache_ttl):
-            return self._project_cache
-        
-        # Buscar proyecto en hilo separado
-        project = await asyncio.to_thread(self.database.find_project, self.state.project_id)
-        
-        # Actualizar cache
-        self._project_cache = project
-        self._project_cache_time = now
-        
-        return project
 
-    async def _calculate_tokens_async(self, message, project, user_id):
-        """Calcula tokens en segundo plano con paralelización optimizada"""
-        try:
-            # Paralelizar operaciones independientes
-            tasks = []
-            
-            # Tarea 1: Calcular tokens del system prompt y input
-            async def calculate_basic_tokens():
-                system_prompt = project.instructions if project and hasattr(project, 'instructions') else ""
-                system_tokens = self.token_counter.count_system_prompt_tokens(system_prompt)
-                input_tokens = self.token_counter.count_message_tokens(message, 'high')
-                return {"system_tokens": system_tokens, "input_tokens": input_tokens}
-            
-            # Tarea 2: Calcular tokens de información del proyecto
-            async def calculate_project_tokens():
-                project_info_tokens = 0
-                if hasattr(project, 'name') and project.name:
-                    project_info_tokens += self.token_counter.count_tokens(project.name, 'low')
-                if hasattr(project, 'personality') and project.personality:
-                    project_info_tokens += self.token_counter.count_tokens(project.personality, 'low')
-                
-                prompt_memory_tokens = 0
-                if hasattr(project, 'prompt_memory') and project.prompt_memory:
-                    formatted_prompt_memory = f"system: {project.prompt_memory}"
-                    prompt_memory_tokens = self.token_counter.count_tokens(formatted_prompt_memory, 'low')
-                
-                return {"project_info_tokens": project_info_tokens, "prompt_memory_tokens": prompt_memory_tokens}
-            
-            # Tarea 3: Calcular tokens de fecha/hora
-            async def calculate_datetime_tokens():
-                date_time_tokens = 0
-                try:
-                    now_in_timezone = datetime.datetime.now().astimezone(TIMEZONE)
-                    now_str = now_in_timezone.isoformat()
-                    
-                    date_range = get_date_range()
-                    date_range_str = ", ".join(date_range)
-                    date_time_tokens += self.token_counter.count_tokens(now_str, 'low')
-                    date_time_tokens += self.token_counter.count_tokens(date_range_str, 'low')
-                    date_time_tokens += self.token_counter.count_tokens("\nConsidera que las fechas de referencia son: ", 'low')
-                except Exception as e:
-                    self.logger.warning(f"Error counting date/time tokens: {e}")
-                return {"date_time_tokens": date_time_tokens}
-            
-            # Tarea 4: Calcular tokens de contexto y resumen
-            async def calculate_context_tokens():
-                current_checkpoints = self.graph.checkpointer.get({"configurable": {"thread_id": user_id}})
-                context_tokens = 0
-                previous_summary_content = ""
-                previous_summary_tokens = 0
-                
-                if current_checkpoints:
-                    state_values_for_context = current_checkpoints.values if hasattr(current_checkpoints, 'values') else current_checkpoints
-                    messages_from_state = []
-                    try:
-                        if isinstance(state_values_for_context, dict):
-                            latest_checkpoint_data = list(state_values_for_context.get('', {}).values())[-1] if state_values_for_context.get('') else None
-                            if isinstance(latest_checkpoint_data, dict):
-                                messages_from_state = latest_checkpoint_data.get("messages", [])
-                                previous_summary_content = latest_checkpoint_data.get("summary", "")
-                    except Exception as e:
-                        self.logger.warning(f"Error extracting messages from checkpoint: {e}")
-                    
-                    if messages_from_state:
-                        context_tokens = self.token_counter.count_conversation_tokens(messages_from_state)
-                    
-                    if previous_summary_content:
-                        formatted_summary_prompt = f"system: Summary of conversation earlier: {previous_summary_content}"
-                        previous_summary_tokens = self.token_counter.count_tokens(formatted_summary_prompt, 'low')
-                
-                return {"context_tokens": context_tokens, "previous_summary_tokens": previous_summary_tokens}
-            
-            # Ejecutar todas las tareas en paralelo
-            basic_tokens_task = asyncio.create_task(calculate_basic_tokens())
-            project_tokens_task = asyncio.create_task(calculate_project_tokens())
-            datetime_tokens_task = asyncio.create_task(calculate_datetime_tokens())
-            context_tokens_task = asyncio.create_task(calculate_context_tokens())
-            
-            # Esperar resultados en paralelo
-            basic_result, project_result, datetime_result, context_result = await asyncio.gather(
-                basic_tokens_task,
-                project_tokens_task, 
-                datetime_tokens_task,
-                context_tokens_task,
-                return_exceptions=True
-            )
-            
-            # Combinar resultados con manejo de errores
-            combined_result = {}
-            
-            if isinstance(basic_result, dict):
-                combined_result.update(basic_result)
-            else:
-                self.logger.error(f"Error in basic tokens calculation: {basic_result}")
-                combined_result.update({"system_tokens": 0, "input_tokens": 0})
-            
-            if isinstance(project_result, dict):
-                combined_result.update(project_result)
-            else:
-                self.logger.error(f"Error in project tokens calculation: {project_result}")
-                combined_result.update({"project_info_tokens": 0, "prompt_memory_tokens": 0})
-            
-            if isinstance(datetime_result, dict):
-                combined_result.update(datetime_result)
-            else:
-                self.logger.error(f"Error in datetime tokens calculation: {datetime_result}")
-                combined_result.update({"date_time_tokens": 0})
-            
-            if isinstance(context_result, dict):
-                combined_result.update(context_result)
-            else:
-                self.logger.error(f"Error in context tokens calculation: {context_result}")
-                combined_result.update({"context_tokens": 0, "previous_summary_tokens": 0})
-            
-            return combined_result
-            
-        except Exception as e:
-            self.logger.error(f"Error calculating tokens: {e}", exc_info=True)
-            return None
 
-    async def execute(self, message, background_tasks: BackgroundTasks):
-        """Execute the graph with the given message and return response - Optimizado para velocidad"""
+    async def execute(self, message: str, background_tasks: BackgroundTasks):
+        """Ejecuta el grafo con el mensaje dado - Versión simplificada según LangGraph"""
         try:
             initial_time = datetime.datetime.now()
             conversation_id = str(uuid.uuid4())
             user_id = self.state.user_id
             
-            # Obtener proyecto con cache en paralelo
-            project_task = asyncio.create_task(self._get_project_cached())
+            # Obtener proyecto y configuración usando servicio
+            project = await self.config_service.get_project_cached(self.state.project_id)
+            model_name = self.config_service.get_model_name(project)
             
-            # Determinar modelo con fallback optimizado
-            model_name = "gpt-4.1-mini"  # Default fallback
-            
-            # Preparar mensaje mientras obtenemos el proyecto
+            # Preparar mensaje
             human_message = HumanMessage(content=message)
             decorate_message(human_message, initial_time, conversation_id)
             
-            # Esperar proyecto y actualizar modelo si es necesario
-            project = await project_task
-            if project and hasattr(project, 'model') and project.model and isinstance(project.model, str):
-                if project.model in self.model_costs.get_supported_models():
-                    model_name = project.model
-                else:
-                    self.logger.warning(f"Modelo '{project.model}' del proyecto no soportado, usando fallback '{model_name}'.")
-            
-            # Ejecutar el cálculo de tokens y la invocación del grafo en paralelo (ya optimizado)
-            token_calculation_task = asyncio.create_task(
-                self._calculate_tokens_async(message, project, user_id)
-            )
-            
+            # Ejecutar el grafo y calcular tokens en paralelo
             graph_invoke_task = asyncio.create_task(
                 asyncio.to_thread(
                     self.graph.invoke,
@@ -285,159 +138,202 @@ class Graph():
                 )
             )
             
-            # Esperar ambas tareas en paralelo
+            token_calculation_task = asyncio.create_task(
+                self.token_service.calculate_tokens_async(message, project, user_id, self.graph)
+            )
+            
+            # Esperar resultados en paralelo
             final_state, token_metrics_result = await asyncio.gather(
                 graph_invoke_task,
                 token_calculation_task
             )
             
-            # Procesar la respuesta inmediatamente (ya optimizado)
-            conversation_messages = final_state.get("messages", [])
-            ai_response_obj = None
-            if conversation_messages:
-                for msg in reversed(conversation_messages):
-                    if isinstance(msg, AIMessage):
-                        ai_response_obj = msg
-                        break
+            # Extraer respuesta AI
+            ai_response_obj = self._extract_ai_response(final_state)
+            response_content = self._get_response_content(ai_response_obj)
             
-            if not ai_response_obj and conversation_messages and isinstance(conversation_messages[-1], SystemMessage):
-                ai_response_obj = conversation_messages[-1]
-
-            response_content = "[Error: No se pudo generar respuesta AI]" if not ai_response_obj else (
-                ai_response_obj.content if hasattr(ai_response_obj, 'content') else str(ai_response_obj)
-            )
-            
-            response = {
-                'response': response_content,
-                "message_id": "message_id", 
-                "user_id": user_id
-            }
-
-            # Agregar tareas en segundo plano usando BackgroundTasks (ya optimizado)
-            background_tasks.add_task(self._process_background_tasks, 
+            # Procesar tareas en segundo plano
+            background_tasks.add_task(
+                self.background_service.process_all_background_tasks,
                 final_state=final_state,
                 token_metrics_result=token_metrics_result,
                 ai_response_obj=ai_response_obj,
                 model_name=model_name,
                 initial_time=initial_time,
-                conversation_id=conversation_id
+                conversation_id=conversation_id,
+                project_id=self.state.project_id,
+                user_id=user_id,
+                source_id=self.source_id,
+                graph=self.graph
             )
 
-            return response
+            return {
+                'response': response_content,
+                "message_id": "message_id", 
+                "user_id": user_id
+            }
             
         except Exception as e:
             self.logger.error(f"Error during execution: {e}", exc_info=True)
             return {
-                'response': "[Error: No se pudo ejecutar la gráfica]",
+                'response': "[Error: No se pudo ejecutar el grafo]",
                 "message_id": "message_id",
                 "user_id": self.state.user_id
             }
-
-    async def _process_background_tasks(self, final_state, token_metrics_result, ai_response_obj, model_name, initial_time, conversation_id):
-        """Procesa tareas en segundo plano usando BackgroundTasks - Paralelización optimizada"""
+    
+    def _extract_ai_response(self, final_state):
+        """Extrae la respuesta AI del estado final"""
+        conversation_messages = final_state.get("messages", [])
+        
+        if conversation_messages:
+            for msg in reversed(conversation_messages):
+                if isinstance(msg, AIMessage):
+                    return msg
+            
+            # Fallback a SystemMessage si no hay AIMessage
+            if isinstance(conversation_messages[-1], SystemMessage):
+                return conversation_messages[-1]
+        
+        return None
+    
+    def _get_response_content(self, ai_response_obj):
+        """Obtiene el contenido de la respuesta AI"""
+        if not ai_response_obj:
+            return "[Error: No se pudo generar respuesta AI]"
+        
+        return (ai_response_obj.content 
+                if hasattr(ai_response_obj, 'content') 
+                else str(ai_response_obj))
+    
+    async def execute_stream(self, message: str, background_tasks: BackgroundTasks):
+        """
+        🆕 NUEVO: Ejecuta el grafo con streaming para respuestas en tiempo real
+        ✅ Mantiene toda la funcionalidad actual + streaming
+        """
         try:
-            # Paralelizar operaciones independientes en segundo plano
-            async def optimize_memory_state():
-                """Optimizar y guardar estado de memoria"""
-                try:
-                    final_memory_state_dict = self.graph.checkpointer.storage.get(self.state.user_id)
-                    
-                    if final_memory_state_dict:
-                        state_to_optimize = final_memory_state_dict.get('', {})
-                        
-                        if isinstance(state_to_optimize, dict):
-                            nested_dict = OrderedDict(state_to_optimize)
-                            original_keys = len(nested_dict)
-                            while len(nested_dict) > self.MAX_KEYS:
-                                nested_dict.popitem(last=False)
-                            
-                            final_memory_state_dict[''] = nested_dict
-                            chat_state_to_save = ChatState(project_id=self.state.project_id, user_id=self.state.user_id)
-                            chat_state_to_save.state = final_memory_state_dict
-                            
-                            await asyncio.to_thread(self.database_state.save_state, chat_state_to_save)
-                            if original_keys > self.MAX_KEYS:
-                                self.logger.info(f"Estado de memoria optimizado: {original_keys} -> {len(nested_dict)} keys")
-                        else:
-                            self.logger.warning(f"Estado de memoria no válido para user {self.state.user_id}")
-                    else:
-                        self.logger.warning(f"No se encontró estado de memoria final para user {self.state.user_id}")
-                except Exception as e:
-                    self.logger.error(f"Error optimizing memory state: {e}", exc_info=True)
+            initial_time = datetime.datetime.now()
+            conversation_id = str(uuid.uuid4())
+            user_id = self.state.user_id
             
-            async def process_metrics():
-                """Procesar y guardar métricas"""
-                try:
-                    if token_metrics_result and ai_response_obj:
-                        output_tokens_count = self.token_counter.count_message_tokens(
-                            ai_response_obj.content if hasattr(ai_response_obj, 'content') else str(ai_response_obj),
-                            model_name
-                        )
-                        
-                        total_input_tokens_approx = sum([
-                            token_metrics_result.get("system_tokens", 0),
-                            token_metrics_result.get("input_tokens", 0),
-                            token_metrics_result.get("context_tokens", 0),
-                            token_metrics_result.get("prompt_memory_tokens", 0),
-                            token_metrics_result.get("project_info_tokens", 0),
-                            token_metrics_result.get("previous_summary_tokens", 0),
-                            token_metrics_result.get("date_time_tokens", 0)
-                        ])
-                        
-                        total_output_tokens_approx = output_tokens_count
-                        
-                        total_cost_val, cost_breakdown_val = self.model_costs.calculate_cost(
-                            input_tokens=total_input_tokens_approx,
-                            output_tokens=total_output_tokens_approx,
-                            model_name=model_name
-                        )
-                        
-                        metrics_obj = TokenMetrics(
-                            project_id=self.state.project_id,
-                            user_id=self.state.user_id,
-                            conversation_id=conversation_id,
-                            message_id="message_id",
-                            timestamp=initial_time,
-                            tokens={
-                                "system_prompt": token_metrics_result.get("system_tokens", 0),
-                                "input": token_metrics_result.get("input_tokens", 0),
-                                "output": output_tokens_count,
-                                "context": token_metrics_result.get("context_tokens", 0),
-                                "tools_input": 0,
-                                "tools_output": 0,
-                                "tools_total": 0,
-                                "prompt_memory": token_metrics_result.get("prompt_memory_tokens", 0),
-                                "new_summary": 0,
-                                "project_info": token_metrics_result.get("project_info_tokens", 0),
-                                "previous_summary": token_metrics_result.get("previous_summary_tokens", 0),
-                                "date_time": token_metrics_result.get("date_time_tokens", 0),
-                                "total_input_approx": total_input_tokens_approx,
-                                "total_output_approx": total_output_tokens_approx,
-                                "total": total_input_tokens_approx + total_output_tokens_approx
-                            },
-                            cost=total_cost_val,
-                            source=self.source_id,
-                            cost_breakdown=cost_breakdown_val
-                        )
-                        
-                        await asyncio.to_thread(self.token_metrics_service.save_metrics, metrics_obj)
-                except Exception as e:
-                    self.logger.error(f"Error processing metrics: {e}", exc_info=True)
+            # Obtener proyecto y configuración (igual que execute normal)
+            project = await self.config_service.get_project_cached(self.state.project_id)
+            model_name = self.config_service.get_model_name(project)
             
-            async def persist_conversation():
-                """Persistir conversación"""
-                try:
-                    await asyncio.to_thread(self.database.persist_conversation, final_state)
-                except Exception as e:
-                    self.logger.error(f"Error persisting conversation: {e}", exc_info=True)
+            # Preparar mensaje (igual que execute normal)
+            human_message = HumanMessage(content=message)
+            decorate_message(human_message, initial_time, conversation_id)
             
-            # Ejecutar todas las tareas en paralelo
-            await asyncio.gather(
-                optimize_memory_state(),
-                process_metrics(),
-                persist_conversation(),
-                return_exceptions=True
+            # Estado inicial para el streaming
+            initial_state = {
+                "messages": [human_message],
+                "user_id": user_id,
+                "project": project,
+                "exec_init": initial_time,
+                "conversation_id": conversation_id,
+                "username": self.username,
+                "source_id": self.source_id,
+                "source": self.source
+            }
+            
+            config = {"configurable": {"thread_id": user_id}}
+            
+            # Iniciar cálculo de tokens en paralelo (no bloqueante)
+            token_calculation_task = asyncio.create_task(
+                self.token_service.calculate_tokens_async(message, project, user_id, self.graph)
             )
             
+            # Variables para acumular respuesta completa
+            full_response_content = ""
+            final_state = None
+            ai_response_obj = None
+            
+            # 🎯 STREAMING: Usar el servicio de streaming híbrido (real + simulado)
+            async for chunk in self.streaming_service.stream_graph_response_hybrid(
+                self.graph, initial_state, config
+            ):
+                
+                # Procesar chunks de contenido
+                if chunk["type"] == "content_chunk":
+                    full_response_content += chunk["content"]
+                    
+                    # Enviar chunk inmediatamente
+                    yield {
+                        "type": "content_chunk",
+                        "content": chunk["content"],
+                        "conversation_id": conversation_id,
+                        "user_id": user_id,
+                        "is_complete": False
+                    }
+                
+                # Procesar actualizaciones de estado
+                elif chunk["type"] == "status_update":
+                    yield {
+                        "type": "status_update",
+                        "status": chunk["status"],
+                        "node": chunk["node"],
+                        "conversation_id": conversation_id,
+                        "user_id": user_id,
+                        "is_complete": False
+                    }
+                
+                # Procesar finalización
+                elif chunk["type"] == "completion":
+                    # Obtener estado final del grafo
+                    final_state = await asyncio.to_thread(
+                        self.graph.get_state,
+                        config
+                    )
+                    
+                    # Extraer respuesta AI para tareas en segundo plano
+                    ai_response_obj = self._extract_ai_response(final_state.values)
+                    
+                    yield {
+                        "type": "completion",
+                        "response": full_response_content or self._get_response_content(ai_response_obj),
+                        "conversation_id": conversation_id,
+                        "user_id": user_id,
+                        "is_complete": True
+                    }
+                
+                # Procesar errores
+                elif chunk["type"] == "error":
+                    yield {
+                        "type": "error",
+                        "error": chunk["error"],
+                        "conversation_id": conversation_id,
+                        "user_id": user_id,
+                        "is_complete": True
+                    }
+                    return
+            
+            # Esperar y procesar tareas en segundo plano (igual que execute normal)
+            try:
+                token_metrics_result = await token_calculation_task
+                
+                if final_state and ai_response_obj:
+                    background_tasks.add_task(
+                        self.background_service.process_all_background_tasks,
+                        final_state=final_state.values,
+                        token_metrics_result=token_metrics_result,
+                        ai_response_obj=ai_response_obj,
+                        model_name=model_name,
+                        initial_time=initial_time,
+                        conversation_id=conversation_id,
+                        project_id=self.state.project_id,
+                        user_id=user_id,
+                        source_id=self.source_id,
+                        graph=self.graph
+                    )
+            except Exception as bg_error:
+                self.logger.warning(f"Background task error in streaming: {bg_error}")
+            
         except Exception as e:
-            self.logger.error(f"Error en tareas en segundo plano: {e}", exc_info=True)
+            self.logger.error(f"Error during streaming execution: {e}", exc_info=True)
+            yield {
+                "type": "error",
+                "error": "[Error: No se pudo ejecutar el grafo en streaming]",
+                "conversation_id": str(uuid.uuid4()),
+                "user_id": self.state.user_id,
+                "is_complete": True
+            }
+
