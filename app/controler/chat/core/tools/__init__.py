@@ -6,6 +6,7 @@ from app.controler.chat.core.tools.retriever_tool import document_retriever
 from app.controler.chat.core.tools.products_fallback_tool import search_products_unified
 from app.controler.chat.core.tools.openai_vector_tool import openai_vector_search
 from app.controler.chat.core.tools.chile_holidays_tool import check_chile_holiday_tool, next_chile_holidays_tool
+from app.controler.chat.core.tools.datetime_tool import current_datetime_tool, week_info_tool
 from app.controler.chat.core.tools.simple_vector_search import buscar_en_vector_openai
 import logging
 
@@ -45,6 +46,7 @@ def agent_tools(project_id, user_id, name, number_phone_agent, project=None):
         "openai_vector": lambda *args: [openai_vector_search],
         "retriever": lambda *args: [document_retriever],
         "chile_holidays": lambda *args: [check_chile_holiday_tool, next_chile_holidays_tool],
+        "datetime": lambda *args: [current_datetime_tool, week_info_tool],
         "openai_product_search": lambda *args: [buscar_en_vector_openai]
     }
     
