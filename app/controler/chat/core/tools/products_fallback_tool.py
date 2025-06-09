@@ -70,6 +70,7 @@ def search_products_unified(
             titulo = producto.get('title', 'Sin título')
             precio = producto.get('price', 0)
             moneda = producto.get('currency', 'CLP')
+            stock = producto.get('stock', 0)
             similarity = producto.get('similarity', 0)
             logger.info(f"  {i}. {titulo} - ${precio:,.0f} {moneda} - Similarity: {similarity:.3f}")
         
@@ -81,6 +82,7 @@ def search_products_unified(
             description = producto.get('description', 'Sin descripción')
             precio = producto.get('price', 0)
             moneda = producto.get('currency', 'CLP')
+            stock = producto.get('stock', 0)
             source_url = producto.get('source_url', 'Sin URL')
             images = producto.get('images', [])
             
@@ -89,6 +91,10 @@ def search_products_unified(
                 respuesta += f" - ${precio:,.0f} {moneda}"
             respuesta += f" - {description}"
             respuesta += f" - {source_url}"
+            if stock > 0:
+                respuesta += f" - Stock disponible: {stock} unidades"
+            elif stock == 0:
+                respuesta += f" - ⚠️ SIN STOCK"
             if images:
                 respuesta += f" - Imágenes: {len(images)}"
             respuesta += "\n"

@@ -1,6 +1,7 @@
 import os
 import logging
 from datetime import datetime, timedelta
+import pytz
 from typing_extensions import Annotated
 from langchain.tools import tool
 from langgraph.prebuilt import InjectedState
@@ -12,6 +13,55 @@ from app.resources.constants import CALENDAR_INTEGRATIONS_TABLE
 
 logger = logging.getLogger(__name__)
 
+# Zona horaria de Chile
+CHILE_TZ = pytz.timezone('America/Santiago')
+
+def normalize_to_chile_timezone(datetime_str):
+    """
+    Normaliza una fecha/hora a la zona horaria de Chile
+    
+    Args:
+        datetime_str: String de fecha/hora en formato ISO
+    
+    Returns:
+        String de fecha/hora normalizado a zona horaria de Chile
+    """
+    try:
+        logger.info(f"Normalizing timezone for: {datetime_str}")
+        
+        # Si ya tiene zona horaria
+        if datetime_str.endswith('Z'):
+            # UTC -> Chile
+            dt = datetime.fromisoformat(datetime_str.replace('Z', '+00:00'))
+            dt_utc = pytz.UTC.localize(dt.replace(tzinfo=None))
+            dt_chile = dt_utc.astimezone(CHILE_TZ)
+        elif '+' in datetime_str[-6:] or '-' in datetime_str[-6:]:
+            # Ya tiene zona horaria -> Chile
+            dt = datetime.fromisoformat(datetime_str)
+            dt_chile = dt.astimezone(CHILE_TZ)
+        else:
+            # Sin zona horaria -> asumir que es hora de Chile
+            dt_naive = datetime.fromisoformat(datetime_str)
+            dt_chile = CHILE_TZ.localize(dt_naive)
+        
+        result = dt_chile.isoformat()
+        logger.info(f"Normalized result: {result}")
+        
+        # Verificar que el resultado no tenga formato inválido (zona horaria + Z)
+        if result.endswith('Z') and ('+' in result[:-1] or '-' in result[-10:-1]):
+            logger.error(f"Invalid format detected: {result}")
+            # Remover la Z si ya tiene zona horaria
+            result = result[:-1]
+            logger.info(f"Fixed format: {result}")
+        
+        return result
+    except Exception as e:
+        logger.error(f"Error normalizing timezone for {datetime_str}: {e}")
+        # Si falla, devolver original con zona horaria de Chile
+        fallback = datetime_str + '-03:00' if 'T' in datetime_str and not any(x in datetime_str for x in ['Z', '+', '-03:00', '-04:00']) else datetime_str
+        logger.info(f"Fallback result: {fallback}")
+        return fallback
+
 @tool(parse_docstring=False)
 def google_calendar_tool(query: str, state: Annotated[dict, InjectedState]) -> str:
     """This tool interacts with Google Calendar to manage events and schedules.
@@ -19,14 +69,16 @@ def google_calendar_tool(query: str, state: Annotated[dict, InjectedState]) -> s
     Args:
         query: A structured query with format: 
                [ACTION]|[PARAMETERS]
-               where ACTION can be: list_events, search_events, create_event, get_event, update_event, or delete_event
+               where ACTION can be: list_events, search_events, create_event, get_event, update_event, delete_event, or check_availability
                and PARAMETERS depend on the action:
                - list_events|days=7 (lists events for next 7 days)
                - search_events|title=Meeting|date=2023-06-15 (searches for events with matching title and/or date)
-               - create_event|title=Meeting with Client|start=2023-06-15T15:00:00|end=2023-06-15T16:00:00|description=Discuss project status
+               - create_event|title=Meeting with Client|start=2023-06-15T15:00:00|end=2023-06-15T16:00:00|description=Discuss project status|attendees=user1@email.com,user2@email.com|force_create=true
+               Note: All times are automatically converted to Chile timezone (America/Santiago)
                - get_event|event_id=abc123
                - update_event|event_id=abc123|title=New Title|description=Updated description
                - delete_event|event_id=abc123
+               - check_availability|start=2023-06-15T16:00:00|end=2023-06-15T17:00:00
         state: Injected state containing project configuration
     
     Returns:
@@ -71,8 +123,10 @@ def google_calendar_tool(query: str, state: Annotated[dict, InjectedState]) -> s
             return update_event(service, parts[1:] if len(parts) > 1 else [])
         elif action == 'delete_event':
             return delete_event(service, parts[1:] if len(parts) > 1 else [])
+        elif action == 'check_availability':
+            return check_availability(service, parts[1:] if len(parts) > 1 else [])
         else:
-            return f"Unknown action: {action}. Supported actions are list_events, search_events, create_event, get_event, update_event, and delete_event."
+            return f"Unknown action: {action}. Supported actions are list_events, search_events, create_event, get_event, update_event, delete_event, and check_availability."
             
     except Exception as e:
         logger.error(f"Error in Google Calendar tool: {str(e)}")
@@ -238,20 +292,113 @@ def search_events(service, params):
     except HttpError as error:
         return f"Error searching events: {error}"
 
-def create_event(service, params):
-    """Create a new event on the calendar"""
+def check_time_conflicts(service, start_time, end_time):
+    """
+    Verifica si hay eventos existentes que se solapan con el horario especificado
+    
+    Args:
+        service: Google Calendar API service
+        start_time: Hora de inicio del nuevo evento (formato ISO)
+        end_time: Hora de fin del nuevo evento (formato ISO)
+    
+    Returns:
+        Lista de eventos que se solapan con el horario especificado
+    """
     try:
-        # Parse parameters
+        # Normalizar fechas a zona horaria de Chile para comparaciones consistentes
+        start_time_normalized = normalize_to_chile_timezone(start_time)
+        end_time_normalized = normalize_to_chile_timezone(end_time)
+        
+        # Convertir strings a datetime para comparaciones
+        new_start = datetime.fromisoformat(start_time_normalized)
+        new_end = datetime.fromisoformat(end_time_normalized)
+        
+        # Buscar eventos en un rango más amplio (día completo) para verificar solapamientos
+        day_start = new_start.replace(hour=0, minute=0, second=0, microsecond=0)
+        day_end = new_end.replace(hour=23, minute=59, second=59, microsecond=999999)
+        
+        # Asegurar que las fechas tengan formato correcto para Google Calendar API
+        day_start_iso = day_start.isoformat()
+        day_end_iso = day_end.isoformat()
+        
+        # Google Calendar API requiere fechas con zona horaria o UTC (con Z)
+        # Pero NUNCA ambos: -03:00Z es inválido
+        # Las fechas ya vienen de normalize_to_chile_timezone con zona horaria correcta
+        
+        logger.info(f"Checking conflicts for: {start_time} to {end_time}")
+        logger.info(f"Normalized to: {start_time_normalized} to {end_time_normalized}")
+        logger.info(f"Searching in range: {day_start_iso} to {day_end_iso}")
+        logger.info(f"Date formats valid: start={not day_start_iso.endswith('Z') or '+' not in day_start_iso}, end={not day_end_iso.endswith('Z') or '+' not in day_end_iso}")
+        
+        events_result = service.events().list(
+            calendarId='primary',
+            timeMin=day_start_iso,
+            timeMax=day_end_iso,
+            singleEvents=True,
+            orderBy='startTime'
+        ).execute()
+        
+        events = events_result.get('items', [])
+        logger.info(f"Found {len(events)} events in the day")
+        
+        conflicts = []
+        for event in events:
+            event_start_str = event['start'].get('dateTime', event['start'].get('date'))
+            event_end_str = event['end'].get('dateTime', event['end'].get('date'))
+            
+            # Convertir a datetime para comparar
+            if 'T' in event_start_str:  # Es datetime
+                event_start = datetime.fromisoformat(event_start_str.replace('Z', '+00:00'))
+                event_end = datetime.fromisoformat(event_end_str.replace('Z', '+00:00'))
+            else:  # Es fecha completa (all-day event)
+                continue  # Saltamos eventos de día completo
+            
+            # Verificar si hay solapamiento
+            # Solapamiento ocurre si: (nuevo_inicio < evento_fin) AND (nuevo_fin > evento_inicio)
+            if new_start < event_end and new_end > event_start:
+                conflicts.append({
+                    'summary': event.get('summary', 'Evento sin título'),
+                    'start': event_start_str,
+                    'end': event_end_str,
+                    'id': event.get('id')
+                })
+                logger.info(f"Conflict found: {event.get('summary')} from {event_start_str} to {event_end_str}")
+        
+        logger.info(f"Total conflicts found: {len(conflicts)}")
+        return conflicts
+        
+    except HttpError as error:
+        logger.error(f"Error checking time conflicts: {error}")
+        return []
+    except Exception as e:
+        logger.error(f"Unexpected error in check_time_conflicts: {e}")
+        return []
+
+def create_event(service, params):
+    """Create a new event on the calendar with conflict checking and attendee support"""
+    try:
+        # Parse parameters - usar zona horaria de Chile por defecto
+        now_chile = datetime.now(CHILE_TZ)
+        default_start = now_chile + timedelta(hours=1)
+        default_end = now_chile + timedelta(hours=2)
+        
         event_data = {
             'summary': 'New Event',
             'description': '',
             'start': {
-                'dateTime': (datetime.utcnow() + timedelta(hours=1)).isoformat() + 'Z',
+                'dateTime': default_start.isoformat(),
             },
             'end': {
-                'dateTime': (datetime.utcnow() + timedelta(hours=2)).isoformat() + 'Z',
-            }
+                'dateTime': default_end.isoformat(),
+            },
+            'attendees': []
         }
+        
+        attendee_emails = []
+        force_create = False  # Para forzar creación a pesar de conflictos
+        
+        # Debug: Log all parameters received
+        logger.info(f"Received parameters: {params}")
         
         for param in params:
             if '=' in param:
@@ -259,19 +406,67 @@ def create_event(service, params):
                 key = key.strip().lower()
                 value = value.strip()
                 
+                logger.info(f"Processing parameter: {key} = {value}")
+                
                 if key == 'title' or key == 'summary':
                     event_data['summary'] = value
                 elif key == 'description':
                     event_data['description'] = value
                 elif key == 'start':
-                    event_data['start']['dateTime'] = value
+                    event_data['start']['dateTime'] = normalize_to_chile_timezone(value)
                 elif key == 'end':
-                    event_data['end']['dateTime'] = value
+                    event_data['end']['dateTime'] = normalize_to_chile_timezone(value)
+                elif key == 'attendees' or key == 'guests' or key == 'emails':
+                    # Soporte para múltiples emails separados por coma
+                    attendee_emails = [email.strip() for email in value.split(',')]
+                elif key == 'force_create' or key == 'force':
+                    force_create = value.lower() in ['true', '1', 'yes', 'sí', 'si']
+                    logger.info(f"force_create parameter found: {key} = {value} -> {force_create}")
         
-        # Create the event
+        # Debug final state
+        logger.info(f"Final force_create value: {force_create}")
+        
+        # Agregar attendees al evento
+        for email in attendee_emails:
+            if email:  # Verificar que no esté vacío
+                event_data['attendees'].append({'email': email})
+        
+        # Si no hay attendees, remover la clave para evitar errores
+        if not event_data['attendees']:
+            del event_data['attendees']
+        
+        logger.info("*********")
+        logger.info(f"Event data: {event_data}")
+        
+        # Verificar conflictos de horario (SIEMPRE se verifica)
+        conflicts = check_time_conflicts(service, event_data['start']['dateTime'], event_data['end']['dateTime'])
+        logger.info(f"Conflicts found: {len(conflicts)}, force_create: {force_create}")
+        
+        if conflicts and not force_create:
+            conflict_list = "\n".join([f"- {conflict['summary']} ({conflict['start']} - {conflict['end']})" for conflict in conflicts])
+            logger.info("BLOCKING event creation due to conflicts")
+            return f"⚠️ CONFLICTO DETECTADO: Ya tienes eventos en este horario:\n{conflict_list}\n\n¿Deseas crear el evento de todas formas? Usa 'force_create=true' para crear el evento a pesar de los conflictos."
+        
+        if conflicts and force_create:
+            logger.info("FORCING event creation despite conflicts")
+        
+        # Crear el evento
         event = service.events().insert(calendarId='primary', body=event_data).execute()
         
-        return f"Event created: {event.get('htmlLink')}"
+        # Preparar respuesta con información adicional
+        response = f"✅ Evento creado exitosamente: {event.get('htmlLink')}\n"
+        response += f"📅 Título: {event_data['summary']}\n"
+        response += f"🕐 Inicio: {event_data['start']['dateTime']}\n"
+        response += f"🕑 Fin: {event_data['end']['dateTime']}\n"
+        
+        if attendee_emails:
+            response += f"👥 Invitados: {', '.join(attendee_emails)}\n"
+        
+        # Si había conflictos pero se forzó la creación
+        if conflicts and force_create:
+            response += f"⚠️ Nota: Se creó el evento a pesar de tener {len(conflicts)} conflicto(s) de horario\n"
+        
+        return response
         
     except HttpError as error:
         return f"Error creating event: {error}"
@@ -379,4 +574,45 @@ def delete_event(service, params):
     except HttpError as error:
         if hasattr(error, 'resp') and error.resp.status == 404:
             return f"Error: Event with ID {event_id} was not found. The event might not exist or may have been already deleted. Use search_events|title=Event Title to find the correct event ID."
-        return f"Error deleting event: {error}" 
+        return f"Error deleting event: {error}"
+
+def check_availability(service, params):
+    """Check if a specific time slot is available"""
+    try:
+        # Parse parameters
+        start_time = None
+        end_time = None
+        
+        for param in params:
+            if '=' in param:
+                key, value = param.split('=', 1)
+                key = key.strip().lower()
+                value = value.strip()
+                
+                if key == 'start':
+                    start_time = normalize_to_chile_timezone(value)
+                elif key == 'end':
+                    end_time = normalize_to_chile_timezone(value)
+        
+        if not start_time:
+            return "Error: 'start' parameter is required. Format: check_availability|start=2024-01-15T16:00:00|end=2024-01-15T17:00:00"
+        
+        # Si no se proporciona hora de fin, asumir 1 hora
+        if not end_time:
+            start_dt = datetime.fromisoformat(start_time)
+            end_dt = start_dt + timedelta(hours=1)
+            end_time = end_dt.isoformat()
+        
+        # Verificar conflictos
+        conflicts = check_time_conflicts(service, start_time, end_time)
+        
+        if not conflicts:
+            return f"✅ DISPONIBLE: El horario del {start_time} al {end_time} está libre."
+        else:
+            conflict_list = "\n".join([f"- {conflict['summary']} ({conflict['start']} - {conflict['end']})" for conflict in conflicts])
+            return f"❌ NO DISPONIBLE: Hay {len(conflicts)} evento(s) en conflicto:\n{conflict_list}"
+        
+    except HttpError as error:
+        return f"Error checking availability: {error}"
+    except Exception as e:
+        return f"Error processing availability check: {e}" 
