@@ -1,10 +1,20 @@
-fastapi
+
+fastapi==0.115.0
+uvicorn==0.29.0
+
+# LangChain
 langchain==0.3.1
-langchain-core==0.3.10
+langchain-core==0.3.51
 langchain-openai==0.2.1
-langgraph==0.2.28
-langsmith==0.1.135
 langchain-community==0.3.1
+
+
+# LangGraph
+langgraph==0.2.28
+
+
+# otros
+pydantic==2.7.4
 tiktoken
 pymongo
 requests
@@ -41,9 +51,8 @@ psycopg2-binary
 python-multipart==0.0.6
 pytest==7.2.1
 pytz==2023.3
-pyyaml==6.0
+pyyaml==6.0.2
 requests==2.28.2
-pydantic==2.7.4
 beautifulsoup4
 playwright
 redis==5.0.1

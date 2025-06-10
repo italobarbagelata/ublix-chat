@@ -28,6 +28,9 @@ def agent_tools(project_id, user_id, name, number_phone_agent, project=None):
     """ This function returns the tools that the agent will use to interact with the user"""
     tools = []
     
+    # Agregar logging para debugear el project_id
+    logging.info(f"agent_tools llamado con project_id: {project_id}, user_id: {user_id}")
+    
     # Si no se proporciona el proyecto, cargarlo
     if project is None:
         from app.controler.chat.store.persistence import Persist
@@ -56,7 +59,11 @@ def agent_tools(project_id, user_id, name, number_phone_agent, project=None):
             try:
                 tool_func = tool_mapping[tool_name]
                 if tool_name == "api":
-                    tools.extend([tool(api_tool) for api_tool in tool_func(project_id)])
+                    logging.info(f"Cargando herramientas API para project_id: {project_id}")
+                    api_tools = tool_func(project_id)
+                    logging.info(f"API tools devueltas: {type(api_tools)}, cantidad: {len(api_tools) if api_tools else 0}")
+                    if api_tools:
+                        tools.extend([tool(api_tool) for api_tool in api_tools])
                 else:
                     tools.extend(tool_func(project_id, user_id, name, number_phone_agent))
             except Exception as e:

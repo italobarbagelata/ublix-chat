@@ -28,7 +28,22 @@ def create_api_tools(project_id):
         data = list(persist.find(APIS_COLLECTION, {"project_id": project_id}))
         logger.info(f"[API_TOOLS] Se recuperaron {len(data)} APIs del método de persistencia anterior")
     
-    api_functions = [create_api_function(api_setting) for api_setting in data]
+    # Debug: verificar estructura de datos
+    logger.info(f"[API_TOOLS] Estructura de data: {type(data)}")
+    logger.info(f"[API_TOOLS] Primer elemento (si existe): {data[0] if data else 'Lista vacía'}")
+    
+    api_functions = []
+    for i, api_setting in enumerate(data):
+        try:
+            logger.info(f"[API_TOOLS] Procesando API {i+1}: {type(api_setting)}")
+            api_function = create_api_function(api_setting)
+            api_functions.append(api_function)
+            logger.info(f"[API_TOOLS] API {i+1} procesada exitosamente")
+        except Exception as e:
+            logger.error(f"[API_TOOLS] Error procesando API {i+1}: {str(e)}")
+            logger.error(f"[API_TOOLS] Datos de la API problemática: {api_setting}")
+            continue
+    
     logger.info(f"[API_TOOLS] Total de funciones API generadas: {len(api_functions)}")
     logger.debug(f"[API_TOOLS] Detalles de las funciones API: {api_functions}")
     
