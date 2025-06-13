@@ -3,7 +3,7 @@ from app.chatbot import chatbot, chat_stream
 from app.controler.webhook.instagram_webhook import process_webhook_instagram, verify_webhook_instagram
 from app.controler.webhook.facebook_webhook import verify_webhook_facebook, process_webhook_facebook
 from app.controler.webhook.whatsapp_webhook import verify_webhook_whatsapp, process_webhook_whatsapp
-from pydantic import BaseModel
+from app.models import ChatRequest
     
 chat_router = APIRouter(prefix="/api/chat", tags=["chat"])
 webhook_router = APIRouter(prefix="/api/instagram", tags=["instagram"])
@@ -13,16 +13,6 @@ webhook_router_whatsapp = APIRouter(prefix="/api/whatsapp", tags=["whatsapp"])
 ##########################
 # Chat
 ##########################
-
-class ChatRequest(BaseModel):
-    message: str
-    project_id: str
-    user_id: str
-    name: str = "no name"
-    source: str = ""
-    number_phone_agent: str = "no number"
-    debug: bool = False
-    
 
 @chat_router.post("/message", operation_id="send_chat_message")
 async def chat_with_agent(request: ChatRequest):

@@ -8,7 +8,7 @@ from app.resources.constants import STATUS_BAD_REQUEST
 from app.controler.chat.core.graph import Graph
 from app.resources.postgresql import SupabaseDatabase
 import httpx
-from app.routes import ChatRequest
+from app.models import ChatRequest
 from app.chatbot import chatbot
 
 logger = logging.getLogger("root")

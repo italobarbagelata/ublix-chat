@@ -10,7 +10,7 @@ from app.resources.postgresql import SupabaseDatabase
 import httpx
 from datetime import datetime
 import asyncio
-from app.routes import ChatRequest        
+from app.models import ChatRequest
 from app.chatbot import chatbot
 
 logger = logging.getLogger("root")

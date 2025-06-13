@@ -7,7 +7,7 @@ from fastapi import Request, HTTPException, BackgroundTasks
 from fastapi.responses import PlainTextResponse
 from dotenv import load_dotenv
 from app.controler.chat.store.persistence import SupabaseDatabase
-from app.routes import ChatRequest
+from app.models import ChatRequest
 from app.chatbot import chatbot
 from app.controler.webhook.instagram_adapter import InstagramAdapter
 
