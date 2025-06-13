@@ -75,7 +75,7 @@ class Persist(object):
             state_data = {
                 "project_id": state.project_id,
                 "user_id": state.user_id,
-                "state_data": state.to_json()
+                "state": state.to_json()
             }
             self.upsert(MEMORY_STATES_TABLE, 
                         {"project_id": state.project_id, "user_id": state.user_id},
@@ -91,7 +91,7 @@ class Persist(object):
                 "project_id": project_id,
                 "user_id": user_id
             })
-            return state["state_data"] if state else None
+            return state["state"] if state else None
         except Exception as e:
             logging.error(f"Error fetching state: {e}")
             raise
@@ -113,23 +113,6 @@ class Persist(object):
             raise
 
     def persist_conversation(self, conversation: CustomState):
-        """
-        Persiste la conversación en la base de datos.
-        Todas las operaciones de base de datos deben realizarse sin bloquear el flujo principal.
-        """
-        # Ejecutar toda la persistencia en un nuevo hilo para no bloquear
-        threading.Thread(target=self._persist_conversation_thread, 
-                         args=(conversation,), 
-                         daemon=True).start()
-        # Retorna inmediatamente sin esperar el resultado
-        return None
-        
-    def _persist_conversation_thread(self, conversation: CustomState):
-        """
-        Método interno que se ejecuta en un hilo separado para persistir la conversación.
-        Contiene la lógica original de persist_conversation.
-        """
-        
         logging.info(f"Persisting conversation")
         try:
             project_id = conversation["project"].id
@@ -264,6 +247,7 @@ class Persist(object):
                         
         except Exception as e:
             logging.error(f"Error in persist_conversation: {e}")
+        
 
     def get_tool_call(self, message):
         try:
@@ -328,3 +312,25 @@ class Persist(object):
             logging.info(f"Actualización de resumen completada para proyecto: {conversation['project'].id}, usuario: {conversation['user_id']}")
         except Exception as e:
             logging.error(f"Error updating summary: {e}")
+
+    def get_summary(self, conversation: CustomState):
+        """Get the summary of a conversation based on project_id and phone_number
+
+        Args:
+            project_id: str : The id of the project
+            phone_number: str : The phone number of the user
+
+        Returns:
+            str: The summary of the conversation or empty string if not found
+        """
+        filter_criteria = {
+            "project_id": conversation["project"].id,
+            "phone_number": conversation["user_id"]
+        }
+
+        database = SupabaseDatabase()
+        summary_records = database.select(CONVERSATION_DATA_TABLE, filter_criteria)
+
+        if len(summary_records) > 0 and "summary" in summary_records[0]:
+            return summary_records[0]["summary"]
+        return ""

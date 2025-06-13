@@ -1,7 +1,6 @@
 from langchain.tools import tool
 
 from app.controler.chat.core.tools.api_tool import create_api_tools
-#from app.controler.chat.core.tools.mongo_tool import mongo_db_tool
 from app.controler.chat.core.tools.retriever_tool import document_retriever
 from app.controler.chat.core.tools.products_fallback_tool import search_products_unified
 from app.controler.chat.core.tools.openai_vector_tool import openai_vector_search
@@ -9,7 +8,10 @@ from app.controler.chat.core.tools.chile_holidays_tool import check_chile_holida
 from app.controler.chat.core.tools.datetime_tool import current_datetime_tool, week_info_tool
 from app.controler.chat.core.tools.simple_vector_search import buscar_en_vector_openai
 import logging
-
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+from typing import List
+from app.controler.chat.store.persistence import Project
 # Import calendar tool safely
 try:
     from app.controler.chat.core.tools.calendar_tool import google_calendar_tool
@@ -24,17 +26,12 @@ except ImportError:
 # así como comandos estructurados para operaciones más avanzadas
 #from app.controler.chat.core.tools.internal_calendar_tool import internal_calendar_tool
 
-def agent_tools(project_id, user_id, name, number_phone_agent, project=None):
+async def agent_tools(project_id: str, user_id: str, name: str, number_phone_agent: str, unique_id: str, project: Project) -> List:
     """ This function returns the tools that the agent will use to interact with the user"""
     tools = []
     
     # Agregar logging para debugear el project_id
     logging.info(f"agent_tools llamado con project_id: {project_id}, user_id: {user_id}")
-    
-    # Si no se proporciona el proyecto, cargarlo
-    if project is None:
-        from app.controler.chat.store.persistence import Persist
-        project = Persist().find_project(project_id)
     
     # Verificar si el proyecto tiene herramientas habilitadas
     if not hasattr(project, 'enabled_tools') or not project.enabled_tools:
@@ -53,22 +50,44 @@ def agent_tools(project_id, user_id, name, number_phone_agent, project=None):
         "openai_product_search": lambda *args: [buscar_en_vector_openai]
     }
     
-    # Cargar solo las herramientas habilitadas
+    # Preparar tareas para paralelización
+    loop = asyncio.get_event_loop()
+    executor = ThreadPoolExecutor(max_workers=5)
+    tasks = []
+    tool_names_to_load = []
+    
+    # Cargar solo las herramientas habilitadas de forma paralela
     for tool_name in project.enabled_tools:
         if tool_name in tool_mapping:
-            try:
-                tool_func = tool_mapping[tool_name]
+            tool_names_to_load.append(tool_name)
+            tool_func = tool_mapping[tool_name]
+            if tool_name == "api":
+                tasks.append(loop.run_in_executor(executor, tool_func, project_id, unique_id))
+            else:
+                tasks.append(loop.run_in_executor(executor, tool_func))
+    
+    # Ejecutar todas las tareas en paralelo
+    if tasks:
+        try:
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # Procesar resultados
+            for i, result in enumerate(results):
+                tool_name = tool_names_to_load[i]
+                if isinstance(result, Exception):
+                    logging.error(f"Error loading tool {tool_name}: {str(result)}")
+                    continue
+                
                 if tool_name == "api":
                     logging.info(f"Cargando herramientas API para project_id: {project_id}")
-                    api_tools = tool_func(project_id)
-                    logging.info(f"API tools devueltas: {type(api_tools)}, cantidad: {len(api_tools) if api_tools else 0}")
-                    if api_tools:
-                        tools.extend([tool(api_tool) for api_tool in api_tools])
+                    logging.info(f"API tools devueltas: {type(result)}, cantidad: {len(result) if result else 0}")
+                    if result:
+                        tools.extend([tool(api_tool) for api_tool in result])
                 else:
-                    tools.extend(tool_func(project_id, user_id, name, number_phone_agent))
-            except Exception as e:
-                logging.error(f"Error loading tool {tool_name}: {str(e)}")
-                continue
+                    if result:
+                        tools.extend(result)
+        except Exception as e:
+            logging.error(f"Error in parallel tool loading: {str(e)}")
 
     logging.info(f"Se inicializaron las tools: {[tool.name for tool in tools]}")
     return tools

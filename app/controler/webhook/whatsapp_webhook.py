@@ -8,6 +8,8 @@ from app.resources.constants import STATUS_BAD_REQUEST
 from app.controler.chat.core.graph import Graph
 from app.resources.postgresql import SupabaseDatabase
 import httpx
+from app.routes import ChatRequest
+from app.chatbot import chatbot
 
 logger = logging.getLogger("root")
 
@@ -230,20 +232,31 @@ async def process_message(message: Dict[str, Any], background_tasks: BackgroundT
             logger.info("Bot desactivado para este usuario de WhatsApp - omitiendo procesamiento")
             return
         
-        # Crear una instancia de Graph y procesar el mensaje
-        user_id = message["from_number"]
-        text_message = message["text"]
+        # Crear el objeto ChatRequest
+        chat_request = ChatRequest(
+            message=message["text"],
+            project_id=project_id,
+            user_id=message["from_number"],
+            name=message["from_number"],  # Usamos el número como nombre por defecto
+            source="whatsapp",
+            number_phone_agent="no number",
+            debug=False
+        )
         
-        logger.info(f"Creando instancia de Graph con project_id: {project_id}, user_id: {user_id}")
-        graph = Graph(project_id, user_id, "whatsapp", user_id, message["phone_number_id"], "whatsapp")
-        response = await graph.execute(text_message, background_tasks)
-        logger.info(f"Respuesta de Graph: {json.dumps(response, indent=2)}")
+        # Obtener la respuesta usando el nuevo endpoint de chat
+        response = await chatbot(chat_request)
+        
+        if response.status_code != 200:
+            logger.error(f"Error en la respuesta del chat: {response.body}")
+            return
+            
+        response_data = json.loads(response.body)
         
         # Enviar la respuesta de vuelta a WhatsApp
-        logger.info(f"Enviando respuesta a WhatsApp para user_id: {user_id}")
-        await send_whatsapp_message(project_id, user_id, message["entry_id"], response["response"], message["phone_number_id"])
+        logger.info(f"Enviando respuesta a WhatsApp para user_id: {message['from_number']}")
+        await send_whatsapp_message(project_id, message["from_number"], message["entry_id"], response_data["response"], message["phone_number_id"])
         
-        logger.info(f"Mensaje procesado de {user_id} y respuesta enviada")
+        logger.info(f"Mensaje procesado de {message['from_number']} y respuesta enviada")
     except Exception as e:
         logger.error(f"Error procesando mensaje: {e}", exc_info=True)
 

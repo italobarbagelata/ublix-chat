@@ -14,4 +14,5 @@ class CustomState(TypedDict):
     username: str
     source_id: str
     source: str
+    unique_id: str
 

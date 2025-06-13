@@ -10,6 +10,8 @@ from app.resources.postgresql import SupabaseDatabase
 import httpx
 from datetime import datetime
 import asyncio
+from app.routes import ChatRequest        
+from app.chatbot import chatbot
 
 logger = logging.getLogger("root")
 
@@ -230,14 +232,29 @@ async def process_message(message: Dict[str, Any], background_tasks: BackgroundT
         user_id = message["sender_id"]
         text_message = message["text"]
         
-        logger.info(f"Creando instancia de Graph con project_id: {project_id}, user_id: {user_id}")
-        graph = Graph(project_id, user_id, "facebook", user_id, message['page_id'], "messenger")
-        response = await graph.execute(text_message, background_tasks)
-        logger.info(f"Respuesta de Graph: {json.dumps(response, indent=2)}")
+        # Crear el objeto ChatRequest
+        chat_request = ChatRequest(
+            message=text_message,
+            project_id=project_id,
+            user_id=user_id,
+            name=user_id,  # Usamos el user_id como nombre por defecto
+            source="messenger",
+            number_phone_agent="no number",
+            debug=False
+        )
+        
+        # Obtener la respuesta usando el nuevo endpoint de chat
+        response = await chatbot(chat_request)
+        
+        if response.status_code != 200:
+            logger.error(f"Error en la respuesta del chat: {response.body}")
+            return
+            
+        response_data = json.loads(response.body)
         
         # Enviar la respuesta de vuelta a Messenger
         logger.info(f"Enviando respuesta a Messenger para user_id: {user_id}")
-        await send_messenger_message(project_id, user_id, response["response"], message["page_id"])
+        await send_messenger_message(project_id, user_id, response_data["response"], message["page_id"])
         
         logger.info(f"Mensaje procesado de {user_id} y respuesta enviada")
     except Exception as e:

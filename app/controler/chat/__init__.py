@@ -26,7 +26,7 @@ async def chat(request: Request, background_tasks: BackgroundTasks):
     except ValidationException as e:
         raise HTTPException(status_code=STATUS_BAD_REQUEST, detail=str(e))
 
-    graph = Graph(project_id, user_id, name, number_phone_agent, source_id, source)
+    graph = Graph.create(project_id, user_id, name, number_phone_agent, source_id, source)
     response = await graph.execute(message, background_tasks)
     return JSONResponse(status_code=200, content=response)
 
@@ -52,7 +52,7 @@ async def chat_stream(request: Request, background_tasks: BackgroundTasks):
 
     graph = Graph(project_id, user_id, name, number_phone_agent, source_id, source)
     
-    # Generador para Server-Sent Events
+    # Generador para Server-Sent Events 
     async def event_generator():
         try:
             async for chunk in graph.execute_stream(message, background_tasks):

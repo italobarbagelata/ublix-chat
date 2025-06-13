@@ -7,7 +7,8 @@ from fastapi import Request, HTTPException, BackgroundTasks
 from fastapi.responses import PlainTextResponse
 from dotenv import load_dotenv
 from app.controler.chat.store.persistence import SupabaseDatabase
-from app.controler.chat.core.graph import Graph
+from app.routes import ChatRequest
+from app.chatbot import chatbot
 from app.controler.webhook.instagram_adapter import InstagramAdapter
 
 INSTAGRAM_API_VERSION = "v22.0"
@@ -239,15 +240,29 @@ async def process_instagram_message(message: Dict[str, Any], background_tasks: B
         username = "Instagram User"
         user_id = sender_id
       
-        # Procesar mensaje con Graph
-        logger.info(f"Procesando mensaje con Graph para project_id: {project_id} y user_id: {user_id}")
-        graph = Graph(project_id, user_id, username, user_id, recipient_id, "instagram")
-        response = await graph.execute(text_message, background_tasks)
-        logger.info(f"Respuesta de Graph: {json.dumps(response, indent=2)}")
+        # Crear el objeto ChatRequest
+        chat_request = ChatRequest(
+            message=text_message,
+            project_id=project_id,
+            user_id=user_id,
+            name=username,
+            source="instagram",
+            number_phone_agent="no number",
+            debug=False
+        )
+        
+        # Obtener la respuesta usando el nuevo endpoint de chat
+        response = await chatbot(chat_request)
+        
+        if response.status_code != 200:
+            logger.error(f"Error en la respuesta del chat: {response.body}")
+            return
+            
+        response_data = json.loads(response.body)
 
         # Enviar respuesta usando InstagramAdapter
         logger.info(f"Enviando respuesta a través de InstagramAdapter")
-        api_response = await instagram_adapter.send_message(sender_id, response["response"])
+        api_response = await instagram_adapter.send_message(sender_id, response_data["response"])
         logger.info(f"Respuesta de Instagram API: {json.dumps(api_response, indent=2)}")
 
         if isinstance(api_response, dict) and "error" in api_response:

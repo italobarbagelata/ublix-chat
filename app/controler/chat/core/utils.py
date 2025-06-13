@@ -1,31 +1,29 @@
 import datetime
 import logging
-# import pytz # Se eliminará pytz
-from langchain_core.messages import BaseMessage, RemoveMessage, ToolMessage, AIMessage, HumanMessage
-from typing import Union, List, Dict, Any
+from typing import List, Union, Dict, Any
+from langchain_core.messages import (
+    BaseMessage, 
+    RemoveMessage, 
+    ToolMessage, 
+    AIMessage, 
+    HumanMessage
+)
+
 
 def filter_and_prepare_messages_for_agent_node(state):
     """Filters and prepares the messages for agent answer"""
     logging.info("filter_and_prepare_messages_for_agent_node")
-    messages = state.get("messages", [])
-    if not messages:
-        return []
+    messages = state["messages"]
+    if messages is None:
+        messages = []
         
-    # Optimización: Filtrado en una sola pasada
-    filtered_messages = []
-    first_ai_found = False
+    messages = [msg for msg in messages if not isinstance(msg, RemoveMessage)]
+    first_ai_index = next((i for i, msg in enumerate(messages) if isinstance(msg, AIMessage)), None)
     
-    for msg in messages:
-        if isinstance(msg, RemoveMessage):
-            continue
-            
-        if not first_ai_found and isinstance(msg, AIMessage):
-            first_ai_found = True
-            filtered_messages = []
-            
-        if first_ai_found or not isinstance(msg, ToolMessage):
-            filtered_messages.append(msg)
-            
+    if first_ai_index is None:
+        first_ai_index = 0
+
+    filtered_messages = [msg for i, msg in enumerate(messages) if i >= first_ai_index or not isinstance(msg, ToolMessage)]
     return filtered_messages
 
 
@@ -34,17 +32,15 @@ def filter_and_prepare_messages_for_summary_node(state):
     Filters and prepares the messages for summarization, normalizing their content. 
     Messages marked for Removal and Tools are also filtered out, and their content is normalized.
     """
+    
     logging.info("filter_and_prepare_messages_for_summary_node")
     messages = state.get("messages", [])
-    if not messages:
-        return []
+    if messages is None:
+        messages = []
     
-    # Optimización: Filtrado y normalización en una sola pasada
-    filtered_messages = []
-    for msg in messages:
-        if not isinstance(msg, (RemoveMessage, ToolMessage)):
-            filtered_messages.append(normalize_message(msg))
-            
+    messages = [msg for msg in messages if not isinstance(msg, RemoveMessage)]
+    normalized_messages = [normalize_message(msg) for msg in messages]
+    filtered_messages = [msg for msg in normalized_messages if not isinstance(msg, ToolMessage)]
     return filtered_messages
 
 
@@ -86,16 +82,8 @@ def normalize_message(
     return message
 
 
-def get_execution_time(initial_date: datetime.datetime) -> float:
-    """Calculate execution time from initial date until now
-    
-    Args:
-        initial_date: Start timestamp of the execution
-        
-    Returns:
-        float: Duration in seconds
-    """
-    end_time = datetime.datetime.now() # Restaurado a naive
+def get_execution_time(initial_date: str):
+    end_time = datetime.datetime.now()
     return (end_time - initial_date).total_seconds()
 
 
@@ -106,8 +94,7 @@ def calculate_execution_duration(initial_date: datetime.datetime, end_date: date
 
 def decorate_message(message: BaseMessage, initial_date: datetime.datetime, conversation_id: str):
     """ Decorate the message with the execution time """
-    message.additional_kwargs["end_timestamp"] = datetime.datetime.now() # Restaurado a naive
+    message.additional_kwargs["end_timestamp"] = datetime.datetime.now()
     message.additional_kwargs["end_time_seconds"] = get_execution_time(
         initial_date)
     message.additional_kwargs["conversation_id"] = conversation_id
-

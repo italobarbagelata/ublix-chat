@@ -4,7 +4,6 @@ from langgraph.prebuilt import ToolNode
 from langchain_core.messages import RemoveMessage, SystemMessage
 import pytz
 import concurrent.futures
-from app.controler.chat.classes.token_counter import TokenCounter
 from app.controler.chat.core.state import CustomState
 from app.controler.chat.core.tools import agent_tools
 from app.controler.chat.core.utils import decorate_message, filter_and_prepare_messages_for_agent_node, filter_and_prepare_messages_for_summary_node
@@ -23,29 +22,8 @@ logging.basicConfig(level=logging.INFO,
 TIMEZONE = pytz.timezone('America/Santiago')
 
 
-def create_agent(user_id, name, number_phone_agent, source):
-    """
-    Factory function que crea un agente conversacional.
-    
-    Args:
-        user_id (str): ID del usuario que interactúa con el agente
-        name (str): Nombre del usuario o agente
-        number_phone_agent (str): Número de teléfono asociado al agente
-        source (str): Fuente de la conversación
-        
-    Returns:
-        function: Función del agente que procesa el estado actual
-    """
-    def agent(state: CustomState):
-        """
-        Función principal del agente que procesa mensajes y genera respuestas.
-        
-        Args:
-            state (CustomState): Estado actual del grafo de conversación
-            
-        Returns:
-            dict: Diccionario con la respuesta del agente
-        """
+async def create_agent(user_id, name, number_phone_agent, source, unique_id, project):
+    async def agent(state: CustomState):
         # Calcular fechas actualizadas en cada interacción
         utc_now = datetime.datetime.now(pytz.UTC)
         now = utc_now.astimezone(TIMEZONE)
@@ -53,26 +31,27 @@ def create_agent(user_id, name, number_phone_agent, source):
         date_range_str = ", ".join(date_range)
 
         project_id = state["project"].id
-        project = state["project"]
+        logging.info(f"{unique_id} project: {project}")
         MODEL_CHATBOT = project.model if project else MODEL_CHATBOT
+        logging.info(f"{unique_id} model_chatbot: {MODEL_CHATBOT}")
 
         # Inicializa el modelo LLM según la configuración
         model = LLMAdapter.get_llm(MODEL_CHATBOT, 0)
-        summary = state.get("summary", "")  # Obtiene el resumen de la conversación
+        summary = Persist().get_summary(state)
         # Filtra y prepara los mensajes para el agente
         messages = filter_and_prepare_messages_for_agent_node(state)
         
         # Obtiene las herramientas disponibles para el agente
-        tools = agent_tools(project_id, user_id, name, number_phone_agent, project)
-        logging.info(f"Herramientas disponibles para el agente: {[tool.name for tool in tools]}")
+        # tools = asyncio.run(agent_tools(project_id, user_id, name, number_phone_agent, unique_id))
+        tools = await agent_tools(project_id, user_id, name, number_phone_agent, unique_id, project)
         
         # Vincula las herramientas al modelo
         model_with_tools = model.bind_tools(tools)
         project_name = project.name
         personality_prompt = project.personality
         instructions = project.instructions
-        prompt_general_skeleton = project.prompt if project else DEFAULT_PROMPT
         
+        prompt_general_skeleton = project.prompt if project else DEFAULT_PROMPT
         prompt_general_skeleton += f"\nConsidera que las fechas de referencia son: {date_range_str}"
         prompt_general_skeleton += f"\nMUY IMPORTANTE: Cualquier cálculo, agendamiento, o referencia a fechas y horas DEBE basarse estrictamente en la fecha y hora proporcionada aquí: {now.isoformat()} (Zona Horaria: America/Santiago). NUNCA uses UTC u otra zona horaria a menos que el usuario lo pida explícitamente."
         
@@ -110,139 +89,20 @@ def get_date_range() -> list:
     date_range_str = ", ".join(date_range)
     return date_range_str
 
-def summarize_conversation(state: CustomState):
-    """
-    Función para crear o actualizar el resumen de una conversación.
-    
-    Args:
-        state (CustomState): Estado actual del grafo de conversación
-        
-    Returns:
-        dict: Diccionario con el resumen actualizado y mensajes a eliminar
-    """
-    #logging.info(f"State\n{str(state)}")
-    logging.info(state.get("unique_id") if state.get("unique_id") else "No Unique Id: " + " Node 2: The summarize_conversation has been initialized...")
+def resume_conversation(state: CustomState):
+    logging.info(str(state))
+    logging.info(state["unique_id"] + " Node 2: The resume conversation has been initialized...")
 
-    # Inicializar contador de tokens - Solo para logs, no bloquea el proceso principal
-    token_counter = TokenCounter()
-    
-    # Recupera datos del proyecto desde la base de datos
-    project_data = Persist().find_project(state["project"].id)
-    MODEL_CHATBOT = project_data.model if project_data else MODEL_CHATBOT
-    project_prompt_memory = project_data.prompt_memory if project_data else DEFAULT_PROMPT_MEMORY
-
-    # Obtiene el resumen actual si existe
-    summary = state.get("summary", "")
-
-    # Determina si debe crear un nuevo resumen o actualizar uno existente
-    creation_inst = "Please create a detailed summary of the previous conversation."
-    update_inst = "Please update and expand the summary."
-
-    summary_instruction = update_inst if summary else creation_inst
-
-    # Prepara el mensaje para la generación del resumen
-    summary_message = f"""Current conversation summary: {summary}"
-
-        {summary_instruction}
-        When making the new summary, follow the instructions in <memory_instructions> strictly,
-        with them having precedence over any other instructions.
-
-        <memory_instructions>
-
-        {project_prompt_memory}
-        
-        IMPORTANTE: Si se menciona el nombre del usuario en la conversación, SIEMPRE debes incluirlo 
-        en el resumen. Esta información es crítica y debe preservarse en cada actualización.
-
-        <memory_instructions>
-
-        The summary should act as a long-term memory with detailed information. 
-        Do not use emojis and ensure the summary is generated in Spanish. 
-        Limit the summary to a maximum of 4 paragraphs or 1023 characters. 
-    """
-
-    # Conteo básico de tokens para logs (no bloqueante) en un hilo separado
-    def log_token_counts():
-        try:
-            # Conteos mínimos para logs, sin afectar rendimiento
-            summary_message_tokens = token_counter.count_tokens(summary_message)
-            current_summary_tokens = token_counter.count_tokens(summary) if summary else 0
-            logging.info(f"Summary message tokens: {summary_message_tokens}")
-            logging.info(f"Current summary tokens: {current_summary_tokens}")
-        except Exception as e:
-            logging.warning(f"Error contando tokens para logs: {e}")
-    
-    # Ejecutar conteo en segundo plano para logs
-    import threading
-    threading.Thread(target=log_token_counts, daemon=True).start()
-
-    logging.info("Initializing summarize creation or update...")
-
-    # Filtra y prepara los mensajes para la generación del resumen
-    messages = filter_and_prepare_messages_for_summary_node(state) + [HumanMessage(content=summary_message)]
-    
-    # Marca los mensajes antiguos para eliminación (mantiene solo los últimos 20)
-    delete_messages = [RemoveMessage(id=m.id) for m in state["messages"][:-20]]
-    logging.info(f"Delete Messages:\n{delete_messages}")
-
-    # Utiliza ejecución concurrente para persistir la conversación y generar el resumen
     with concurrent.futures.ThreadPoolExecutor() as executor:
-        # Guarda la conversación en la base de datos de forma asíncrona (completamente en segundo plano)
-        # No esperaremos por su finalización
         executor.submit(Persist().persist_conversation, state)
 
-        # Inicializa el modelo para la generación del resumen
-        model_summary = LLMAdapter.get_llm(MODEL_CHATBOT, 0)
+    delete_messages = [RemoveMessage(id=m.id) for m in state["messages"][:-20]]
+    logging.info(f"Delete Messages:\n {delete_messages}")
 
-        # Genera el resumen y esperamos solo por este resultado
-        summary_future = executor.submit(model_summary.invoke, messages)
-        logging.info(state.get("unique_id") if state.get("unique_id") else "No Unique Id: " + " Node 2: The summarize_conversation has been sucessfully executed...")
-
-        # Solo esperamos por el resumen, no por la persistencia
-        response = summary_future.result()
-        # Ya no esperamos por persist_future.result()
-
-    # Registrar conteo del nuevo resumen en segundo plano (no bloqueante)
-    def log_new_summary_tokens():
-        try:
-            new_summary_tokens = token_counter.count_tokens(response.content)
-            current_summary_tokens = token_counter.count_tokens(summary) if summary else 0
-            token_difference = new_summary_tokens - current_summary_tokens
-            logging.info(f"New summary tokens: {new_summary_tokens}")
-            logging.info(f"Summary token difference: {token_difference}")
-        except Exception as e:
-            logging.warning(f"Error contando tokens del nuevo resumen: {e}")
-    
-    # Ejecutar conteo en segundo plano
-    threading.Thread(target=log_new_summary_tokens, daemon=True).start()
-
-    # Devuelve el resumen generado y los mensajes a eliminar
-    return {"summary": response.content, "messages": delete_messages}
+    return {"messages": delete_messages}
 
 
-def tools_node(project_id, user_id, name, number_phone_agent):
-    """
-    Factory function que crea un nodo de herramientas para el grafo.
-    
-    Args:
-        project_id (str): ID del proyecto
-        user_id (str): ID del usuario
-        name (str): Nombre del usuario o agente
-        number_phone_agent (str): Número de teléfono asociado al agente
-        
-    Returns:
-        function: Función que inicializa un nodo de herramientas
-    """
-    def node(state: CustomState):
-        """
-        Función que inicializa un nodo de herramientas con las herramientas del proyecto.
-        
-        Args:
-            state (CustomState): Estado actual del grafo
-            
-        Returns:
-            ToolNode: Nodo de herramientas configurado
-        """
-        project = state["project"]
-        return ToolNode(agent_tools(project_id, user_id, name, number_phone_agent, project))
-    return node
+async def tools_node(project_id, user_id, name, number_phone_agent, unique_id, project):
+    logging.info(unique_id + " Initiating tools node...")
+    tools = await agent_tools(project_id, user_id, name, number_phone_agent, unique_id, project)
+    return ToolNode(tools)
