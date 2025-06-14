@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 import logging
 from langchain.tools import tool
 import locale
+import pytz
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +38,7 @@ def current_datetime_tool(query: str) -> str:
         logger.info(f"Procesando consulta de fecha/tiempo: '{query}'")
         
         query_lower = query.lower().strip()
-        ahora = datetime.now()
+        ahora = datetime.now(pytz.timezone('America/Santiago'))
         
         # Mapeo de días de la semana en español
         dias_semana = {
@@ -52,10 +53,11 @@ def current_datetime_tool(query: str) -> str:
         }
         
         # ¿Qué día es hoy?
-        if any(palabra in query_lower for palabra in ["qué día es hoy", "que día es hoy", "día de hoy", "hoy qué día"]):
+        if any(palabra in query_lower for palabra in ["qué día es hoy", "que día es hoy", "día de hoy", "hoy qué día", "qué día es", "que día es"]):
             dia_nombre = dias_semana[ahora.weekday()]
             fecha_formateada = f"{ahora.day} de {meses[ahora.month]} de {ahora.year}"
-            return f"Hoy es **{dia_nombre}** {fecha_formateada}."
+            hora_formateada = ahora.strftime("%H:%M")
+            return f"Hoy es **{dia_nombre}** {fecha_formateada} y son las **{hora_formateada}** horas."
         
         # ¿Qué fecha es hoy?
         if any(palabra in query_lower for palabra in ["qué fecha es hoy", "que fecha es hoy", "fecha de hoy", "fecha actual"]):
@@ -113,6 +115,18 @@ def current_datetime_tool(query: str) -> str:
                         return f"Esa fecha fue hace **{abs(diferencia)} días**."
             except:
                 pass
+        
+        # ¿Qué fecha es el próximo [día de la semana]?
+        if "próximo" in query_lower or "proximo" in query_lower:
+            for i, dia in enumerate(dias_semana.values()):
+                if dia in query_lower:
+                    # Calcular el próximo día de la semana
+                    dias_hasta = (i - ahora.weekday()) % 7
+                    if dias_hasta == 0:
+                        dias_hasta = 7  # Si es hoy, tomamos el próximo
+                    fecha_futura = ahora + timedelta(days=dias_hasta)
+                    fecha_formateada = f"{fecha_futura.day} de {meses[fecha_futura.month]} de {fecha_futura.year}"
+                    return f"El próximo {dia} será el **{fecha_formateada}**."
         
         # ¿Qué día de la semana es [fecha]?
         if "qué día de la semana" in query_lower or "que día de la semana" in query_lower:

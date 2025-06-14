@@ -19,14 +19,12 @@ def search_products_unified(
     query: str,
     state: Annotated[dict, InjectedState],
     category: Optional[str] = None,
-    min_price: Optional[float] = None,
-    max_price: Optional[float] = None,
-    limit: int = 10
+    limit: int = 8
 ) -> str:
-    """Búsqueda simple de productos con embeddings semánticos."""
+    """Búsqueda híbrida de productos combinando embeddings semánticos y búsqueda por texto."""
     
     logger.info(f"🔍 search_products_unified iniciada con query: '{query}'")
-    logger.info(f"🔍 Parámetros: category={category}, min_price={min_price}, max_price={max_price}, limit={limit}")
+    logger.info(f"🔍 Parámetros: category={category}, limit={limit}")
     
     # Validar proyecto
     project_state = state.get("project")
@@ -47,23 +45,23 @@ def search_products_unified(
         query_embedding = embeddings.embed_query(query)
         logger.info("✅ Embeddings generados exitosamente")
         
-        logger.info("🔄 Ejecutando búsqueda en Supabase...")
+        logger.info("🔄 Ejecutando búsqueda híbrida en Supabase...")
         response = db.supabase.rpc(
-            'match_documents_v20',
+            'match_documents_hybrid',
             {
                 'query_embedding': query_embedding,
-                'match_count': 30,  # Buscar más productos para encontrar los específicos
+                'query_text': query,
+                'match_count': limit,
                 'project_id_filter': project_id,
                 'type_filter': 'product',
                 'category_filter': category,
-                'min_price': min_price,
-                'max_price': max_price
+                'similarity_threshold': 0.6
             }
         ).execute()
         
         productos = response.data if response.data else []
         logger.info(f"✅ Búsqueda completada. Productos encontrados: {len(productos)}")
-        
+                
         # Imprimir información de los productos encontrados para debug
         logger.info("📋 Productos encontrados:")
         for i, producto in enumerate(productos, 1):
@@ -72,6 +70,7 @@ def search_products_unified(
             moneda = producto.get('currency', 'CLP')
             stock = producto.get('stock', 0)
             similarity = producto.get('similarity', 0)
+            images = producto.get('images', [])
             logger.info(f"  {i}. {titulo} - ${precio:,.0f} {moneda} - Similarity: {similarity:.3f}")
         
         # Respuesta simple
@@ -90,17 +89,18 @@ def search_products_unified(
             if precio > 0:
                 respuesta += f" - ${precio:,.0f} {moneda}"
             respuesta += f" - {description}"
-            respuesta += f" - {source_url}"
+            respuesta += f" - URL: {source_url}"
             if stock > 0:
                 respuesta += f" - Stock disponible: {stock} unidades"
             elif stock == 0:
                 respuesta += f" - ⚠️ SIN STOCK"
             if images:
-                respuesta += f" - Imágenes: {len(images)}"
+                respuesta += f"\n   Imágenes:\n"
+                for j, img_url in enumerate(images, 1):
+                    respuesta += f"   {j}. {img_url}\n"
             respuesta += "\n"
         
         logger.info(f"✅ Respuesta generada exitosamente. Longitud: {len(respuesta)} caracteres")
-        logger.info(f"📝 Primeros 200 caracteres de la respuesta: {respuesta[:200]}...")
         return respuesta
         
     except Exception as e:

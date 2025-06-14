@@ -4,7 +4,6 @@ from pydantic import BaseModel, Field
 
 from app.controler.chat.classes.datasource import Datasource
 from app.controler.chat.classes.integrations import Integrations
-from app.controler.chat.core.prompt_templates import get_personality_prompt
 from app.resources.constants import MODEL_CHATBOT
 
 class Project(BaseModel):
@@ -48,7 +47,3 @@ class Project(BaseModel):
                 "custom_patterns": []
             })
         )
-
-    def get_prompt(self, message: str) -> str:
-        # pylint: disable=E1101
-        return get_personality_prompt(self.name, self.personality, message)

@@ -7,6 +7,7 @@ from app.controler.chat.core.tools.openai_vector_tool import openai_vector_searc
 from app.controler.chat.core.tools.chile_holidays_tool import check_chile_holiday_tool, next_chile_holidays_tool
 from app.controler.chat.core.tools.datetime_tool import current_datetime_tool, week_info_tool
 from app.controler.chat.core.tools.simple_vector_search import buscar_en_vector_openai
+from app.controler.chat.core.tools.tienda_tool import buscar_productos_tienda, consultar_info_tienda, gestionar_carrito
 import logging
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
@@ -46,8 +47,9 @@ async def agent_tools(project_id: str, user_id: str, name: str, number_phone_age
         "openai_vector": lambda *args: [openai_vector_search],
         "retriever": lambda *args: [document_retriever],
         "chile_holidays": lambda *args: [check_chile_holiday_tool, next_chile_holidays_tool],
-        "datetime": lambda *args: [current_datetime_tool, week_info_tool],
-        "openai_product_search": lambda *args: [buscar_en_vector_openai]
+        "datetime": lambda *args: [current_datetime_tool],
+        "openai_product_search": lambda *args: [buscar_en_vector_openai],
+        "tienda": lambda *args: [buscar_productos_tienda, consultar_info_tienda, gestionar_carrito]
     }
     
     # Preparar tareas para paralelización
@@ -89,5 +91,8 @@ async def agent_tools(project_id: str, user_id: str, name: str, number_phone_age
         except Exception as e:
             logging.error(f"Error in parallel tool loading: {str(e)}")
 
+    # Siempre agregamos la herramienta datetime al final
+    tools.append(current_datetime_tool)
+    
     logging.info(f"Se inicializaron las tools: {[tool.name for tool in tools]}")
     return tools

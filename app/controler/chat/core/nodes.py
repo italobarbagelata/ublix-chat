@@ -29,9 +29,11 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
         now = utc_now.astimezone(TIMEZONE)
         date_range = [(now.date() + datetime.timedelta(days=x)).strftime('%Y-%m-%d') for x in range(15)]
         date_range_str = ", ".join(date_range)
+        
+        now_chile = datetime.datetime.now(pytz.timezone("America/Santiago")).isoformat()
+        logging.info(f"now_chile: {now_chile}")
 
         project_id = state["project"].id
-        logging.info(f"{unique_id} project: {project}")
         MODEL_CHATBOT = project.model if project else MODEL_CHATBOT
         logging.info(f"{unique_id} model_chatbot: {MODEL_CHATBOT}")
 
@@ -53,15 +55,30 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
         
         prompt_general_skeleton = project.prompt if project else DEFAULT_PROMPT
         prompt_general_skeleton += f"\nConsidera que las fechas de referencia son: {date_range_str}"
-        prompt_general_skeleton += f"\nMUY IMPORTANTE: Cualquier cálculo, agendamiento, o referencia a fechas y horas DEBE basarse estrictamente en la fecha y hora proporcionada aquí: {now.isoformat()} (Zona Horaria: America/Santiago). NUNCA uses UTC u otra zona horaria a menos que el usuario lo pida explícitamente."
         
+        prompt_general_skeleton += f"""
+        IMPORTANTE:
+        - Todas las fechas y horas deben entenderse en la zona horaria de Chile: (America/Santiago, UTC-3).
+        - Si el usuario menciona fechas relativas como "mañana", "el próximo lunes", "en dos días", debes transformarlas en fechas absolutas.
+        - Siempre incluye la fecha completa (día, mes, año) y la hora exacta (en formato de 24 horas si es posible).
+        - Asegúrate de usar la hora actual en Chile para interpretar correctamente cualquier mención de tiempo.
+        - La hora actual en Chile es: {now_chile}
+        - Para cualquier consulta sobre fechas o días de la semana, DEBES usar la herramienta 'current_datetime_tool'.
+        - Para consultas sobre semanas o rangos de fechas, usa la herramienta 'week_info_tool'.
+        - NUNCA intentes calcular fechas por tu cuenta, siempre usa las herramientas proporcionadas.
+        - Si el usuario pregunta por un día específico o una fecha, usa la herramienta de fechas para dar una respuesta precisa.
+        """
+
         PROMPT_GENERAL = prompt_general_skeleton.format(
             name=project_name,
             personality=personality_prompt,
             instructions=instructions,
             utc_now=now.isoformat(),
-            date_range_str=date_range_str
+            date_range_str=date_range_str,
+            now_chile=now_chile
         )
+        
+        #logging.info(f"PROMPT_GENERAL: {PROMPT_GENERAL}")
         
         messages.insert(0, SystemMessage(content=PROMPT_GENERAL))
 
@@ -90,7 +107,6 @@ def get_date_range() -> list:
     return date_range_str
 
 def resume_conversation(state: CustomState):
-    logging.info(str(state))
     logging.info(state["unique_id"] + " Node 2: The resume conversation has been initialized...")
 
     with concurrent.futures.ThreadPoolExecutor() as executor:

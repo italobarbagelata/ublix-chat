@@ -109,3 +109,69 @@ create index if not exists search_items_embedding_idx
   on public.search_items
   using ivfflat (embedding vector_cosine_ops)
   with (lists = 100);
+
+
+
+
+CREATE OR REPLACE FUNCTION match_documents_hybrid(
+    query_embedding vector(384),
+    query_text text,
+    match_count int,
+    project_id_filter uuid,
+    type_filter text,
+    category_filter text,
+    similarity_threshold double precision
+)
+RETURNS TABLE (
+    id uuid,
+    title text,
+    description text,
+    price double precision,
+    currency text,
+    stock integer,
+    source_url text,
+    images text[],
+    similarity double precision
+)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    RETURN QUERY
+    WITH search_results AS (
+        SELECT 
+            si.id,
+            si.title,
+            si.description,
+            si.price::double precision,
+            si.currency::text,
+            si.stock::integer,
+            si.source_url,
+            CASE 
+                WHEN jsonb_typeof(si.images) = 'array' THEN 
+                    (SELECT array_agg(value::text) FROM jsonb_array_elements_text(si.images))
+                ELSE 
+                    ARRAY[]::text[]
+            END as images,
+            GREATEST(
+                (si.embedding <=> query_embedding) * -1 + 1,
+                CASE 
+                    WHEN si.title ILIKE '%' || query_text || '%' THEN 0.9
+                    WHEN si.description ILIKE '%' || query_text || '%' THEN 0.8
+                    ELSE 0
+                END
+            )::double precision as similarity
+        FROM search_items si
+        WHERE si.project_id = project_id_filter
+            AND si.type = type_filter
+            AND (category_filter IS NULL OR si.category = category_filter)
+            AND (
+                si.title ILIKE '%' || query_text || '%'
+                OR si.description ILIKE '%' || query_text || '%'
+                OR (si.embedding <=> query_embedding) * -1 + 1 > similarity_threshold
+            )
+    )
+    SELECT * FROM search_results
+    ORDER BY similarity DESC
+    LIMIT match_count;
+END;
+$$;
