@@ -1,14 +1,40 @@
 from typing import Dict
 import dateparser
 from datetime import datetime
-import holidays
 import logging
 from langchain.tools import tool
 
 logger = logging.getLogger(__name__)
 
-# Feriados de Chile (expandimos el rango para cubrir más años)
-feriados_chile = holidays.Chile(years=range(2020, 2035))
+# Diccionario con los feriados de Chile 2025
+FERIADOS_2025 = {
+    "2025-01-01": "Año Nuevo (Irrenunciable)",
+    "2025-04-18": "Viernes Santo",
+    "2025-04-19": "Sábado Santo",
+    "2025-05-01": "Día Nacional del Trabajo (Irrenunciable)",
+    "2025-05-21": "Día de las Glorias Navales",
+    "2025-06-20": "Día Nacional de los Pueblos Indígenas",
+    "2025-06-29": "San Pedro y San Pablo",
+    "2025-06-29": "Elecciones Primarias Presidenciales y Parlamentarias (Irrenunciable)",
+    "2025-07-16": "Día de la Virgen del Carmen",
+    "2025-08-15": "Asunción de la Virgen",
+    "2025-09-18": "Independencia Nacional (Irrenunciable)",
+    "2025-09-19": "Día de las Glorias del Ejército (Irrenunciable)",
+    "2025-10-12": "Encuentro de Dos Mundos",
+    "2025-10-31": "Día de las Iglesias Evangélicas y Protestantes",
+    "2025-11-01": "Día de Todos los Santos",
+    "2025-11-16": "Elecciones Presidenciales y Parlamentarias (Irrenunciable)",
+    "2025-12-08": "Inmaculada Concepción",
+    "2025-12-14": "Elecciones Presidenciales (Segunda Vuelta) (Irrenunciable)",
+    "2025-12-25": "Navidad (Irrenunciable)"
+}
+
+# Feriados específicos por región
+FERIADOS_ESPECIFICOS = {
+    "2025-06-07": "Asalto y Toma del Morro de Arica (Región de Arica y Parinacota)",
+    "2025-08-20": "Nacimiento del Prócer de la Independencia (Comunas de Chillán y Chillán Viejo)",
+    "2025-12-31": "Feriado Bancario (Trabajadores de Instituciones Bancarias)"
+}
 
 def normalize_date(text: str) -> datetime | None:
     """
@@ -27,8 +53,8 @@ def normalize_date(text: str) -> datetime | None:
             settings={
                 "TIMEZONE": "America/Santiago",
                 "RETURN_AS_TIMEZONE_AWARE": True,
-                "PREFER_DAY_OF_MONTH": "first",  # Para casos ambiguos, preferir día del mes
-                "RELATIVE_BASE": datetime.now()  # Base para fechas relativas
+                "PREFER_DAY_OF_MONTH": "first",
+                "RELATIVE_BASE": datetime.now()
             }
         )
     except Exception as e:
@@ -51,7 +77,7 @@ def check_chile_holiday_tool(query: str) -> str:
     try:
         logger.info(f"Verificando feriado para: '{query}'")
         
-        # Limpiar la consulta de palabras innecesarias
+        # Limpiar la consulta
         clean_query = query.lower()
         for phrase in ["es feriado", "¿es feriado", "es un feriado", "feriado", "¿", "?"]:
             clean_query = clean_query.replace(phrase, "").strip()
@@ -62,10 +88,10 @@ def check_chile_holiday_tool(query: str) -> str:
         fecha = normalize_date(clean_query)
         
         if not fecha:
-            return f"No pude entender la fecha '{query}'. Por favor intenta con formatos como '18 de septiembre', 'mañana', '25/12/2024', etc."
+            return f"No pude entender la fecha '{query}'. Por favor intenta con formatos como '18 de septiembre', 'mañana', '25/12/2025', etc."
 
+        fecha_str = fecha.strftime("%Y-%m-%d")
         fecha_sola = fecha.date()
-        motivo = feriados_chile.get(fecha_sola)
         
         # Formatear la fecha en español
         meses = {
@@ -80,20 +106,24 @@ def check_chile_holiday_tool(query: str) -> str:
         
         fecha_formateada = f"{dias_semana[fecha_sola.weekday()]} {fecha_sola.day} de {meses[fecha_sola.month]} de {fecha_sola.year}"
         
-        if motivo:
-            return f"✅ Sí, el {fecha_formateada} es feriado en Chile: **{motivo}**."
-        else:
-            # Verificar si es fin de semana
-            if fecha_sola.weekday() >= 5:  # 5=sábado, 6=domingo
-                return f"❌ El {fecha_formateada} no es feriado en Chile, pero es {dias_semana[fecha_sola.weekday()]} (fin de semana)."
-            else:
-                return f"❌ El {fecha_formateada} no es feriado en Chile. Es un día hábil normal."
+        # Verificar si es feriado general
+        if fecha_str in FERIADOS_2025:
+            return f"✅ Sí, el {fecha_formateada} es feriado en Chile: **{FERIADOS_2025[fecha_str]}**."
+        
+        # Verificar si es feriado específico
+        if fecha_str in FERIADOS_ESPECIFICOS:
+            return f"✅ Sí, el {fecha_formateada} es feriado específico en Chile: **{FERIADOS_ESPECIFICOS[fecha_str]}**."
+        
+        # Verificar si es fin de semana
+        if fecha_sola.weekday() >= 5:  # 5=sábado, 6=domingo
+            return f"❌ El {fecha_formateada} no es feriado en Chile, pero es {dias_semana[fecha_sola.weekday()]} (fin de semana)."
+        
+        return f"❌ El {fecha_formateada} no es feriado en Chile. Es un día hábil normal."
         
     except Exception as e:
         logger.error(f"Error en check_chile_holiday_tool: {str(e)}")
         return f"Ocurrió un error al verificar la fecha: {str(e)}"
 
-# Función adicional para obtener próximos feriados
 @tool(parse_docstring=False)  
 def next_chile_holidays_tool(query: str = "") -> str:
     """Muestra los próximos feriados de Chile.
@@ -113,8 +143,12 @@ def next_chile_holidays_tool(query: str = "") -> str:
         today = datetime.now().date()
         proximos_feriados = []
         
+        # Combinar feriados generales y específicos
+        todos_feriados = {**FERIADOS_2025, **FERIADOS_ESPECIFICOS}
+        
         # Buscar feriados futuros
-        for fecha, motivo in sorted(feriados_chile.items()):
+        for fecha_str, motivo in sorted(todos_feriados.items()):
+            fecha = datetime.strptime(fecha_str, "%Y-%m-%d").date()
             if fecha > today:
                 proximos_feriados.append((fecha, motivo))
                 if len(proximos_feriados) >= num_holidays:

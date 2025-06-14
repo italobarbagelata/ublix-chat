@@ -46,8 +46,6 @@ async def agent_tools(project_id: str, user_id: str, name: str, number_phone_age
         "calendar": lambda *args: [google_calendar_tool] if CALENDAR_TOOL_AVAILABLE else [],
         "openai_vector": lambda *args: [openai_vector_search],
         "retriever": lambda *args: [document_retriever],
-        "chile_holidays": lambda *args: [check_chile_holiday_tool, next_chile_holidays_tool],
-        "datetime": lambda *args: [current_datetime_tool],
         "openai_product_search": lambda *args: [buscar_en_vector_openai],
         "tienda": lambda *args: [buscar_productos_tienda, consultar_info_tienda, gestionar_carrito]
     }
@@ -91,8 +89,14 @@ async def agent_tools(project_id: str, user_id: str, name: str, number_phone_age
         except Exception as e:
             logging.error(f"Error in parallel tool loading: {str(e)}")
 
-    # Siempre agregamos la herramienta datetime al final
-    tools.append(current_datetime_tool)
+    # Siempre agregamos las herramientas que deben estar activas por defecto
+    default_tools = [
+        current_datetime_tool,
+        week_info_tool,
+        check_chile_holiday_tool,
+        next_chile_holidays_tool
+    ]
+    tools.extend(default_tools)
     
     logging.info(f"Se inicializaron las tools: {[tool.name for tool in tools]}")
     return tools

@@ -54,19 +54,36 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
         instructions = project.instructions
         
         prompt_general_skeleton = project.prompt if project else DEFAULT_PROMPT
-        prompt_general_skeleton += f"\nConsidera que las fechas de referencia son: {date_range_str}"
         
         prompt_general_skeleton += f"""
-        IMPORTANTE:
-        - Todas las fechas y horas deben entenderse en la zona horaria de Chile: (America/Santiago, UTC-3).
-        - Si el usuario menciona fechas relativas como "mañana", "el próximo lunes", "en dos días", debes transformarlas en fechas absolutas.
-        - Siempre incluye la fecha completa (día, mes, año) y la hora exacta (en formato de 24 horas si es posible).
-        - Asegúrate de usar la hora actual en Chile para interpretar correctamente cualquier mención de tiempo.
-        - La hora actual en Chile es: {now_chile}
-        - Para cualquier consulta sobre fechas o días de la semana, DEBES usar la herramienta 'current_datetime_tool'.
-        - Para consultas sobre semanas o rangos de fechas, usa la herramienta 'week_info_tool'.
-        - NUNCA intentes calcular fechas por tu cuenta, siempre usa las herramientas proporcionadas.
-        - Si el usuario pregunta por un día específico o una fecha, usa la herramienta de fechas para dar una respuesta precisa.
+        MANEJO DE FECHAS, HORA Y FERIADOS  (INSTRUCCIONES TÉCNICAS):
+        
+        Zona Horaria y Fechas:
+        - Todas las fechas y horas se manejan en zona horaria de Chile (America/Santiago, UTC-3)
+        - Hora actual en Chile: {now_chile}
+        - Rango de fechas de referencia: {date_range_str}
+
+        Conversión y Validación:
+        - Las expresiones relativas como “hoy”, “mañana”, “próximo lunes” deben convertirse a fechas absolutas.
+        - Siempre incluir la fecha completa en formato DD-MM-YYYY y hora en formato 24h.
+        - Siempre usar la herramienta current_datetime_tool para obtener la fecha exacta antes de responder.
+        - Si el usuario menciona una fecha, siempre usar la herramienta current_datetime_tool para obtener la fecha exacta antes de responder.
+
+        Herramientas disponibles:
+        1. `current_datetime_tool`: para obtener información de una fecha específica (día de semana, hora, etc.)
+        2. `check_chile_holiday_tool`: para verificar si una fecha es feriado nacional o local (OBLIGATORIO ANTES DE AGENDAR)
+        3. `week_info_tool`: para obtener rango semanal y días hábiles
+        4. `next_chile_holidays_tool`: para sugerir próximos días no hábiles
+
+        Flujo para procesar una fecha:
+        1. Convertir la entrada a fecha absoluta si es relativa (ej. “mañana”)
+        2. Verificar si la fecha es válida usando `current_datetime_tool`
+        3. Validar si es hábil con `check_chile_holiday_tool`
+        4. Si la fecha es válida, continuar según las reglas de negocio
+
+        NUNCA calcular fechas manualmente
+        SIEMPRE usar las herramientas para validar y responder
+        Está terminantemente prohibido asumir el día de la semana de una fecha sin usar la herramienta current_datetime_tool. Siempre debes consultar el día exacto usando esa herramienta antes de responder.
         """
 
         PROMPT_GENERAL = prompt_general_skeleton.format(
