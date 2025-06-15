@@ -30,8 +30,8 @@ class Project(BaseModel):
         """Class method to create an instance from a dictionary"""
         return cls(
             id=data.get('project_id', ''),
-            name=data.get('project_name', ''),
-            description=data.get('project_description', ''),
+            name=data.get('name', ''),
+            description=data.get('description', ''),
             vstore_index=data.get('vstore_index', ''),
             personality=data.get('personality', ''),
             datasources=data.get('datasources', []),

@@ -55,6 +55,13 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
         
         prompt_general_skeleton = project.prompt if project else DEFAULT_PROMPT
         
+        prompt_general_skeleton = prompt_general_skeleton.replace("{name}", project_name)
+        prompt_general_skeleton = prompt_general_skeleton.replace("{personality}", personality_prompt)
+        prompt_general_skeleton = prompt_general_skeleton.replace("{instructions}", instructions)
+        prompt_general_skeleton = prompt_general_skeleton.replace("{utc_now}", now.isoformat())
+        prompt_general_skeleton = prompt_general_skeleton.replace("{date_range_str}", date_range_str)
+        prompt_general_skeleton = prompt_general_skeleton.replace("{now_chile}", now_chile)
+        
         prompt_general_skeleton += f"""
         MANEJO DE FECHAS, HORA Y FERIADOS  (INSTRUCCIONES TÉCNICAS):
         
@@ -64,7 +71,7 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
         - Rango de fechas de referencia: {date_range_str}
 
         Conversión y Validación:
-        - Las expresiones relativas como “hoy”, “mañana”, “próximo lunes” deben convertirse a fechas absolutas.
+        - Las expresiones relativas como "hoy", "mañana", "próximo lunes" deben convertirse a fechas absolutas.
         - Siempre incluir la fecha completa en formato DD-MM-YYYY y hora en formato 24h.
         - Siempre usar la herramienta current_datetime_tool para obtener la fecha exacta antes de responder.
         - Si el usuario menciona una fecha, siempre usar la herramienta current_datetime_tool para obtener la fecha exacta antes de responder.
@@ -76,7 +83,7 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
         4. `next_chile_holidays_tool`: para sugerir próximos días no hábiles
 
         Flujo para procesar una fecha:
-        1. Convertir la entrada a fecha absoluta si es relativa (ej. “mañana”)
+        1. Convertir la entrada a fecha absoluta si es relativa (ej. "mañana")
         2. Verificar si la fecha es válida usando `current_datetime_tool`
         3. Validar si es hábil con `check_chile_holiday_tool`
         4. Si la fecha es válida, continuar según las reglas de negocio
@@ -85,17 +92,25 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
         SIEMPRE usar las herramientas para validar y responder
         Está terminantemente prohibido asumir el día de la semana de una fecha sin usar la herramienta current_datetime_tool. Siempre debes consultar el día exacto usando esa herramienta antes de responder.
         """
-
-        PROMPT_GENERAL = prompt_general_skeleton.format(
-            name=project_name,
-            personality=personality_prompt,
-            instructions=instructions,
-            utc_now=now.isoformat(),
-            date_range_str=date_range_str,
-            now_chile=now_chile
-        )
         
-        #logging.info(f"PROMPT_GENERAL: {PROMPT_GENERAL}")
+        prompt_general_skeleton += f"""
+        MANEJO DE INFORMACIÓN DE CONTACTO:
+        1. Cuando el usuario proporcione su información de contacto (nombre, email, teléfono):
+        - Detecta automáticamente esta información
+        - Usa la herramienta save_contact_tool para guardarla
+        - Confirma al usuario que has guardado su información
+        - Continúa la conversación normalmente
+        2. Si el usuario actualiza su información:
+        - Detecta los cambios
+        - Actualiza la información usando save_contact_tool
+        - Confirma la actualización
+        3. Mantén un tono profesional al manejar información personal
+        4. NO pidas información de contacto si el usuario no la ha proporcionado voluntariamente
+        """
+        
+        PROMPT_GENERAL = prompt_general_skeleton
+        
+        logging.info(f"PROMPT_GENERAL: {PROMPT_GENERAL}")
         
         messages.insert(0, SystemMessage(content=PROMPT_GENERAL))
 

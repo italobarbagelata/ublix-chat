@@ -8,6 +8,7 @@ from app.controler.chat.core.tools.chile_holidays_tool import check_chile_holida
 from app.controler.chat.core.tools.datetime_tool import current_datetime_tool, week_info_tool
 from app.controler.chat.core.tools.simple_vector_search import buscar_en_vector_openai
 from app.controler.chat.core.tools.tienda_tool import buscar_productos_tienda, consultar_info_tienda, gestionar_carrito
+from app.controler.chat.core.tools.contact_tool import SaveContactTool
 import logging
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
@@ -34,10 +35,6 @@ async def agent_tools(project_id: str, user_id: str, name: str, number_phone_age
     # Agregar logging para debugear el project_id
     logging.info(f"agent_tools llamado con project_id: {project_id}, user_id: {user_id}")
     
-    # Verificar si el proyecto tiene herramientas habilitadas
-    if not hasattr(project, 'enabled_tools') or not project.enabled_tools:
-        logging.warning(f"No hay herramientas habilitadas para el proyecto {project_id}")
-        return tools
     
     # Mapeo de nombres de herramientas a funciones
     tool_mapping = {
@@ -47,7 +44,7 @@ async def agent_tools(project_id: str, user_id: str, name: str, number_phone_age
         "openai_vector": lambda *args: [openai_vector_search],
         "retriever": lambda *args: [document_retriever],
         "openai_product_search": lambda *args: [buscar_en_vector_openai],
-        "tienda": lambda *args: [buscar_productos_tienda, consultar_info_tienda, gestionar_carrito]
+        "tienda": lambda *args: [buscar_productos_tienda, consultar_info_tienda, gestionar_carrito],
     }
     
     # Preparar tareas para paralelización
@@ -94,7 +91,8 @@ async def agent_tools(project_id: str, user_id: str, name: str, number_phone_age
         current_datetime_tool,
         week_info_tool,
         check_chile_holiday_tool,
-        next_chile_holidays_tool
+        next_chile_holidays_tool,
+        SaveContactTool(project_id, user_id)
     ]
     tools.extend(default_tools)
     
