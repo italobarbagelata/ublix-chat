@@ -7,6 +7,26 @@ class ContactService:
     def __init__(self):
         self.client = SupabaseClient()
 
+    async def get_contact_by_user_id(self, project_id: str, user_id: str) -> Optional[dict]:
+        """
+        Obtiene la información de contacto existente para un user_id específico.
+        
+        Args:
+            project_id: ID del proyecto
+            user_id: ID del usuario
+            
+        Returns:
+            dict: Información del contacto si existe, None si no existe
+        """
+        try:
+            response = self.client.client.table("contacts").select("*").eq("project_id", project_id).eq("user_id", user_id).execute()
+            if response.data and len(response.data) > 0:
+                return response.data[0]
+            return None
+        except Exception as e:
+            print(f"Error getting contact by user_id: {str(e)}")
+            return None
+
     def extract_contact_info(self, message: str) -> Dict[str, Any]:
         """
         Extrae información de contacto del mensaje usando expresiones regulares.
@@ -60,7 +80,7 @@ class ContactService:
     ) -> Optional[dict]:
         """
         Guarda o actualiza un contacto en la base de datos usando Supabase.
-        Si el contacto ya existe (por email o teléfono), actualiza la información.
+        Si el contacto ya existe (por user_id), actualiza la información.
         Retorna None si no hay suficiente información para guardar.
         """
         if not any([name, phone_number, email]):
@@ -68,11 +88,7 @@ class ContactService:
 
         try:
             # Buscar contacto existente por user_id
-            contact = None
-            if user_id:
-                response = self.client.client.table("contacts").select("*").eq("project_id", project_id).eq("user_id", user_id).execute()
-                if response.data and len(response.data) > 0:
-                    contact = response.data[0]
+            contact = await self.get_contact_by_user_id(project_id, user_id)
 
             if contact:
                 # Actualizar contacto existente

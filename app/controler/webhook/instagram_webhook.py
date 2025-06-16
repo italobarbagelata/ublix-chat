@@ -239,6 +239,7 @@ async def process_instagram_message(message: Dict[str, Any], background_tasks: B
         
         username = "Instagram User"
         user_id = sender_id
+        source_id = message.get("recipient_id")
       
         # Crear el objeto ChatRequest
         chat_request = ChatRequest(
@@ -247,6 +248,7 @@ async def process_instagram_message(message: Dict[str, Any], background_tasks: B
             user_id=user_id,
             name=username,
             source="instagram",
+            source_id=source_id,
             number_phone_agent="no number",
             debug=False
         )

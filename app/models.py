@@ -6,5 +6,6 @@ class ChatRequest(BaseModel):
     user_id: str
     name: str = "no name"
     source: str = ""
+    source_id: str = ""
     number_phone_agent: str = "no number"
     debug: bool = False 

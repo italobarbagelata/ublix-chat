@@ -18,7 +18,7 @@ from uuid import uuid4
 
 class Graph():
     @classmethod
-    async def create(cls, project_id, user_id, name, number_phone_agent, source, unique_id, project):
+    async def create(cls, project_id, user_id, name, number_phone_agent, source, source_id, unique_id, project):
         self = cls()
         self.state = ChatState(project_id, user_id)
         
@@ -27,7 +27,7 @@ class Graph():
         self.user_id = user_id
         self.name = name
         self.number_phone_agent = number_phone_agent
-        self.source_id = source
+        self.source_id = source_id
         self.source = source
         self.project = project
         self.workflow = StateGraph(CustomState)

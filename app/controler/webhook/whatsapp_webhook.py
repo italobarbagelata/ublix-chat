@@ -239,6 +239,7 @@ async def process_message(message: Dict[str, Any], background_tasks: BackgroundT
             user_id=message["from_number"],
             name=message["from_number"],  # Usamos el número como nombre por defecto
             source="whatsapp",
+            source_id=message["phone_number_id"],
             number_phone_agent="no number",
             debug=False
         )
