@@ -22,6 +22,7 @@ class ChatRequest(BaseModel):
     user_id: str
     name: str = "no name"
     source: str = ""
+    source_id: str = ""
     number_phone_agent: str = "no number"
     debug: bool = False
 
@@ -40,7 +41,7 @@ async def chatbot(request: ChatRequest):
         logging.error("Error fetching project: %s", str(e))
         return JSONResponse(status_code=500, content={"error": "Internal server error"})
 
-    graph = await Graph.create(request.project_id, request.user_id, request.name, request.number_phone_agent, request.source, unique_id, project)
+    graph = await Graph.create(request.project_id, request.user_id, request.name, request.number_phone_agent, request.source, request.source_id, unique_id, project)
     response = await graph.execute(request.message, request.debug)
 
     return JSONResponse(status_code=200, content=response)
@@ -75,7 +76,7 @@ async def chat_stream(request: ChatRequest, background_tasks: BackgroundTasks):
         logging.error("Error fetching project: %s", str(e))
         return JSONResponse(status_code=500, content={"error": "Internal server error"})
 
-    graph = await Graph.create(project_id, user_id, name, number_phone_agent, source_id, unique_id, project)
+    graph = await Graph.create(project_id, user_id, name, number_phone_agent, source_id, request.source_id, unique_id, project)
     
     # Generador para Server-Sent Events 
     async def event_generator():
