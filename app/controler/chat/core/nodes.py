@@ -10,7 +10,7 @@ from app.controler.chat.core.utils import decorate_message, filter_and_prepare_m
 from app.controler.chat.store.persistence import Persist
 from app.controler.chat.core.llm_adapter import LLMAdapter
 from dotenv import load_dotenv
-from app.resources.constants import DEFAULT_PROMPT, DEFAULT_PROMPT_MEMORY
+from app.resources.constants import DEFAULT_PROMPT, DEFAULT_PROMPT_MEMORY, MODEL_CHATBOT
 import datetime 
 
 load_dotenv()
@@ -34,8 +34,6 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
         logging.info(f"now_chile: {now_chile}")
 
         project_id = state["project"].id
-        MODEL_CHATBOT = project.model if project else MODEL_CHATBOT
-        logging.info(f"{unique_id} model_chatbot: {MODEL_CHATBOT}")
 
         # Inicializa el modelo LLM según la configuración
         model = LLMAdapter.get_llm(MODEL_CHATBOT, 0)
@@ -98,14 +96,11 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
         1. Cuando el usuario proporcione su información de contacto (nombre, email, teléfono):
         - Detecta automáticamente esta información
         - Usa la herramienta save_contact_tool para guardarla
-        - Confirma al usuario que has guardado su información
         - Continúa la conversación normalmente
         2. Si el usuario actualiza su información:
         - Detecta los cambios
         - Actualiza la información usando save_contact_tool
-        - Confirma la actualización
-        3. Mantén un tono profesional al manejar información personal
-        4. NO pidas información de contacto si el usuario no la ha proporcionado voluntariamente
+        - Continúa la conversación normalmente
         """
         
         PROMPT_GENERAL = prompt_general_skeleton

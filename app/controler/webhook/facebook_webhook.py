@@ -239,6 +239,7 @@ async def process_message(message: Dict[str, Any], background_tasks: BackgroundT
             user_id=user_id,
             name=user_id,  # Usamos el user_id como nombre por defecto
             source="messenger",
+            source_id=message['page_id'],
             number_phone_agent="no number",
             debug=False
         )

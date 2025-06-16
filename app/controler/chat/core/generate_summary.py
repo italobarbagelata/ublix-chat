@@ -1,7 +1,6 @@
 from pydantic import BaseModel
 
 from app.controler.chat.core.llm_adapter import LLMAdapter    
-from app.controler.chat.store.persistence import Persist
 from app.resources.constants import CONVERSATION_DATA_TABLE, DEFAULT_PROMPT_MEMORY, MODEL_CHATBOT
 from app.resources.postgresql import SupabaseDatabase
 
@@ -14,11 +13,7 @@ class SummaryPayload(BaseModel):
 def generate_summary(payload: SummaryPayload):
     """ Generate or updates a summary of a user-project chat """
     database = SupabaseDatabase()
-    project_data = Persist().find_project(payload.project_id)
-    selected_model = project_data.model if project_data.model else MODEL_CHATBOT
-    project_prompt_memory = project_data.prompt_memory if project_data else DEFAULT_PROMPT_MEMORY
-
-    user_conversation_summary = database.select(CONVERSATION_DATA_TABLE, {"phone_number": payload.phone_number, "project_id": project_data.id})
+    user_conversation_summary = database.select(CONVERSATION_DATA_TABLE, {"phone_number": payload.phone_number, "project_id": payload.project_id})
 
     new_conversation = user_conversation_summary is None or len(user_conversation_summary) == 0
     if new_conversation:
@@ -40,7 +35,7 @@ def generate_summary(payload: SummaryPayload):
 
         <memory_instructions>
 
-        {project_prompt_memory}
+        {DEFAULT_PROMPT_MEMORY}
 
         <memory_instructions>
 
@@ -51,7 +46,7 @@ def generate_summary(payload: SummaryPayload):
         Current conversation summary: {previous_summary}
     """
 
-    model_summary = LLMAdapter.get_llm(selected_model, 0)
+    model_summary = LLMAdapter.get_llm(MODEL_CHATBOT, 0)
     messages = [
         {"role": "system", "content": summary_message},
         {"role": "user", "content": payload.message},
@@ -66,11 +61,11 @@ def generate_summary(payload: SummaryPayload):
 
     if new_conversation:
         database.insert(CONVERSATION_DATA_TABLE, {
-            "project_id": project_data.id,
+            "project_id": payload.project_id,
             "phone_number": payload.phone_number,
             "summary": new_summary
         })
     else:
-        database.update(CONVERSATION_DATA_TABLE, {"summary": new_summary}, {"phone_number": payload.phone_number, "project_id": project_data.id})
+        database.update(CONVERSATION_DATA_TABLE, {"summary": new_summary}, {"phone_number": payload.phone_number, "project_id": payload.project_id})
 
     return {"message": new_summary}
