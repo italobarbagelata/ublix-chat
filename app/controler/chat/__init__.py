@@ -20,8 +20,8 @@ async def chat(request: Request, background_tasks: BackgroundTasks):
 
         name = req_body.get("name", "no name")
         number_phone_agent = req_body.get("number_phone_agent", "no number")
-        source_id = req_body.get("source", "default")
-        source = req_body.get("source_name", "default")
+        source_id = req_body.get("source_id", "default")
+        source = req_body.get("source", "default")
 
     except ValidationException as e:
         raise HTTPException(status_code=STATUS_BAD_REQUEST, detail=str(e))

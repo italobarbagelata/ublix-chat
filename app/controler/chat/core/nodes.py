@@ -103,9 +103,18 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
         - Continúa la conversación normalmente
         """
         
+        
+        prompt_general_skeleton += f"""
+        FORMATO DE URLs:
+        1. SIEMPRE formatea las URLs usando la sintaxis markdown: [texto descriptivo](url)
+        2. NO dejes las URLs como texto plano
+        3. Usa un texto descriptivo relevante para el enlace
+        4. Ejemplo: En lugar de "https://ejemplo.com/producto", usa "[Ver producto](https://ejemplo.com/producto)"
+        """
+        
         PROMPT_GENERAL = prompt_general_skeleton
         
-        logging.info(f"PROMPT_GENERAL: {PROMPT_GENERAL}")
+        #logging.info(f"PROMPT_GENERAL: {PROMPT_GENERAL}")
         
         messages.insert(0, SystemMessage(content=PROMPT_GENERAL))
 

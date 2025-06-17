@@ -19,7 +19,7 @@ def search_products_unified(
     query: str,
     state: Annotated[dict, InjectedState],
     category: Optional[str] = None,
-    limit: int = 8
+    limit: int = 15
 ) -> str:
     """Búsqueda híbrida de productos combinando embeddings semánticos y búsqueda por texto."""
     
@@ -55,11 +55,22 @@ def search_products_unified(
                 'project_id_filter': project_id,
                 'type_filter': 'product',
                 'category_filter': category,
-                'similarity_threshold': 0.6
+                'similarity_threshold': 0.5
             }
         ).execute()
         
-        productos = response.data if response.data else []
+        match_documents_v20 = db.supabase.rpc(
+            'match_documents_v20',
+            {
+                'query_embedding': query_embedding,
+                'match_count': limit,
+                'project_id_filter': project_id,
+                'type_filter': 'product',
+                'category_filter': category
+            }
+        ).execute()
+        
+        productos = match_documents_v20.data if match_documents_v20.data else []
         logger.info(f"✅ Búsqueda completada. Productos encontrados: {len(productos)}")
                 
         # Imprimir información de los productos encontrados para debug
