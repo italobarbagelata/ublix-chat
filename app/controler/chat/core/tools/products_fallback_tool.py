@@ -50,10 +50,12 @@ def search_products_unified(
             'match_documents_v20',
             {
                 'query_embedding': query_embedding,
-                'match_count': limit,
+                'match_count': 20,
                 'project_id_filter': project_id,
                 'type_filter': 'product',
-                'category_filter': category
+                'category_filter': None,
+                'min_price': None,
+                'max_price': None
             }
         ).execute()
         

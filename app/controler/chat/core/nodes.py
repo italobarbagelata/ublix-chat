@@ -102,7 +102,6 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
                 - Parámetros: query (texto de búsqueda), category (opcional), limit=15
                 - Muestra: título, precio (CLP), descripción, stock e imágenes
                 - Formatea URLs con markdown: [texto](url)
-                - Verifica SIEMPRE el stock antes de confirmar disponibilidad
                 - Si no hay resultados, sugiere términos alternativos
                 """
             if "retriever" in project.enabled_tools:
