@@ -61,56 +61,139 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
         prompt_general_skeleton = prompt_general_skeleton.replace("{now_chile}", now_chile)
         
         prompt_general_skeleton += f"""
-        MANEJO DE FECHAS, HORA Y FERIADOS  (INSTRUCCIONES TÉCNICAS):
+        MANEJO DE FECHAS Y HORAS:
+        - Zona horaria: Chile (UTC-3)
+        - Hora actual: {now_chile}
+        - Fechas de referencia: {date_range_str}
         
-        Zona Horaria y Fechas:
-        - Todas las fechas y horas se manejan en zona horaria de Chile (America/Santiago, UTC-3)
-        - Hora actual en Chile: {now_chile}
-        - Rango de fechas de referencia: {date_range_str}
-
-        Conversión y Validación:
-        - Las expresiones relativas como "hoy", "mañana", "próximo lunes" deben convertirse a fechas absolutas.
-        - Siempre incluir la fecha completa en formato DD-MM-YYYY y hora en formato 24h.
-        - Siempre usar la herramienta current_datetime_tool para obtener la fecha exacta antes de responder.
-        - Si el usuario menciona una fecha, siempre usar la herramienta current_datetime_tool para obtener la fecha exacta antes de responder.
-
-        Herramientas disponibles:
-        1. `current_datetime_tool`: para obtener información de una fecha específica (día de semana, hora, etc.)
-        2. `check_chile_holiday_tool`: para verificar si una fecha es feriado nacional o local (OBLIGATORIO ANTES DE AGENDAR)
-        3. `week_info_tool`: para obtener rango semanal y días hábiles
-        4. `next_chile_holidays_tool`: para sugerir próximos días no hábiles
-
-        Flujo para procesar una fecha:
-        1. Convertir la entrada a fecha absoluta si es relativa (ej. "mañana")
-        2. Verificar si la fecha es válida usando `current_datetime_tool`
-        3. Validar si es hábil con `check_chile_holiday_tool`
-        4. Si la fecha es válida, continuar según las reglas de negocio
-
-        NUNCA calcular fechas manualmente
-        SIEMPRE usar las herramientas para validar y responder
-        Está terminantemente prohibido asumir el día de la semana de una fecha sin usar la herramienta current_datetime_tool. Siempre debes consultar el día exacto usando esa herramienta antes de responder.
+        Reglas:
+        - Usar current_datetime_tool para validar fechas
+        - Verificar feriados con check_chile_holiday_tool
+        - Formato: DD-MM-YYYY HH:mm
+        - Prohibido calcular fechas manualmente
         """
         
         prompt_general_skeleton += f"""
-        MANEJO DE INFORMACIÓN DE CONTACTO:
-        1. Cuando el usuario proporcione su información de contacto (nombre, email, teléfono):
-        - Detecta automáticamente esta información
-        - Usa la herramienta save_contact_tool para guardarla
-        - Continúa la conversación normalmente
-        2. Si el usuario actualiza su información:
-        - Detecta los cambios
-        - Actualiza la información usando save_contact_tool
-        - Continúa la conversación normalmente
+        MANEJO DE CONTACTOS:
+        - DETECTAR AUTOMÁTICAMENTE cuando el usuario proporcione:
+          * Nombre completo (ej: "pedrito morales")
+          * Email (ej: "sabado@fa.cl")
+          * Teléfono (ej: "+56424231552")
+        - Usar save_contact_tool con los datos detectados
+        - Ejemplo: si el usuario escribe "pedrito morales sabado@fa.cl +56424231552"
+          → save_contact_tool(name="Pedrito Morales", email="sabado@fa.cl", phone_number="+56424231552")
+        - Continuar con la conversación
         """
         
         
         prompt_general_skeleton += f"""
         FORMATO DE URLs:
-        1. SIEMPRE formatea las URLs usando la sintaxis markdown: [texto descriptivo](url)
-        2. NO dejes las URLs como texto plano
-        3. Usa un texto descriptivo relevante para el enlace
-        4. Ejemplo: En lugar de "https://ejemplo.com/producto", usa "[Ver producto](https://ejemplo.com/producto)"
+        - Usar markdown: [texto](url)
+        - Ejemplo: [Ver producto](https://ejemplo.com/producto)
         """
+        
+        logging.info(f"project: {project.enabled_tools}")
+        
+        if(project.enabled_tools):
+            if "products_search" in project.enabled_tools:
+                prompt_general_skeleton += f"""
+                BÚSQUEDA DE PRODUCTOS:
+                - Usa search_products_unified para buscar productos
+                - Parámetros: query (texto de búsqueda), category (opcional), limit=15
+                - Muestra: título, precio (CLP), descripción, stock e imágenes
+                - Formatea URLs con markdown: [texto](url)
+                - Verifica SIEMPRE el stock antes de confirmar disponibilidad
+                - Si no hay resultados, sugiere términos alternativos
+                """
+            if "retriever" in project.enabled_tools:
+                prompt_general_skeleton += f"""
+                RETRIEVER:
+                - Usa document_retriever para buscar información específica
+                - Parámetros: query (texto de búsqueda)
+                - Devuelve: documentos relevantes con título, contenido y relevancia
+                - Usar cuando: necesites información precisa sobre el proyecto
+                """
+            if "calendar" in project.enabled_tools:
+                prompt_general_skeleton += f"""
+                CALENDAR:
+                Herramienta: google_calendar_tool
+                
+                Funcionalidades disponibles:
+                1. Listar eventos:
+                   - list_events|days=7 (lista eventos de los próximos 7 días)
+                
+                2. Buscar eventos:
+                   - search_events|title=Reunión|date=2024-03-20
+                
+                3. Crear evento:
+                   - create_event|title=Reunión|start=2024-03-20T15:00:00|end=2024-03-20T16:00:00|description=Detalles|attendees=email1@ejemplo.com,email2@ejemplo.com
+                   - Opcional: force_create=true para crear a pesar de conflictos
+                
+                4. Verificar disponibilidad:
+                   - check_availability|start=2024-03-20T15:00:00|end=2024-03-20T16:00:00
+                
+                5. Obtener detalles:
+                   - get_event|event_id=abc123
+                
+                6. Actualizar evento:
+                   - update_event|event_id=abc123|title=Nuevo título|description=Nueva descripción
+                
+                7. Eliminar evento:
+                   - delete_event|event_id=abc123
+                
+                Notas importantes:
+                - Todas las fechas se manejan en zona horaria de Chile (UTC-3)
+                - Se verifica automáticamente conflictos de horario
+                - Formato de fecha: YYYY-MM-DDThh:mm:ss
+                - Para eventos con invitados, separar emails por coma
+                - NUNCA digas "el horario está disponible" sin ejecutar check_availability primero
+                """
+            if "tienda" in project.enabled_tools:
+                prompt_general_skeleton += f"""
+                TIENDA:
+                - Herramientas disponibles:
+                  * buscar_productos_tienda: busca productos por nombre, talla, color
+                  * consultar_info_tienda: información sobre contacto, devoluciones, envíos
+                  * gestionar_carrito: ver, agregar, eliminar productos, aplicar cupones
+                - Usar cuando: necesites buscar productos o gestionar compras
+                """
+            if "openai_vector" in project.enabled_tools:
+                prompt_general_skeleton += f"""
+                OPENAI VECTOR:
+                - Usa openai_vector_search para buscar información en documentos
+                - Parámetros: query (texto de búsqueda)
+                - Devuelve: 
+                  * Contenido relevante de los documentos
+                  * Nombre del archivo fuente
+                  * Puntuación de relevancia
+                  * Citas y referencias
+                - Usar cuando: necesites información específica de documentos subidos
+                - Formato de respuesta:
+                  * Título con la consulta
+                  * Resultados ordenados por relevancia
+                  * Fuentes citadas cuando aplique
+                """
+            if "api" in project.enabled_tools:
+                prompt_general_skeleton += f"""
+                API:
+                Herramienta: api_tool
+                
+                Características:
+                - Integración con APIs externas configuradas en el proyecto
+                - Funciones específicas generadas para cada API
+                - Manejo automático de errores y timeouts
+                
+                Uso:
+                - Consultar la API específica según el contexto
+                - Proporcionar parámetros en el formato requerido
+                - Procesar la respuesta según el formato de la API
+                
+                Consideraciones:
+                - Verificar autenticación y headers requeridos
+                - Respetar límites de rate y timeouts
+                - Manejar errores según el tipo de API
+                """
+
         
         PROMPT_GENERAL = prompt_general_skeleton
         

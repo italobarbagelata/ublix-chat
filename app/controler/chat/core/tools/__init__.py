@@ -14,13 +14,8 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from typing import List
 from app.controler.chat.store.persistence import Project
-# Import calendar tool safely
-try:
-    from app.controler.chat.core.tools.calendar_tool import google_calendar_tool
-    CALENDAR_TOOL_AVAILABLE = True
-except ImportError:
-    logging.warning("Google Calendar tool not available. Missing dependencies. Run 'pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib'")
-    CALENDAR_TOOL_AVAILABLE = False
+from app.controler.chat.core.tools.calendar_tool import google_calendar_tool
+
 
 # Import internal calendar tool
 # Esta herramienta permite interactuar con el calendario interno de la aplicación
@@ -40,10 +35,9 @@ async def agent_tools(project_id: str, user_id: str, name: str, number_phone_age
     tool_mapping = {
         "api": create_api_tools,
         "products_search": lambda *args: [search_products_unified],
-        "calendar": lambda *args: [google_calendar_tool] if CALENDAR_TOOL_AVAILABLE else [],
+        "calendar": lambda *args: [google_calendar_tool],
         "openai_vector": lambda *args: [openai_vector_search],
         "retriever": lambda *args: [document_retriever],
-        "openai_product_search": lambda *args: [buscar_en_vector_openai],
         "tienda": lambda *args: [buscar_productos_tienda, consultar_info_tienda, gestionar_carrito],
     }
     

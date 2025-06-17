@@ -46,19 +46,6 @@ def search_products_unified(
         logger.info("✅ Embeddings generados exitosamente")
         
         logger.info("🔄 Ejecutando búsqueda híbrida en Supabase...")
-        response = db.supabase.rpc(
-            'match_documents_hybrid',
-            {
-                'query_embedding': query_embedding,
-                'query_text': query,
-                'match_count': limit,
-                'project_id_filter': project_id,
-                'type_filter': 'product',
-                'category_filter': category,
-                'similarity_threshold': 0.5
-            }
-        ).execute()
-        
         match_documents_v20 = db.supabase.rpc(
             'match_documents_v20',
             {

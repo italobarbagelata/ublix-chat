@@ -2,11 +2,13 @@ from typing import Optional, Dict, Any
 from langchain.tools import BaseTool
 from app.controler.chat.services.contact_service import ContactService
 from pydantic import Field, PrivateAttr
+import asyncio
+import logging
 
 class SaveContactTool(BaseTool):
     project_id: str = Field(description="ID del proyecto")
     user_id: str = Field(description="ID del usuario")
-    _contact_service: ContactService = PrivateAttr(default_factory=ContactService)
+    _contact_service: ContactService = PrivateAttr()
     
     def __init__(self, project_id: str, user_id: str):
         super().__init__(
@@ -20,6 +22,7 @@ class SaveContactTool(BaseTool):
             project_id=project_id,
             user_id=user_id
         )
+        self._contact_service = ContactService()
 
     async def _get_existing_contact(self) -> Optional[dict]:
         """
@@ -63,7 +66,7 @@ class SaveContactTool(BaseTool):
         """
         try:
             # Primero verificar si existe información del contacto
-            existing_contact = self._contact_service.get_contact_by_user_id(self.project_id, self.user_id)
+            existing_contact = asyncio.run(self._get_existing_contact())
             
             # Si no hay datos nuevos y existe información, mostrar la información existente
             if existing_contact and not any([name, email, phone_number]):
@@ -71,13 +74,13 @@ class SaveContactTool(BaseTool):
 
             # Si hay datos nuevos, actualizar la información
             if any([name, email, phone_number]):
-                result = self._contact_service.save_or_update_contact(
+                result = asyncio.run(self._contact_service.save_or_update_contact(
                     project_id=self.project_id,
                     user_id=self.user_id,
                     name=name,
                     email=email,
                     phone_number=phone_number
-                )
+                ))
                 
                 if result:
                     if existing_contact:
@@ -91,6 +94,7 @@ class SaveContactTool(BaseTool):
             return "No se proporcionó información para actualizar."
                 
         except Exception as e:
+            logging.error(f"Error al guardar la información de contacto: {str(e)}")
             return f"Error al guardar la información de contacto: {str(e)}"
 
     async def _arun(self, name: Optional[str] = None, email: Optional[str] = None, phone_number: Optional[str] = None) -> str:
@@ -99,7 +103,7 @@ class SaveContactTool(BaseTool):
         """
         try:
             # Primero verificar si existe información del contacto
-            existing_contact = await self._contact_service.get_contact_by_user_id(self.project_id, self.user_id)
+            existing_contact = await self._get_existing_contact()
             
             # Si no hay datos nuevos y existe información, mostrar la información existente
             if existing_contact and not any([name, email, phone_number]):
@@ -127,4 +131,5 @@ class SaveContactTool(BaseTool):
             return "No se proporcionó información para actualizar."
                 
         except Exception as e:
+            logging.error(f"Error al guardar la información de contacto: {str(e)}")
             return f"Error al guardar la información de contacto: {str(e)}" 
