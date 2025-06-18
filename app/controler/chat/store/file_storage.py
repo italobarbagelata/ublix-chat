@@ -35,14 +35,15 @@ class FileStorage:
         # Combinar todo
         return f"{timestamp}_{unique_id}{file_extension}"
         
-    async def save_image(self, project_id: str, file: UploadFile) -> str:
+    async def save_image(self, project_id: str, file: UploadFile, content_type: str = None) -> str:
         """
         Guarda una imagen en el almacenamiento de Supabase.
         
         Args:
             project_id: ID del proyecto
             file: Archivo de imagen a guardar
-            
+            content_type: Tipo de contenido de la imagen (opcional)
+        
         Returns:
             str: URL de la imagen guardada
         """
@@ -79,12 +80,15 @@ class FileStorage:
                     }
                 )
             
+            # Usar el content_type proporcionado o el del archivo
+            final_content_type = content_type or getattr(file, 'content_type', 'image/jpeg')
+            
             # Subir archivo
             result = self.db.supabase.storage.from_(bucket_name).upload(
                 path=file_path,
                 file=file_content,
                 file_options={
-                    "content-type": file.content_type,
+                    "content-type": final_content_type,
                     "cache-control": "3600",
                     "upsert": "true"
                 }

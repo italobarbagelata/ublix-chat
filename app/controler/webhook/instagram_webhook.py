@@ -335,7 +335,7 @@ async def process_instagram_message(message: Dict[str, Any], background_tasks: B
                         # Guardar imagen en Supabase usando el servicio de archivos
                         from app.controler.chat.store.file_storage import FileStorage
                         file_storage = FileStorage()
-                        image_url = await file_storage.save_image(project_id, image_file)
+                        image_url = await file_storage.save_image(project_id, image_file, content_type="image/jpeg")
                         
                         logger.info(f"Imagen guardada en Supabase: {image_url}")
                         
