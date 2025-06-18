@@ -196,7 +196,7 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
                 prompt_general_skeleton += f"""
                 EMAIL (send_email):
                 API: Resend | Params: from_email, to, subject, html/text, cc, bcc, reply_to
-                Default from: "noreply@ublix.com" | Multi emails: "email1@domain.com, email2@domain.com"
+                Default from: "noreply@ublix.app" | Multi emails: "email1@domain.com, email2@domain.com"
                 Use when: user wants to send email, mentions "enviar email", "mandar correo"
                 Examples: send_email(to="user@domain.com", subject="Test", html="<h1>Hola</h1>")
                 """

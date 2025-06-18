@@ -173,7 +173,7 @@ class EmailTool(BaseTool):
             
             # Usar email por defecto si no se proporciona remitente
             if not from_email:
-                from_email = "noreply@ublix.com"
+                from_email = "noreply@ublix.app"
                 logger.info(f"Usando email por defecto: {from_email}")
             
             logger.info(f"Parámetros extraídos: from={from_email}, to={to}, subject={subject}")
