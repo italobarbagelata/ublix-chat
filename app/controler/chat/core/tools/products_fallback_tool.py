@@ -36,7 +36,7 @@ def search_products_unified(
     logger.info(f"✅ Proyecto encontrado: {project_id}")
     
     try:
-        # Búsqueda semántica
+        # Generar embeddings para la búsqueda
         logger.info("🔄 Generando embeddings...")
         embeddings = OpenAIEmbeddings(
             model="text-embedding-3-small",
@@ -45,23 +45,25 @@ def search_products_unified(
         query_embedding = embeddings.embed_query(query)
         logger.info("✅ Embeddings generados exitosamente")
         
-        logger.info("🔄 Ejecutando búsqueda híbrida en Supabase...")
-        match_documents_v20 = db.supabase.rpc(
-            'match_documents_v20',
+        # Ejecutar búsqueda híbrida
+        logger.info("🔄 Ejecutando búsqueda híbrida...")
+        search_result = db.supabase.rpc(
+            'search_by_title_similarity',
             {
+                'search_query': query,
                 'query_embedding': query_embedding,
-                'match_count': 20,
                 'project_id_filter': project_id,
-                'type_filter': 'product',
-                'category_filter': None,
-                'min_price': None,
-                'max_price': None
+                'similarity_threshold': 0.3,
+                'result_limit': limit,
+                'text_weight': 1.0,
+                'vector_weight': 1.0,
+                'rrf_k': 50
             }
         ).execute()
         
-        productos = match_documents_v20.data if match_documents_v20.data else []
+        productos = search_result.data if search_result.data else []
         logger.info(f"✅ Búsqueda completada. Productos encontrados: {len(productos)}")
-                
+        
         # Imprimir información de los productos encontrados para debug
         logger.info("📋 Productos encontrados:")
         for i, producto in enumerate(productos, 1):
@@ -69,7 +71,7 @@ def search_products_unified(
             precio = producto.get('price', 0)
             moneda = producto.get('currency', 'CLP')
             stock = producto.get('stock', 0)
-            similarity = producto.get('similarity', 0)
+            similarity = producto.get('similarity_score', 0)
             images = producto.get('images', [])
             logger.info(f"  {i}. {titulo} - ${precio:,.0f} {moneda} - Similarity: {similarity:.3f}")
         

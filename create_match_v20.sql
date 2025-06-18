@@ -1,5 +1,4 @@
--- Función para búsqueda semántica en search_items
--- Versión 20: Optimizada para la nueva estructura de tabla
+create extension if not exists vector;
 
 CREATE OR REPLACE FUNCTION match_documents_v20(
   query_embedding vector(384),
@@ -72,13 +71,6 @@ $$;
 
 
 
-
-
-
-
-create extension if not exists vector;
-
--- 2. Crear la tabla principal
 create table if not exists public.search_items (
   id uuid primary key default extensions.uuid_generate_v4(),
   type text not null,
@@ -173,5 +165,92 @@ BEGIN
     SELECT * FROM search_results
     ORDER BY similarity DESC
     LIMIT match_count;
+END;
+$$;
+
+
+
+-- Habilitar la extensión pg_trgm para similitud de texto
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
+-- Función para búsqueda por similitud de título
+CREATE OR REPLACE FUNCTION search_by_title_similarity(
+    search_query text,
+    query_embedding vector(384),
+    project_id_filter uuid,
+    similarity_threshold float DEFAULT 0.3,
+    result_limit int DEFAULT 15,
+    text_weight float DEFAULT 1.0,
+    vector_weight float DEFAULT 1.0,
+    rrf_k int DEFAULT 50
+)
+RETURNS TABLE (
+    id uuid,
+    title text,
+    description text,
+    price numeric,
+    currency varchar(5),
+    stock numeric,
+    images jsonb,
+    source_url text,
+    similarity_score double precision
+)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    RETURN QUERY
+    WITH text_search AS (
+        SELECT 
+            si.id,
+            si.title,
+            si.description,
+            si.price,
+            si.currency,
+            si.stock,
+            si.images,
+            si.source_url,
+            similarity(si.title, search_query) as text_score,
+            row_number() OVER (ORDER BY similarity(si.title, search_query) DESC) as text_rank
+        FROM search_items si
+        WHERE 
+            si.type = 'product'
+            AND si.project_id = project_id_filter
+            AND similarity(si.title, search_query) > similarity_threshold
+    ),
+    vector_search AS (
+        SELECT 
+            si.id,
+            si.title,
+            si.description,
+            si.price,
+            si.currency,
+            si.stock,
+            si.images,
+            si.source_url,
+            1 - (si.embedding <=> query_embedding) as vector_score,
+            row_number() OVER (ORDER BY si.embedding <=> query_embedding) as vector_rank
+        FROM search_items si
+        WHERE 
+            si.type = 'product'
+            AND si.project_id = project_id_filter
+            AND si.embedding IS NOT NULL
+    )
+    SELECT 
+        COALESCE(ts.id, vs.id) as id,
+        COALESCE(ts.title, vs.title) as title,
+        COALESCE(ts.description, vs.description) as description,
+        COALESCE(ts.price, vs.price) as price,
+        COALESCE(ts.currency, vs.currency) as currency,
+        COALESCE(ts.stock, vs.stock) as stock,
+        COALESCE(ts.images, vs.images) as images,
+        COALESCE(ts.source_url, vs.source_url) as source_url,
+        (
+            COALESCE(1.0 / (rrf_k + ts.text_rank), 0.0) * text_weight +
+            COALESCE(1.0 / (rrf_k + vs.vector_rank), 0.0) * vector_weight
+        )::double precision as similarity_score
+    FROM text_search ts
+    FULL OUTER JOIN vector_search vs ON ts.id = vs.id
+    ORDER BY similarity_score DESC
+    LIMIT result_limit;
 END;
 $$;
