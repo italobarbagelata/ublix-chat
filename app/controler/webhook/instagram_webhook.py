@@ -106,6 +106,7 @@ def extract_instagram_messages(body: Dict[str, Any]) -> List[Dict[str, Any]]:
                     
                     logger.debug(f"Mensaje encontrado - Sender: {sender_id}, Recipient: {recipient_id}, Message ID: {message_id}")
                     
+                    # Procesar mensajes de texto
                     if "text" in message_obj:
                         message_data = {
                             "recipient_id": recipient_id,
@@ -118,6 +119,47 @@ def extract_instagram_messages(body: Dict[str, Any]) -> List[Dict[str, Any]]:
                         }
                         logger.debug(f"Agregando mensaje de texto: {json.dumps(message_data, indent=2)}")
                         messages.append(message_data)
+                    
+                    # Procesar mensajes con archivos adjuntos (imágenes, videos, audio)
+                    elif "attachments" in message_obj:
+                        attachments = message_obj.get("attachments", [])
+                        for attachment in attachments:
+                            attachment_type = attachment.get("type")
+                            payload = attachment.get("payload", {})
+                            
+                            if attachment_type in ["image", "video", "audio"]:
+                                message_data = {
+                                    "recipient_id": recipient_id,
+                                    "sender_id": sender_id,
+                                    "type": attachment_type,
+                                    "attachment_url": payload.get("url"),
+                                    "attachment_id": payload.get("attachment_id"),
+                                    "timestamp": timestamp,
+                                    "message_id": message_id,
+                                    "entry_id": entry_id
+                                }
+                                
+                                # Si hay texto junto con el archivo adjunto
+                                if "text" in message_obj:
+                                    message_data["text"] = message_obj.get("text", "")
+                                
+                                logger.debug(f"Agregando mensaje con {attachment_type}: {json.dumps(message_data, indent=2)}")
+                                messages.append(message_data)
+                    
+                    # Procesar stickers
+                    elif "sticker_id" in message_obj:
+                        message_data = {
+                            "recipient_id": recipient_id,
+                            "sender_id": sender_id,
+                            "type": "sticker",
+                            "sticker_id": message_obj.get("sticker_id"),
+                            "timestamp": timestamp,
+                            "message_id": message_id,
+                            "entry_id": entry_id
+                        }
+                        logger.debug(f"Agregando sticker: {json.dumps(message_data, indent=2)}")
+                        messages.append(message_data)
+                        
     except Exception as e:
         logger.error(f"Error extrayendo mensajes IG: {e}", exc_info=True)
     return messages
@@ -196,11 +238,10 @@ async def process_instagram_message(message: Dict[str, Any], background_tasks: B
         logger.info(f"Iniciando procesamiento de mensaje: {json.dumps(message, indent=2)}")
         recipient_id = message.get("recipient_id")
         sender_id = message.get("sender_id")
-        text_message = message.get("text")
         message_type = message.get("type")
         
-        if message_type != "text" or not recipient_id or not sender_id or not text_message:
-            logger.warning(f"Mensaje IG omitido - Tipo: {message_type}, Recipient: {recipient_id}, Sender: {sender_id}, Texto: {text_message}")
+        if not recipient_id or not sender_id:
+            logger.warning(f"Mensaje IG omitido - Recipient: {recipient_id}, Sender: {sender_id}")
             return
         
         logger.info(f"Buscando project_id para el mensaje")
@@ -240,10 +281,107 @@ async def process_instagram_message(message: Dict[str, Any], background_tasks: B
         username = "Instagram User"
         user_id = sender_id
         source_id = message.get("recipient_id")
+        
+        # Preparar el mensaje y la imagen
+        text_message = message.get("text", "")
+        image_url = None
+        
+        # Si es un mensaje con imagen, descargar y guardar la imagen
+        if message_type == "image" and message.get("attachment_url"):
+            try:
+                logger.info(f"Procesando imagen de Instagram: {message.get('attachment_url')}")
+                
+                # Descargar la imagen desde Instagram
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    response = await client.get(message.get("attachment_url"))
+                    if response.status_code == 200:
+                        # Crear un archivo temporal con la imagen
+                        import tempfile
+                        import os
+                        from datetime import datetime
+                        
+                        # Crear directorio temporal si no existe
+                        temp_dir = os.path.join(os.getcwd(), "temp_images")
+                        if not os.path.exists(temp_dir):
+                            os.makedirs(temp_dir)
+                        
+                        # Generar nombre único para la imagen
+                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        file_extension = "jpg"  # Instagram generalmente usa JPG
+                        temp_filename = f"instagram_{sender_id}_{timestamp}.{file_extension}"
+                        temp_filepath = os.path.join(temp_dir, temp_filename)
+                        
+                        # Guardar la imagen
+                        with open(temp_filepath, "wb") as f:
+                            f.write(response.content)
+                        
+                        logger.info(f"Imagen guardada temporalmente: {temp_filepath} ({len(response.content)} bytes)")
+                        
+                        # Crear un objeto UploadFile simulado para el chat
+                        from fastapi import UploadFile
+                        from io import BytesIO
+                        
+                        # Leer el archivo guardado
+                        with open(temp_filepath, "rb") as f:
+                            image_content = f.read()
+                        
+                        # Crear UploadFile simulado
+                        image_file = UploadFile(
+                            filename=temp_filename,
+                            content_type="image/jpeg",
+                            file=BytesIO(image_content)
+                        )
+                        
+                        # Guardar imagen en Supabase usando el servicio de archivos
+                        from app.controler.chat.store.file_storage import FileStorage
+                        file_storage = FileStorage()
+                        image_url = await file_storage.save_image(project_id, image_file)
+                        
+                        logger.info(f"Imagen guardada en Supabase: {image_url}")
+                        
+                        # Limpiar archivo temporal
+                        try:
+                            os.remove(temp_filepath)
+                            logger.debug(f"Archivo temporal eliminado: {temp_filepath}")
+                        except Exception as cleanup_error:
+                            logger.warning(f"Error eliminando archivo temporal: {cleanup_error}")
+                        
+                    else:
+                        logger.error(f"Error descargando imagen de Instagram: {response.status_code} - {response.text}")
+                        
+            except Exception as e:
+                logger.error(f"Error procesando imagen de Instagram: {e}", exc_info=True)
+                # Continuar con el procesamiento sin imagen
+        
+        # Registrar otros tipos de contenido multimedia
+        elif message_type in ["video", "audio"] and message.get("attachment_url"):
+            logger.info(f"Contenido multimedia recibido - Tipo: {message_type}, URL: {message.get('attachment_url')}")
+            # Por ahora solo registramos, no descargamos videos/audio
+        
+        # Construir el mensaje final
+        final_message = text_message
+        if image_url:
+            if text_message:
+                final_message = f"{text_message}\n\n![Imagen]({image_url})"
+            else:
+                final_message = f"![Imagen]({image_url})"
+        
+        # Si no hay mensaje de texto ni imagen, crear un mensaje descriptivo según el tipo
+        if not final_message:
+            if message_type == "image":
+                final_message = "![Imagen recibida]"
+            elif message_type == "video":
+                final_message = "📹 Video recibido"
+            elif message_type == "audio":
+                final_message = "🎵 Audio recibido"
+            elif message_type == "sticker":
+                final_message = "😊 Sticker recibido"
+            else:
+                final_message = f"📎 Archivo {message_type} recibido"
       
         # Crear el objeto ChatRequest
         chat_request = ChatRequest(
-            message=text_message,
+            message=final_message,
             project_id=project_id,
             user_id=user_id,
             name=username,

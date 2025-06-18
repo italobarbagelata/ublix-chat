@@ -9,9 +9,8 @@ from app.controler.chat.store.supabase_client import SupabaseClient
 
 
 def create_api_tools(project_id, user_id):
-    """Generate the API functions code to be executed, with Redis cache."""
+    """Generate the API functions code to be executed."""
     logger = logging.getLogger(f"root")
-    cache_key = f"api_functions:{project_id}"
 
     logger.info("[API_TOOLS] Iniciando creación de herramientas API")
     

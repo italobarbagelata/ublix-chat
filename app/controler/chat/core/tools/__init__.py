@@ -9,6 +9,8 @@ from app.controler.chat.core.tools.datetime_tool import current_datetime_tool, w
 from app.controler.chat.core.tools.simple_vector_search import buscar_en_vector_openai
 from app.controler.chat.core.tools.tienda_tool import buscar_productos_tienda, consultar_info_tienda, gestionar_carrito
 from app.controler.chat.core.tools.contact_tool import SaveContactTool
+from app.controler.chat.core.tools.email_tool import EmailTool
+from .image_processor_tool import ImageProcessorTool
 import logging
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
@@ -39,6 +41,8 @@ async def agent_tools(project_id: str, user_id: str, name: str, number_phone_age
         "openai_vector": lambda *args: [openai_vector_search],
         "retriever": lambda *args: [document_retriever],
         "tienda": lambda *args: [buscar_productos_tienda, consultar_info_tienda, gestionar_carrito],
+        "image_processor": lambda *args: [ImageProcessorTool()],
+        "email": lambda *args: [EmailTool()],
     }
     
     # Preparar tareas para paralelización

@@ -91,7 +91,7 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
         - Usar markdown: [texto](url)
         - Ejemplo: [Ver producto](https://ejemplo.com/producto)
         """
-        
+                
         logging.info(f"project: {project.enabled_tools}")
         
         if(project.enabled_tools):
@@ -191,6 +191,24 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
                 - Verificar autenticación y headers requeridos
                 - Respetar límites de rate y timeouts
                 - Manejar errores según el tipo de API
+                """
+            if "email" in project.enabled_tools:
+                prompt_general_skeleton += f"""
+                EMAIL (send_email):
+                API: Resend | Params: from_email, to, subject, html/text, cc, bcc, reply_to
+                Default from: "noreply@ublix.com" | Multi emails: "email1@domain.com, email2@domain.com"
+                Use when: user wants to send email, mentions "enviar email", "mandar correo"
+                Examples: send_email(to="user@domain.com", subject="Test", html="<h1>Hola</h1>")
+                """
+            if "image_processor" in project.enabled_tools:
+                prompt_general_skeleton += f"""
+                PROCESAMIENTO DE IMÁGENES:
+                - Usa image_processor cuando:
+                * El usuario envía una imagen
+                * Necesites extraer texto de una imagen
+                * El mensaje menciona "leer imagen" o "extraer texto"
+                - La herramienta devolverá el texto extraído de la imagen
+                - Usa el texto extraído para responder al usuario
                 """
 
         

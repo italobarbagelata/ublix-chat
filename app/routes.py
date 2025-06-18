@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Request, FastAPI, BackgroundTasks
+from fastapi import APIRouter, Request, FastAPI, BackgroundTasks, UploadFile, File
 from app.chatbot import chatbot, chat_stream
 from app.controler.webhook.instagram_webhook import process_webhook_instagram, verify_webhook_instagram
 from app.controler.webhook.facebook_webhook import verify_webhook_facebook, process_webhook_facebook
 from app.controler.webhook.whatsapp_webhook import verify_webhook_whatsapp, process_webhook_whatsapp
 from app.models import ChatRequest
+from app.controler.chat import chat
     
 chat_router = APIRouter(prefix="/api/chat", tags=["chat"])
 webhook_router = APIRouter(prefix="/api/instagram", tags=["instagram"])
@@ -15,15 +16,20 @@ webhook_router_whatsapp = APIRouter(prefix="/api/whatsapp", tags=["whatsapp"])
 ##########################
 
 @chat_router.post("/message", operation_id="send_chat_message")
-async def chat_with_agent(request: ChatRequest):
-    """Chat with the server."""
-    return await chatbot(request)
+async def chat_with_agent(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    image: UploadFile = None
+):
+    """
+    Chat con el servidor. Soporta mensajes con o sin imágenes.
+    """
+    return await chat(request, background_tasks, image)
 
 @chat_router.post("/stream", operation_id="send_chat_message_stream")
 async def chat_with_agent_stream(request: ChatRequest, background_tasks: BackgroundTasks):
     """🆕 Chat with the server using streaming for real-time responses."""
     return await chat_stream(request, background_tasks)
-
 
 ##########################
 # Webhook
