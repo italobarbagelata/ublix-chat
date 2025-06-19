@@ -143,10 +143,20 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
                 REGLAS IMPORTANTES PARA AGENDAMIENTO:
                 - SIEMPRE verificar disponibilidad antes de crear eventos
                 - NUNCA agendar si la hora ya está ocupada
+                - SIEMPRE verificar si es feriado antes de agendar
                 - Usar check_availability primero para confirmar que el horario está libre
+                - Usar check_chile_holiday_tool para verificar si la fecha es feriado
+                - NO agendar eventos en feriados chilenos
                 - Si hay conflictos, mostrar los eventos existentes y sugerir horarios alternativos
+                - Si es feriado, informar al usuario y sugerir otra fecha
                 - Solo usar force_create=true si el usuario explícitamente lo solicita
                 - El sistema verifica automáticamente conflictos al crear eventos
+                
+                FLUJO DE VALIDACIÓN PARA AGENDAR:
+                1. Verificar si la fecha es feriado: check_chile_holiday_tool
+                2. Si NO es feriado, verificar disponibilidad: check_availability
+                3. Si está disponible, proceder con create_event
+                4. Si hay conflictos o es feriado, sugerir alternativas
                 
                 Notas importantes:
                 - Todas las fechas se manejan en zona horaria de Chile (UTC-3)
@@ -154,6 +164,7 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
                 - Formato de fecha: YYYY-MM-DDThh:mm:ss
                 - Para eventos con invitados, separar emails por coma
                 - NUNCA digas "el horario está disponible" sin ejecutar check_availability primero
+                - NUNCA agendes en feriados sin verificar primero con check_chile_holiday_tool
                 """
             if "tienda" in project.enabled_tools:
                 prompt_general_skeleton += f"""
