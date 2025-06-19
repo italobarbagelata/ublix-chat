@@ -325,11 +325,10 @@ async def process_instagram_message(message: Dict[str, Any], background_tasks: B
                         with open(temp_filepath, "rb") as f:
                             image_content = f.read()
                         
-                        # Crear UploadFile simulado con content_type correcto
+                        # Crear UploadFile simulado
                         image_file = UploadFile(
                             filename=temp_filename,
-                            file=BytesIO(image_content),
-                            content_type="image/jpeg"
+                            file=BytesIO(image_content)
                         )
                         
                         # Guardar imagen en Supabase usando el servicio de archivos
