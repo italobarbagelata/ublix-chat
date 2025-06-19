@@ -132,27 +132,58 @@ def extract_messages(body: Dict[str, Any]) -> List[Dict[str, Any]]:
         # Extraer el mensaje
         if "message" in messaging:
             message = messaging["message"]
-            message_type = message.get("type", "text")
             
-            if message_type == "text":
-                messages.append({
-                    "sender_id": sender_id,
-                    "page_id": page_id,  # Agregar el page_id al mensaje
-                    "type": message_type,
-                    "text": message.get("text", ""),
-                    "timestamp": messaging.get("timestamp"),
-                    "message_id": message.get("mid")
-                })
-            elif message_type in ["image", "audio", "file", "video"]:
-                # Manejar mensajes multimedia
-                messages.append({
-                    "sender_id": sender_id,
-                    "page_id": page_id,  # Agregar el page_id al mensaje
-                    "type": message_type,
-                    "media_id": message.get(message_type, {}).get("id"),
-                    "timestamp": messaging.get("timestamp"),
-                    "message_id": message.get("mid")
-                })
+            # Verificar si hay attachments (imágenes, archivos, etc.)
+            if "attachments" in message and message["attachments"]:
+                attachment = message["attachments"][0]
+                attachment_type = attachment.get("type", "image")
+                
+                if attachment_type == "image":
+                    # Imagen con URL directa
+                    payload = attachment.get("payload", {})
+                    image_url = payload.get("url")
+                    
+                    messages.append({
+                        "sender_id": sender_id,
+                        "page_id": page_id,
+                        "type": "image",
+                        "image_url": image_url,  # URL directa de la imagen
+                        "timestamp": messaging.get("timestamp"),
+                        "message_id": message.get("mid")
+                    })
+                else:
+                    # Otros tipos de attachments
+                    messages.append({
+                        "sender_id": sender_id,
+                        "page_id": page_id,
+                        "type": attachment_type,
+                        "attachment_url": attachment.get("payload", {}).get("url"),
+                        "timestamp": messaging.get("timestamp"),
+                        "message_id": message.get("mid")
+                    })
+            else:
+                # Mensaje de texto normal
+                message_type = message.get("type", "text")
+                
+                if message_type == "text":
+                    messages.append({
+                        "sender_id": sender_id,
+                        "page_id": page_id,
+                        "type": message_type,
+                        "text": message.get("text", ""),
+                        "timestamp": messaging.get("timestamp"),
+                        "message_id": message.get("mid")
+                    })
+                elif message_type in ["image", "audio", "file", "video"]:
+                    # Manejar mensajes multimedia con media_id
+                    messages.append({
+                        "sender_id": sender_id,
+                        "page_id": page_id,
+                        "type": message_type,
+                        "media_id": message.get(message_type, {}).get("id"),
+                        "timestamp": messaging.get("timestamp"),
+                        "message_id": message.get("mid")
+                    })
     except Exception as e:
         logger.error(f"Error extrayendo mensajes: {e}")
     
@@ -233,43 +264,20 @@ async def process_message(message: Dict[str, Any], background_tasks: BackgroundT
         final_message = None
         image_url = None
         
-        if message["type"] == "image" and message.get("media_id"):
-            # Descargar la imagen desde la API de Facebook
-            logger.info(f"Procesando imagen de Messenger: {message.get('media_id')}")
-            try:
-                # Obtener access_token de la página
-                pages = config.get("pages", [])
-                if isinstance(pages, str):
-                    try:
-                        pages = json.loads(pages)
-                    except json.JSONDecodeError:
-                        logger.error(f"Error parseando pages como JSON: {pages}")
-                        return
-                page_config = next((page for page in pages if page.get("id") == source_id), None)
-                if not page_config:
-                    logger.error(f"No se encontró configuración de página para page_id: {source_id}")
-                    return
-                access_token = page_config.get("access_token")
-                if not access_token:
-                    logger.error("Falta access_token en la configuración de la página")
-                    return
-                # Obtener la URL de la imagen
-                url = f"https://graph.facebook.com/v22.0/{message['media_id']}?fields=images&access_token={access_token}"
-                async with httpx.AsyncClient(timeout=30.0) as client:
-                    response = await client.get(url)
-                    if response.status_code == 200:
-                        data = response.json()
-                        image_src = data.get("images", [{}])[0].get("source")
-                        if not image_src:
-                            logger.error("No se pudo obtener la URL de la imagen desde la API de Facebook")
-                            return
-                        # Descargar la imagen
-                        img_response = await client.get(image_src)
+        if message["type"] == "image":
+            if message.get("image_url"):
+                # Imagen con URL directa (attachments)
+                logger.info(f"Procesando imagen de Messenger con URL directa: {message.get('image_url')}")
+                try:
+                    import os
+                    from datetime import datetime
+                    from fastapi import UploadFile
+                    from io import BytesIO
+                    
+                    # Descargar la imagen directamente desde la URL
+                    async with httpx.AsyncClient(timeout=30.0) as client:
+                        img_response = await client.get(message["image_url"])
                         if img_response.status_code == 200:
-                            import os
-                            from datetime import datetime
-                            from fastapi import UploadFile
-                            from io import BytesIO
                             # Crear directorio temporal si no existe
                             temp_dir = os.path.join(os.getcwd(), "temp_images")
                             if not os.path.exists(temp_dir):
@@ -299,13 +307,87 @@ async def process_message(message: Dict[str, Any], background_tasks: BackgroundT
                             # Construir mensaje markdown para el bot
                             final_message = f"![Imagen]({image_url})"
                         else:
-                            logger.error(f"Error descargando imagen de Facebook: {img_response.status_code}")
+                            logger.error(f"Error descargando imagen desde URL directa: {img_response.status_code}")
                             return
-                    else:
-                        logger.error(f"Error obteniendo info de imagen de Facebook: {response.status_code} - {response.text}")
+                except Exception as e:
+                    logger.error(f"Error procesando imagen de Messenger con URL directa: {e}", exc_info=True)
+                    return
+            elif message.get("media_id"):
+                # Descargar la imagen desde la API de Facebook (método anterior)
+                logger.info(f"Procesando imagen de Messenger: {message.get('media_id')}")
+                try:
+                    # Obtener access_token de la página
+                    pages = config.get("pages", [])
+                    if isinstance(pages, str):
+                        try:
+                            pages = json.loads(pages)
+                        except json.JSONDecodeError:
+                            logger.error(f"Error parseando pages como JSON: {pages}")
+                            return
+                    page_config = next((page for page in pages if page.get("id") == source_id), None)
+                    if not page_config:
+                        logger.error(f"No se encontró configuración de página para page_id: {source_id}")
                         return
-            except Exception as e:
-                logger.error(f"Error procesando imagen de Messenger: {e}", exc_info=True)
+                    access_token = page_config.get("access_token")
+                    if not access_token:
+                        logger.error("Falta access_token en la configuración de la página")
+                        return
+                    # Obtener la URL de la imagen
+                    url = f"https://graph.facebook.com/v22.0/{message['media_id']}?fields=images&access_token={access_token}"
+                    async with httpx.AsyncClient(timeout=30.0) as client:
+                        response = await client.get(url)
+                        if response.status_code == 200:
+                            data = response.json()
+                            image_src = data.get("images", [{}])[0].get("source")
+                            if not image_src:
+                                logger.error("No se pudo obtener la URL de la imagen desde la API de Facebook")
+                                return
+                            # Descargar la imagen
+                            img_response = await client.get(image_src)
+                            if img_response.status_code == 200:
+                                import os
+                                from datetime import datetime
+                                from fastapi import UploadFile
+                                from io import BytesIO
+                                # Crear directorio temporal si no existe
+                                temp_dir = os.path.join(os.getcwd(), "temp_images")
+                                if not os.path.exists(temp_dir):
+                                    os.makedirs(temp_dir)
+                                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                                temp_filename = f"messenger_{user_id}_{timestamp}.jpg"
+                                temp_filepath = os.path.join(temp_dir, temp_filename)
+                                with open(temp_filepath, "wb") as f:
+                                    f.write(img_response.content)
+                                logger.info(f"Imagen guardada temporalmente: {temp_filepath} ({len(img_response.content)} bytes)")
+                                with open(temp_filepath, "rb") as f:
+                                    image_content = f.read()
+                                image_file = UploadFile(
+                                    filename=temp_filename,
+                                    file=BytesIO(image_content)
+                                )
+                                # Guardar imagen en Supabase
+                                from app.controler.chat.store.file_storage import FileStorage
+                                file_storage = FileStorage()
+                                image_url = await file_storage.save_image(project_id, image_file, content_type="image/jpeg")
+                                logger.info(f"Imagen guardada en Supabase: {image_url}")
+                                try:
+                                    os.remove(temp_filepath)
+                                    logger.debug(f"Archivo temporal eliminado: {temp_filepath}")
+                                except Exception as cleanup_error:
+                                    logger.warning(f"Error eliminando archivo temporal: {cleanup_error}")
+                                # Construir mensaje markdown para el bot
+                                final_message = f"![Imagen]({image_url})"
+                            else:
+                                logger.error(f"Error descargando imagen de Facebook: {img_response.status_code}")
+                                return
+                        else:
+                            logger.error(f"Error obteniendo info de imagen de Facebook: {response.status_code} - {response.text}")
+                            return
+                except Exception as e:
+                    logger.error(f"Error procesando imagen de Messenger: {e}", exc_info=True)
+                    return
+            else:
+                logger.error("Imagen sin URL ni media_id")
                 return
         elif message["type"] == "text":
             final_message = message["text"]

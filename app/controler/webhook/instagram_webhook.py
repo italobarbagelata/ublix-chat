@@ -325,12 +325,12 @@ async def process_instagram_message(message: Dict[str, Any], background_tasks: B
                         with open(temp_filepath, "rb") as f:
                             image_content = f.read()
                         
-                        # Crear UploadFile simulado
+                        # Crear UploadFile simulado con content_type correcto
                         image_file = UploadFile(
                             filename=temp_filename,
-                            file=BytesIO(image_content)
+                            file=BytesIO(image_content),
+                            content_type="image/jpeg"
                         )
-                        image_file.content_type = "image/jpeg"
                         
                         # Guardar imagen en Supabase usando el servicio de archivos
                         from app.controler.chat.store.file_storage import FileStorage
