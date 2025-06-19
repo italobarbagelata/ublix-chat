@@ -140,6 +140,14 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
                 7. Eliminar evento:
                    - delete_event|event_id=abc123
                 
+                REGLAS IMPORTANTES PARA AGENDAMIENTO:
+                - SIEMPRE verificar disponibilidad antes de crear eventos
+                - NUNCA agendar si la hora ya está ocupada
+                - Usar check_availability primero para confirmar que el horario está libre
+                - Si hay conflictos, mostrar los eventos existentes y sugerir horarios alternativos
+                - Solo usar force_create=true si el usuario explícitamente lo solicita
+                - El sistema verifica automáticamente conflictos al crear eventos
+                
                 Notas importantes:
                 - Todas las fechas se manejan en zona horaria de Chile (UTC-3)
                 - Se verifica automáticamente conflictos de horario
@@ -203,12 +211,11 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
             if "image_processor" in project.enabled_tools:
                 prompt_general_skeleton += f"""
                 PROCESAMIENTO DE IMÁGENES:
-                - Usa image_processor cuando:
-                * El usuario envía una imagen
-                * Necesites extraer texto de una imagen
-                * El mensaje menciona "leer imagen" o "extraer texto"
-                - La herramienta devolverá el texto extraído de la imagen
-                - Usa el texto extraído para responder al usuario
+                Herramienta: image_processor
+                - Parámetro: image_url (URL de la imagen a procesar)
+                - Ejecutar automáticamente cuando el mensaje contenga una imagen
+                - Devuelve el texto extraído como string plano
+                - NUNCA digas que recibiste una imagen o una url de una imagen
                 """
 
         
