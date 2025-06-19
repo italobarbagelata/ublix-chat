@@ -169,9 +169,9 @@ async def process_message(message: Dict[str, Any], background_tasks: BackgroundT
     try:
         logger.info(f"Iniciando procesamiento de mensaje: {json.dumps(message, indent=2)}")
         
-        # Por ahora solo procesamos mensajes de texto
-        if message["type"] != "text":
-            logger.info(f"Omitiendo mensaje no textual de tipo: {message['type']}")
+        # Procesar solo texto o imagen
+        if message["type"] not in ["text", "image"]:
+            logger.info(f"Omitiendo mensaje no soportado de tipo: {message['type']}")
             return
         
         # Obtener el ID del proyecto asociado con esta página de Facebook
@@ -228,35 +228,110 @@ async def process_message(message: Dict[str, Any], background_tasks: BackgroundT
             logger.info("Bot desactivado para este usuario - omitiendo procesamiento")
             return
         
-        # Crear una instancia de Graph y procesar el mensaje
         user_id = message["sender_id"]
-        text_message = message["text"]
+        source_id = message["page_id"]
+        final_message = None
+        image_url = None
         
+        if message["type"] == "image" and message.get("media_id"):
+            # Descargar la imagen desde la API de Facebook
+            logger.info(f"Procesando imagen de Messenger: {message.get('media_id')}")
+            try:
+                # Obtener access_token de la página
+                pages = config.get("pages", [])
+                if isinstance(pages, str):
+                    try:
+                        pages = json.loads(pages)
+                    except json.JSONDecodeError:
+                        logger.error(f"Error parseando pages como JSON: {pages}")
+                        return
+                page_config = next((page for page in pages if page.get("id") == source_id), None)
+                if not page_config:
+                    logger.error(f"No se encontró configuración de página para page_id: {source_id}")
+                    return
+                access_token = page_config.get("access_token")
+                if not access_token:
+                    logger.error("Falta access_token en la configuración de la página")
+                    return
+                # Obtener la URL de la imagen
+                url = f"https://graph.facebook.com/v22.0/{message['media_id']}?fields=images&access_token={access_token}"
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    response = await client.get(url)
+                    if response.status_code == 200:
+                        data = response.json()
+                        image_src = data.get("images", [{}])[0].get("source")
+                        if not image_src:
+                            logger.error("No se pudo obtener la URL de la imagen desde la API de Facebook")
+                            return
+                        # Descargar la imagen
+                        img_response = await client.get(image_src)
+                        if img_response.status_code == 200:
+                            import os
+                            from datetime import datetime
+                            from fastapi import UploadFile
+                            from io import BytesIO
+                            # Crear directorio temporal si no existe
+                            temp_dir = os.path.join(os.getcwd(), "temp_images")
+                            if not os.path.exists(temp_dir):
+                                os.makedirs(temp_dir)
+                            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                            temp_filename = f"messenger_{user_id}_{timestamp}.jpg"
+                            temp_filepath = os.path.join(temp_dir, temp_filename)
+                            with open(temp_filepath, "wb") as f:
+                                f.write(img_response.content)
+                            logger.info(f"Imagen guardada temporalmente: {temp_filepath} ({len(img_response.content)} bytes)")
+                            with open(temp_filepath, "rb") as f:
+                                image_content = f.read()
+                            image_file = UploadFile(
+                                filename=temp_filename,
+                                file=BytesIO(image_content)
+                            )
+                            # Guardar imagen en Supabase
+                            from app.controler.chat.store.file_storage import FileStorage
+                            file_storage = FileStorage()
+                            image_url = await file_storage.save_image(project_id, image_file, content_type="image/jpeg")
+                            logger.info(f"Imagen guardada en Supabase: {image_url}")
+                            try:
+                                os.remove(temp_filepath)
+                                logger.debug(f"Archivo temporal eliminado: {temp_filepath}")
+                            except Exception as cleanup_error:
+                                logger.warning(f"Error eliminando archivo temporal: {cleanup_error}")
+                            # Construir mensaje markdown para el bot
+                            final_message = f"![Imagen]({image_url})"
+                        else:
+                            logger.error(f"Error descargando imagen de Facebook: {img_response.status_code}")
+                            return
+                    else:
+                        logger.error(f"Error obteniendo info de imagen de Facebook: {response.status_code} - {response.text}")
+                        return
+            except Exception as e:
+                logger.error(f"Error procesando imagen de Messenger: {e}", exc_info=True)
+                return
+        elif message["type"] == "text":
+            final_message = message["text"]
+        else:
+            logger.info(f"Tipo de mensaje no soportado: {message['type']}")
+            return
         # Crear el objeto ChatRequest
         chat_request = ChatRequest(
-            message=text_message,
+            message=final_message,
             project_id=project_id,
             user_id=user_id,
             name=user_id,  # Usamos el user_id como nombre por defecto
             source="messenger",
-            source_id=message['page_id'],
+            source_id=source_id,
             number_phone_agent="no number",
             debug=False
         )
-        
         # Obtener la respuesta usando el nuevo endpoint de chat
         response = await chatbot(chat_request)
-        
         if response.status_code != 200:
             logger.error(f"Error en la respuesta del chat: {response.body}")
             return
-            
         response_data = json.loads(response.body)
-        
         # Enviar la respuesta de vuelta a Messenger
         logger.info(f"Enviando respuesta a Messenger para user_id: {user_id}")
-        await send_messenger_message(project_id, user_id, response_data["response"], message["page_id"])
-        
+        await send_messenger_message(project_id, user_id, response_data["response"], source_id)
         logger.info(f"Mensaje procesado de {user_id} y respuesta enviada")
     except Exception as e:
         logger.error(f"Error procesando mensaje: {e}", exc_info=True)

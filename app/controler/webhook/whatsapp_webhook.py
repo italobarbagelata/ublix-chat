@@ -184,9 +184,9 @@ async def process_message(message: Dict[str, Any], background_tasks: BackgroundT
     try:
         logger.info(f"Iniciando procesamiento de mensaje: {json.dumps(message, indent=2)}")
         
-        # Por ahora solo procesamos mensajes de texto
-        if message["type"] != "text":
-            logger.info(f"Omitiendo mensaje no textual de tipo: {message['type']}")
+        # Procesar solo texto o imagen
+        if message["type"] not in ["text", "image"]:
+            logger.info(f"Omitiendo mensaje no soportado de tipo: {message['type']}")
             return
         
         # Obtener el ID del proyecto asociado con este número de WhatsApp
@@ -232,14 +232,87 @@ async def process_message(message: Dict[str, Any], background_tasks: BackgroundT
             logger.info("Bot desactivado para este usuario de WhatsApp - omitiendo procesamiento")
             return
         
+        user_id = message["from_number"]
+        source_id = message["phone_number_id"]
+        final_message = None
+        image_url = None
+        
+        if message["type"] == "image" and message.get("media_id"):
+            # Descargar la imagen desde la API de WhatsApp
+            logger.info(f"Procesando imagen de WhatsApp: {message.get('media_id')}")
+            try:
+                access_token = config.get("access_token")
+                if not access_token:
+                    logger.error("Falta access_token en la configuración")
+                    return
+                # Obtener la URL de la imagen
+                url = f"https://graph.facebook.com/v22.0/{message['media_id']}?access_token={access_token}"
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    response = await client.get(url)
+                    if response.status_code == 200:
+                        data = response.json()
+                        image_src = data.get("url")
+                        if not image_src:
+                            logger.error("No se pudo obtener la URL de la imagen desde la API de WhatsApp")
+                            return
+                        # Descargar la imagen
+                        img_response = await client.get(image_src)
+                        if img_response.status_code == 200:
+                            import os
+                            from datetime import datetime
+                            from fastapi import UploadFile
+                            from io import BytesIO
+                            # Crear directorio temporal si no existe
+                            temp_dir = os.path.join(os.getcwd(), "temp_images")
+                            if not os.path.exists(temp_dir):
+                                os.makedirs(temp_dir)
+                            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                            temp_filename = f"whatsapp_{user_id}_{timestamp}.jpg"
+                            temp_filepath = os.path.join(temp_dir, temp_filename)
+                            with open(temp_filepath, "wb") as f:
+                                f.write(img_response.content)
+                            logger.info(f"Imagen guardada temporalmente: {temp_filepath} ({len(img_response.content)} bytes)")
+                            with open(temp_filepath, "rb") as f:
+                                image_content = f.read()
+                            image_file = UploadFile(
+                                filename=temp_filename,
+                                file=BytesIO(image_content)
+                            )
+                            # Guardar imagen en Supabase
+                            from app.controler.chat.store.file_storage import FileStorage
+                            file_storage = FileStorage()
+                            image_url = await file_storage.save_image(project_id, image_file, content_type="image/jpeg")
+                            logger.info(f"Imagen guardada en Supabase: {image_url}")
+                            try:
+                                os.remove(temp_filepath)
+                                logger.debug(f"Archivo temporal eliminado: {temp_filepath}")
+                            except Exception as cleanup_error:
+                                logger.warning(f"Error eliminando archivo temporal: {cleanup_error}")
+                            # Construir mensaje markdown para el bot
+                            final_message = f"![Imagen]({image_url})"
+                        else:
+                            logger.error(f"Error descargando imagen de WhatsApp: {img_response.status_code}")
+                            return
+                    else:
+                        logger.error(f"Error obteniendo info de imagen de WhatsApp: {response.status_code} - {response.text}")
+                        return
+            except Exception as e:
+                logger.error(f"Error procesando imagen de WhatsApp: {e}", exc_info=True)
+                return
+        elif message["type"] == "text":
+            final_message = message["text"]
+        else:
+            logger.info(f"Tipo de mensaje no soportado: {message['type']}")
+            return
+        
         # Crear el objeto ChatRequest
         chat_request = ChatRequest(
-            message=message["text"],
+            message=final_message,
             project_id=project_id,
-            user_id=message["from_number"],
-            name=message["from_number"],  # Usamos el número como nombre por defecto
+            user_id=user_id,
+            name=user_id,  # Usamos el número como nombre por defecto
             source="whatsapp",
-            source_id=message["phone_number_id"],
+            source_id=source_id,
             number_phone_agent="no number",
             debug=False
         )
@@ -254,10 +327,10 @@ async def process_message(message: Dict[str, Any], background_tasks: BackgroundT
         response_data = json.loads(response.body)
         
         # Enviar la respuesta de vuelta a WhatsApp
-        logger.info(f"Enviando respuesta a WhatsApp para user_id: {message['from_number']}")
-        await send_whatsapp_message(project_id, message["from_number"], message["entry_id"], response_data["response"], message["phone_number_id"])
+        logger.info(f"Enviando respuesta a WhatsApp para user_id: {user_id}")
+        await send_whatsapp_message(project_id, user_id, message["entry_id"], response_data["response"], source_id)
         
-        logger.info(f"Mensaje procesado de {message['from_number']} y respuesta enviada")
+        logger.info(f"Mensaje procesado de {user_id} y respuesta enviada")
     except Exception as e:
         logger.error(f"Error procesando mensaje: {e}", exc_info=True)
 
