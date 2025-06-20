@@ -60,6 +60,22 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
         prompt_general_skeleton = prompt_general_skeleton.replace("{date_range_str}", date_range_str)
         prompt_general_skeleton = prompt_general_skeleton.replace("{now_chile}", now_chile)
         
+        # INSTRUCCIÓN CRÍTICA: SIEMPRE usar unified_search antes de responder
+        if "unified_search" in project.enabled_tools:
+            prompt_general_skeleton += f"""
+            
+            ⚠️ INSTRUCCIÓN CRÍTICA - OBLIGATORIA:
+            - ANTES de responder CUALQUIER consulta del usuario, SIEMPRE ejecuta unified_search_tool
+            - NO respondas NUNCA sin haber buscado primero con unified_search_tool
+            - Usa unified_search_tool con la consulta exacta del usuario
+            - Esta herramienta busca automáticamente en FAQs, documentos y productos
+            - Solo después de obtener resultados, procede a responder
+            - Si no hay resultados relevantes, entonces puedes responder basándote en tu conocimiento
+            - Esta regla es ABSOLUTA y no tiene excepciones
+            - unified_search_tool es la HERRAMIENTA PRINCIPAL de búsqueda híbrida
+            
+            """
+        
         prompt_general_skeleton += f"""
         MANEJO DE FECHAS Y HORAS:
         - Zona horaria: Chile (UTC-3)
@@ -82,7 +98,7 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
         - Usar save_contact_tool con los datos detectados
         - Ejemplo: si el usuario escribe "pedrito morales sabado@fa.cl +56424231552"
           → save_contact_tool(name="Pedrito Morales", email="sabado@fa.cl", phone_number="+56424231552")
-        - Continuar con la conversación
+        - NUNCA digas que guardaste el contacto, solo ejecuta la herramienta
         """
         
         
@@ -95,7 +111,21 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
         logging.info(f"project: {project.enabled_tools}")
         
         if(project.enabled_tools):
-            if "products_search" in project.enabled_tools:
+            if "unified_search" in project.enabled_tools:
+                prompt_general_skeleton += f"""
+                BÚSQUEDA UNIFICADA (unified_search_tool) - HERRAMIENTA PRINCIPAL:
+                - Herramienta OBLIGATORIA para buscar en TODOS los tipos de contenido
+                - SIEMPRE ejecutar ANTES de responder cualquier consulta del usuario
+                - Busca automáticamente en: documentos, FAQs y productos
+                - Combina búsqueda semántica y por texto para mejores resultados
+                - Prioriza FAQs para respuestas rápidas, luego documentos, luego productos
+                - Parámetros: query (obligatorio), content_types (opcional), limit (opcional, default 15), category (opcional)
+                - Ejemplo: unified_search_tool(query="política de devoluciones", limit=10)
+                - NO usar las herramientas separadas (document_retriever, faq_retriever, search_products_unified)
+                - Esta herramienta es MÁS EFICIENTE y RÁPIDA que usar 3 herramientas separadas
+                - Es la HERRAMIENTA PRINCIPAL de búsqueda híbrida del sistema
+                """
+            elif "products_search" in project.enabled_tools:
                 prompt_general_skeleton += f"""
                 BÚSQUEDA DE PRODUCTOS:
                 - Usa search_products_unified para buscar productos
@@ -104,13 +134,37 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
                 - Formatea URLs con markdown: [texto](url)
                 - Si no hay resultados, sugiere términos alternativos
                 """
-            if "retriever" in project.enabled_tools:
+            elif "retriever" in project.enabled_tools:
                 prompt_general_skeleton += f"""
                 RETRIEVER:
                 - Usa document_retriever para buscar información específica
                 - Parámetros: query (texto de búsqueda)
                 - Devuelve: documentos relevantes con título, contenido y relevancia
-                - Usar cuando: necesites información precisa sobre el proyecto
+                - SIEMPRE buscar en documentos cuando el usuario haga consultas sobre el proyecto
+                - Usar para: información técnica, procedimientos, políticas, contenido detallado
+                """
+            elif "faq_retriever" in project.enabled_tools:
+                prompt_general_skeleton += f"""
+                FAQ RETRIEVER - OBLIGATORIO:
+                - SIEMPRE ejecuta faq_retriever ANTES de responder cualquier consulta
+                - Usa faq_retriever con la consulta exacta del usuario
+                - Parámetros: query (texto de búsqueda), limit (opcional, por defecto 8)
+                - Devuelve: FAQs con pregunta, respuesta, título y metadatos
+                - NO respondas sin haber buscado primero en FAQs
+                - Si no hay FAQs relevantes, entonces puedes responder basándote en tu conocimiento
+                - Esta herramienta es PRIORITARIA sobre todas las demás
+                """
+            if "retriever" in project.enabled_tools and "faq_retriever" in project.enabled_tools and "unified_search" not in project.enabled_tools:
+                prompt_general_skeleton += f"""
+                ESTRATEGIA DE BÚSQUEDA COMBINADA:
+                - SIEMPRE usar AMBAS herramientas (document_retriever Y faq_retriever) cuando el usuario haga consultas
+                - Buscar primero en FAQs para respuestas rápidas y directas
+                - Buscar en documentos para información más detallada y técnica
+                - Combinar los resultados para dar respuestas completas
+                - Priorizar FAQs cuando la consulta sea una pregunta directa
+                - Usar documentos para complementar con información adicional
+                - NO esperar a que el usuario pida específicamente buscar en una herramienta
+                - Ser proactivo: buscar automáticamente en ambas fuentes
                 """
             if "calendar" in project.enabled_tools:
                 prompt_general_skeleton += f"""
@@ -143,7 +197,7 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
                 REGLAS IMPORTANTES PARA AGENDAMIENTO:
                 - SIEMPRE verificar disponibilidad antes de crear eventos
                 - NUNCA agendar si la hora ya está ocupada
-                - SIEMPRE verificar si es feriado antes de agendar
+                - SIEMPRE verificar si es feriado antes de agendar con check_chile_holiday_tool
                 - Usar check_availability primero para confirmar que el horario está libre
                 - Usar check_chile_holiday_tool para verificar si la fecha es feriado
                 - NO agendar eventos en feriados chilenos

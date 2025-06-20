@@ -2,7 +2,9 @@ from langchain.tools import tool
 
 from app.controler.chat.core.tools.api_tool import create_api_tools
 from app.controler.chat.core.tools.retriever_tool import document_retriever
+from app.controler.chat.core.tools.faq_retriever_tool import faq_retriever
 from app.controler.chat.core.tools.products_fallback_tool import search_products_unified
+from app.controler.chat.core.tools.unified_search_tool import unified_search_tool
 from app.controler.chat.core.tools.openai_vector_tool import openai_vector_search
 from app.controler.chat.core.tools.chile_holidays_tool import check_chile_holiday_tool, next_chile_holidays_tool
 from app.controler.chat.core.tools.datetime_tool import current_datetime_tool, week_info_tool
@@ -40,6 +42,8 @@ async def agent_tools(project_id: str, user_id: str, name: str, number_phone_age
         "calendar": lambda *args: [google_calendar_tool],
         "openai_vector": lambda *args: [openai_vector_search],
         "retriever": lambda *args: [document_retriever],
+        "faq_retriever": lambda *args: [faq_retriever],
+        "unified_search": lambda *args: [unified_search_tool],
         "tienda": lambda *args: [buscar_productos_tienda, consultar_info_tienda, gestionar_carrito],
         "image_processor": lambda *args: [ImageProcessorTool()],
         "email": lambda *args: [EmailTool()],
