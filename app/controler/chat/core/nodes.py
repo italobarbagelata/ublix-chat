@@ -248,22 +248,11 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
             if "api" in project.enabled_tools:
                 prompt_general_skeleton += f"""
                 API:
-                Herramienta: api_tool
-                
-                Características:
-                - Integración con APIs externas configuradas en el proyecto
-                - Funciones específicas generadas para cada API
-                - Manejo automático de errores y timeouts
-                
-                Uso:
-                - Consultar la API específica según el contexto
-                - Proporcionar parámetros en el formato requerido
-                - Procesar la respuesta según el formato de la API
-                
-                Consideraciones:
-                - Verificar autenticación y headers requeridos
-                - Respetar límites de rate y timeouts
-                - Manejar errores según el tipo de API
+                - Herramientas disponibles: funciones específicas generadas para cada API configurada
+                - Uso: ejecutar automáticamente cuando el usuario solicite información o acciones que requieran APIs externas
+                - Parámetros: seguir la documentación específica de cada función API
+                - Respuesta: procesar y presentar los datos de forma clara y útil
+                - Manejo de errores: informar al usuario si hay problemas de conexión o datos
                 """
             if "email" in project.enabled_tools:
                 prompt_general_skeleton += f"""
