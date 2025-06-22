@@ -9,8 +9,7 @@ class VisionModelProcessor:
 
     def __init__(self) -> None:
         self.__api_key = os.getenv("OPENAI_API_KEY")
-        # Usar el nuevo modelo de visión
-        self.__vision_model = "gpt-4o-mini"
+        self.__vision_model = os.getenv("MODEL_CHATBOT")
         
         if not self.__api_key:
             raise ValueError("OPENAI_API_KEY environment variable is not set")

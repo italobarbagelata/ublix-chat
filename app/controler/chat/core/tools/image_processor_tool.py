@@ -29,7 +29,7 @@ class ImageProcessorTool(BaseTool):
         """
         try:
             response = await self._client.chat.completions.create(
-                model="gpt-4o-mini",
+                model=os.getenv("MODEL_CHATBOT"),
                 messages=[
                     {
                         "role": "user",

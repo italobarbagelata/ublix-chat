@@ -168,7 +168,7 @@ def search_with_chat_completions(
     query: str,
     project_id: str,
     vector_store_id: Optional[str] = None,
-    model: str = "gpt-4o-mini"
+    model: str = os.getenv("MODEL_CHATBOT")
 ) -> Dict[str, Any]:
     """
     Buscar usando Chat Completions API con file_search
