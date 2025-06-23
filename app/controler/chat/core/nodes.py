@@ -191,9 +191,9 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
                 Herramienta: google_calendar_tool
                 
                 ⚠️ CONFIGURACIÓN ESPECÍFICA DEL PROYECTO:
-                - DURACIÓN ESTÁNDAR: Todas las reuniones duran 30 minutos (0.5 horas)
-                - SIEMPRE usar duration=0.5 en find_available_slots
-                - Al crear eventos, calcular hora de fin sumando 30 minutos a la hora de inicio
+                - DURACIÓN ESTÁNDAR: Todas las reuniones duran 60 minutos (1 hora)
+                - SIEMPRE usar duration=1 en find_available_slots
+                - Al crear eventos, calcular hora de fin sumando 60 minutos a la hora de inicio
                 
                 Funcionalidades disponibles:
                 1. Listar eventos:
@@ -205,14 +205,16 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
                 3. Crear evento:
                    - create_event|title=Reunión|start=2024-03-20T15:00:00|end=2024-03-20T16:00:00|description=Detalles|attendees=email1@ejemplo.com,email2@ejemplo.com
                    - Opcional: force_create=true para crear a pesar de conflictos
+                   - Opcional: meet=true para agregar Google Meet automáticamente
                    - IMPORTANTE: Cuando se incluyen attendees, Google Calendar envía automáticamente invitaciones por correo
                    - Los invitados reciben recordatorios por email 24 horas antes y popup 10 minutos antes
+                   - GOOGLE MEET: Si meet=true, se genera un enlace de Google Meet automáticamente y se incluye en las invitaciones
                 
                 4. Verificar disponibilidad:
                    - check_availability|start=2024-03-20T15:00:00|end=2024-03-20T16:00:00
                 
                 8. Buscar horarios disponibles:
-                   - find_available_slots|duration=0.5 (busca las próximas 3 fechas disponibles de 30 minutos)
+                   - find_available_slots|duration=1 (busca las próximas 3 fechas disponibles de 60 minutos)
                    - find_available_slots|duration=1.5|start_hour=10|end_hour=16 (personalizado)
                 
                 5. Obtener detalles:
@@ -239,9 +241,9 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
                 FLUJO PARA AGENDAR - REGLAS OBLIGATORIAS:
                 
                 1. PRIMERO: Cuando el usuario quiera agendar, usa google_calendar_tool con find_available_slots para mostrarle las próximas 3 fechas disponibles:
-                   - Ejecuta: google_calendar_tool|find_available_slots|duration=0.5
-                   - IMPORTANTE: SIEMPRE usar duration=0.5 (30 minutos) para este proyecto
-                   - Esto le mostrará 3 opciones siempre enumeradas (1, 2, 3) con fechas y horarios libres de 30 minutos
+                   - Ejecuta: google_calendar_tool|find_available_slots|duration=1
+                   - IMPORTANTE: SIEMPRE usar duration=1 (60 minutos) para este proyecto
+                   - Esto le mostrará 3 opciones siempre enumeradas (1, 2, 3) con fechas y horarios libres de 60 minutos
                 
                 2. ESPERA que el usuario elija una opción (enumerada 1, 2 o 3) O proponga su propia fecha/hora O pregunte por un día específico.
                 
@@ -249,19 +251,21 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
                    a) Si eligió un número (enumerada 1, 2 o 3): Confirma directamente "¿Confirmas que agende para [fecha/hora de la opción elegida]?"
                    b) Si propuso su propia fecha/hora: Verifica feriado (check_chile_holiday_tool) y disponibilidad (check_availability)
                    c) Si pregunta por un día específico (ej: "para el jueves?", "y para el miércoles?", "¿qué tal el viernes?", "tienes para martes?"): 
-                      Ejecuta google_calendar_tool|find_available_slots|day=[día]|duration=0.5
+                      Ejecuta google_calendar_tool|find_available_slots|day=[día]|duration=1
                       Ejemplos: 
-                      - "para el jueves?" → google_calendar_tool|find_available_slots|day=jueves|duration=0.5
-                      - "y para el miércoles?" → google_calendar_tool|find_available_slots|day=miércoles|duration=0.5
+                      - "para el jueves?" → google_calendar_tool|find_available_slots|day=jueves|duration=1
+                      - "y para el miércoles?" → google_calendar_tool|find_available_slots|day=miércoles|duration=1
                    d) Si hay conflictos o es feriado, muestra las opciones disponibles otra vez
                    e) Si está libre, confirma: "¿Confirmas que agende para [fecha/hora]?"
                 
                 4. Solo cuando tengas CONFIRMACIÓN y TODOS LOS DATOS, usa create_event con attendees=email_del_usuario.
-                   - IMPORTANTE: Los eventos deben durar exactamente 30 minutos
-                   - Si el usuario elige una hora (ej: 15:00), el evento va de 15:00 a 15:30
+                   - IMPORTANTE: Los eventos deben durar exactamente 60 minutos
+                   - Si el usuario elige una hora (ej: 15:00), el evento va de 15:00 a 16:00
+                   - GOOGLE MEET: Agregar meet=true automáticamente para todas las reuniones (es la configuración estándar)
+                   - Ejemplo: create_event|title=Reunión|start=2024-03-20T15:00:00|end=2024-03-20T16:00:00|attendees=usuario@email.com|meet=true
                 
                 ⚠️ CRÍTICO: NUNCA crees eventos sin tener el email del usuario. SIEMPRE incluye el email como attendee.
-                ⚠️ CRÍTICO: SIEMPRE empieza mostrando las opciones disponibles con find_available_slots|duration=0.5. NO preguntes "¿qué día y hora?" sin antes mostrar las opciones.
+                ⚠️ CRÍTICO: SIEMPRE empieza mostrando las opciones disponibles con find_available_slots|duration=1. NO preguntes "¿qué día y hora?" sin antes mostrar las opciones.
                 
                 ⚠️ DETECCIÓN DE DÍAS ESPECÍFICOS:
                 Si el usuario menciona un día de la semana específico (lunes, martes, miércoles, jueves, viernes, sábado, domingo), 

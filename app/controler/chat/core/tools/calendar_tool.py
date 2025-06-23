@@ -73,10 +73,10 @@ def google_calendar_tool(query: str, state: Annotated[dict, InjectedState]) -> s
                and PARAMETERS depend on the action:
                - list_events|days=7 (lists events for next 7 days)
                - search_events|title=Meeting|date=2023-06-15 (searches for events with matching title and/or date)
-               - create_event|title=Meeting with Client|start=2023-06-15T15:00:00|end=2023-06-15T16:00:00|description=Discuss project status|attendees=user1@email.com,user2@email.com|force_create=true
+               - create_event|title=Meeting with Client|start=2023-06-15T15:00:00|end=2023-06-15T16:00:00|description=Discuss project status|attendees=user1@email.com,user2@email.com|meet=true|force_create=true
                - find_available_slots (finds next 3 available time slots for meetings)
                - find_available_slots|duration=1.5|start_hour=10|end_hour=16 (customized search)
-               - find_available_slots|day=miércoles|duration=0.5 (search for specific weekday)
+               - find_available_slots|day=miércoles|duration=1 (search for specific weekday)
                Note: All times are automatically converted to Chile timezone (America/Santiago)
                - get_event|event_id=abc123
                - update_event|event_id=abc123|title=New Title|description=Updated description
@@ -401,6 +401,7 @@ def create_event(service, params):
         
         attendee_emails = []
         force_create = False  # Para forzar creación a pesar de conflictos
+        add_meet = False  # Para agregar Google Meet
         
         # Debug: Log all parameters received
         logger.info(f"Received parameters: {params}")
@@ -427,9 +428,25 @@ def create_event(service, params):
                 elif key == 'force_create' or key == 'force':
                     force_create = value.lower() in ['true', '1', 'yes', 'sí', 'si']
                     logger.info(f"force_create parameter found: {key} = {value} -> {force_create}")
+                elif key == 'meet' or key == 'google_meet' or key == 'video_call':
+                    add_meet = value.lower() in ['true', '1', 'yes', 'sí', 'si']
+                    logger.info(f"add_meet parameter found: {key} = {value} -> {add_meet}")
         
         # Debug final state
         logger.info(f"Final force_create value: {force_create}")
+        logger.info(f"Final add_meet value: {add_meet}")
+        
+        # Agregar Google Meet si se solicita
+        if add_meet:
+            event_data['conferenceData'] = {
+                'createRequest': {
+                    'requestId': f"meet-{int(datetime.now().timestamp())}",  # ID único para la solicitud
+                    'conferenceSolutionKey': {
+                        'type': 'hangoutsMeet'  # Especifica que queremos Google Meet
+                    }
+                }
+            }
+            logger.info("Google Meet conference added to event")
         
         # Agregar attendees al evento
         for email in attendee_emails:
@@ -471,12 +488,18 @@ def create_event(service, params):
             logger.info("FORCING event creation despite conflicts")
         
         # Crear el evento - sendNotifications=True asegura que se envíen invitaciones por correo
-        event = service.events().insert(
-            calendarId='primary', 
-            body=event_data,
-            sendNotifications=True,  # Forzar envío de notificaciones por correo
-            sendUpdates='all'  # Enviar actualizaciones a todos los invitados
-        ).execute()
+        # Si se incluye Google Meet, necesitamos conferenceDataVersion=1
+        insert_params = {
+            'calendarId': 'primary',
+            'body': event_data,
+            'sendNotifications': True,  # Forzar envío de notificaciones por correo
+            'sendUpdates': 'all'  # Enviar actualizaciones a todos los invitados
+        }
+        
+        if add_meet:
+            insert_params['conferenceDataVersion'] = 1  # Requerido para Google Meet
+            
+        event = service.events().insert(**insert_params).execute()
         
         # Preparar respuesta con información adicional
         response = f"✅ Evento creado exitosamente: {event.get('htmlLink')}\n"
@@ -488,6 +511,14 @@ def create_event(service, params):
             response += f"👥 Invitados: {', '.join(attendee_emails)}\n"
             response += f"📧 Se han enviado invitaciones por correo automáticamente a todos los invitados.\n"
             response += f"🔔 Los invitados recibirán recordatorios por email 24 horas antes del evento.\n"
+        
+        # Información sobre Google Meet
+        if add_meet and 'conferenceData' in event:
+            meet_link = event['conferenceData'].get('entryPoints', [{}])[0].get('uri', 'No disponible')
+            response += f"📹 Google Meet: {meet_link}\n"
+            response += f"🔗 El enlace de Google Meet se incluye automáticamente en las invitaciones.\n"
+        elif add_meet:
+            response += f"📹 Google Meet solicitado (el enlace se generará momentáneamente)\n"
         
         # Si había conflictos pero se forzó la creación
         if conflicts and force_create:
@@ -725,7 +756,7 @@ def find_next_available_slots(service, params):
     """Find the next 3 available time slots for meetings"""
     try:
         # Parse parameters
-        duration_hours = 0.5  # Duración por defecto de 30 minutos (según configuración del proyecto)
+        duration_hours = 1.0  # Duración por defecto de 60 minutos (según configuración del proyecto)
         preferred_start_hour = 9  # Hora de inicio preferida (9 AM)
         preferred_end_hour = 18  # Hora de fin preferida (6 PM)
         specific_day = None  # Para buscar en un día específico
