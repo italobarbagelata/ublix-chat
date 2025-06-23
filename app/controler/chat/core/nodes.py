@@ -21,7 +21,6 @@ logging.basicConfig(level=logging.INFO,
 # Zona horaria para Chile (Santiago)
 TIMEZONE = pytz.timezone('America/Santiago')
 
-
 async def create_agent(user_id, name, number_phone_agent, source, unique_id, project):
     async def agent(state: CustomState):
         # Calcular fechas actualizadas en cada interacción
