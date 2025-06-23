@@ -69,11 +69,14 @@ def google_calendar_tool(query: str, state: Annotated[dict, InjectedState]) -> s
     Args:
         query: A structured query with format: 
                [ACTION]|[PARAMETERS]
-               where ACTION can be: list_events, search_events, create_event, get_event, update_event, delete_event, or check_availability
+               where ACTION can be: list_events, search_events, create_event, get_event, update_event, delete_event, check_availability, or find_available_slots
                and PARAMETERS depend on the action:
                - list_events|days=7 (lists events for next 7 days)
                - search_events|title=Meeting|date=2023-06-15 (searches for events with matching title and/or date)
                - create_event|title=Meeting with Client|start=2023-06-15T15:00:00|end=2023-06-15T16:00:00|description=Discuss project status|attendees=user1@email.com,user2@email.com|force_create=true
+               - find_available_slots (finds next 3 available time slots for meetings)
+               - find_available_slots|duration=1.5|start_hour=10|end_hour=16 (customized search)
+               - find_available_slots|day=miércoles|duration=0.5 (search for specific weekday)
                Note: All times are automatically converted to Chile timezone (America/Santiago)
                - get_event|event_id=abc123
                - update_event|event_id=abc123|title=New Title|description=Updated description
@@ -125,8 +128,10 @@ def google_calendar_tool(query: str, state: Annotated[dict, InjectedState]) -> s
             return delete_event(service, parts[1:] if len(parts) > 1 else [])
         elif action == 'check_availability':
             return check_availability(service, parts[1:] if len(parts) > 1 else [])
+        elif action == 'find_available_slots':
+            return find_next_available_slots(service, parts[1:] if len(parts) > 1 else [])
         else:
-            return f"Unknown action: {action}. Supported actions are list_events, search_events, create_event, get_event, update_event, delete_event, and check_availability."
+            return f"Unknown action: {action}. Supported actions are list_events, search_events, create_event, get_event, update_event, delete_event, check_availability, and find_available_slots."
             
     except Exception as e:
         logger.error(f"Error in Google Calendar tool: {str(e)}")
@@ -429,10 +434,25 @@ def create_event(service, params):
         # Agregar attendees al evento
         for email in attendee_emails:
             if email:  # Verificar que no esté vacío
-                event_data['attendees'].append({'email': email})
+                event_data['attendees'].append({
+                    'email': email,
+                    'responseStatus': 'needsAction'  # Marca que necesita respuesta del invitado
+                })
         
-        # Si no hay attendees, remover la clave para evitar errores
-        if not event_data['attendees']:
+        # Configuraciones adicionales para asegurar envío de correos
+        if event_data['attendees']:
+            event_data['guestsCanInviteOthers'] = False  # Los invitados no pueden invitar a otros
+            event_data['guestsCanModify'] = False  # Los invitados no pueden modificar el evento
+            event_data['guestsCanSeeOtherGuests'] = True  # Los invitados pueden ver otros invitados
+            event_data['reminders'] = {
+                'useDefault': False,
+                'overrides': [
+                    {'method': 'email', 'minutes': 24 * 60},  # Recordatorio por email 24 horas antes
+                    {'method': 'popup', 'minutes': 10}  # Recordatorio popup 10 minutos antes
+                ]
+            }
+        else:
+            # Si no hay attendees, remover la clave para evitar errores
             del event_data['attendees']
         
         logger.info("*********")
@@ -450,8 +470,13 @@ def create_event(service, params):
         if conflicts and force_create:
             logger.info("FORCING event creation despite conflicts")
         
-        # Crear el evento
-        event = service.events().insert(calendarId='primary', body=event_data).execute()
+        # Crear el evento - sendNotifications=True asegura que se envíen invitaciones por correo
+        event = service.events().insert(
+            calendarId='primary', 
+            body=event_data,
+            sendNotifications=True,  # Forzar envío de notificaciones por correo
+            sendUpdates='all'  # Enviar actualizaciones a todos los invitados
+        ).execute()
         
         # Preparar respuesta con información adicional
         response = f"✅ Evento creado exitosamente: {event.get('htmlLink')}\n"
@@ -461,6 +486,8 @@ def create_event(service, params):
         
         if attendee_emails:
             response += f"👥 Invitados: {', '.join(attendee_emails)}\n"
+            response += f"📧 Se han enviado invitaciones por correo automáticamente a todos los invitados.\n"
+            response += f"🔔 Los invitados recibirán recordatorios por email 24 horas antes del evento.\n"
         
         # Si había conflictos pero se forzó la creación
         if conflicts and force_create:
@@ -615,4 +642,242 @@ def check_availability(service, params):
     except HttpError as error:
         return f"Error checking availability: {error}"
     except Exception as e:
-        return f"Error processing availability check: {e}" 
+        return f"Error processing availability check: {e}"
+
+def find_available_slots_for_specific_day(service, target_weekday, now_chile, duration_hours, preferred_start_hour, preferred_end_hour):
+    """
+    Helper function to find available slots for a specific weekday.
+    Starts from the current week and searches up to 4 weeks ahead.
+    """
+    available_slots = []
+    first_week_skipped = False
+    first_week_date = None
+    
+    logger.info(f"Searching for available slots on weekday {target_weekday} (0=Monday, 3=Thursday)")
+    logger.info(f"Current day: {now_chile.strftime('%A %Y-%m-%d %H:%M')} (weekday={now_chile.weekday()})")
+    
+    # Buscar en las próximas 4 semanas
+    for week_offset in range(4):
+        # Calcular cuántos días hasta el día objetivo en cada semana
+        days_ahead = target_weekday - now_chile.weekday() + (week_offset * 7)
+        
+        # Si es en el pasado (días negativos), saltar
+        if days_ahead < 0:
+            logger.info(f"Week {week_offset}: Skipping {days_ahead} days (in the past)")
+            continue
+            
+        current_date = now_chile.date() + timedelta(days=days_ahead)
+        logger.info(f"Week {week_offset}: Checking date {current_date.strftime('%A %Y-%m-%d')} ({days_ahead} days ahead)")
+        
+        # Verificar si es feriado
+        from app.controler.chat.core.tools.chile_holidays_tool import FERIADOS_2025, FERIADOS_ESPECIFICOS
+        date_str = current_date.strftime("%Y-%m-%d")
+        if date_str in FERIADOS_2025 or date_str in FERIADOS_ESPECIFICOS:
+            logger.info(f"  Skipping {current_date} - Holiday")
+            continue
+        
+        # Buscar horarios disponibles en este día
+        day_slots = []
+        is_today = (current_date == now_chile.date())
+        logger.info(f"  Searching hours {preferred_start_hour}-{preferred_end_hour}, is_today={is_today}, current_hour={now_chile.hour if is_today else 'N/A'}")
+        
+        for hour in range(preferred_start_hour, preferred_end_hour - int(duration_hours) + 1):
+            # Si es hoy, no buscar horarios que ya pasaron
+            if is_today and hour <= now_chile.hour:
+                logger.info(f"    Hour {hour}: Skipped (already passed)")
+                continue
+            
+            # Crear datetime para el slot
+            slot_start = datetime.combine(current_date, datetime.min.time().replace(hour=hour))
+            slot_start = CHILE_TZ.localize(slot_start)
+            slot_end = slot_start + timedelta(hours=duration_hours)
+            
+            # Verificar disponibilidad
+            conflicts = check_time_conflicts(service, slot_start.isoformat(), slot_end.isoformat())
+            
+            if not conflicts:
+                logger.info(f"    Hour {hour}: AVAILABLE - {slot_start.strftime('%H:%M')}")
+                day_slots.append({
+                    'start': slot_start,
+                    'end': slot_end,
+                    'date_str': current_date.strftime("%A %d de %B"),
+                    'time_str': f"{hour:02d}:00 - {(hour + int(duration_hours)):02d}:00"
+                })
+            else:
+                logger.info(f"    Hour {hour}: BUSY - {len(conflicts)} conflict(s)")
+        
+        logger.info(f"  Found {len(day_slots)} available slots on {current_date}")
+        
+        if day_slots:
+            available_slots.extend(day_slots[:3])  # Máximo 3 slots por día
+            logger.info(f"  SUCCESS: Found {len(day_slots)} slots, stopping search")
+            break  # Encontramos slots en este día, no necesitamos buscar más semanas
+        else:
+            logger.info(f"  No available slots found on {current_date}, continuing to next week")
+            # Si es la primera semana (este día específico), marcar que se saltó
+            if week_offset == 0:
+                first_week_skipped = True
+                first_week_date = current_date
+    
+    return available_slots, first_week_skipped, first_week_date
+
+def find_next_available_slots(service, params):
+    """Find the next 3 available time slots for meetings"""
+    try:
+        # Parse parameters
+        duration_hours = 0.5  # Duración por defecto de 30 minutos (según configuración del proyecto)
+        preferred_start_hour = 9  # Hora de inicio preferida (9 AM)
+        preferred_end_hour = 18  # Hora de fin preferida (6 PM)
+        specific_day = None  # Para buscar en un día específico
+        
+        for param in params:
+            if '=' in param:
+                key, value = param.split('=', 1)
+                key = key.strip().lower()
+                value = value.strip()
+                
+                if key == 'duration':
+                    duration_hours = float(value)
+                elif key == 'start_hour':
+                    preferred_start_hour = int(value)
+                elif key == 'end_hour':
+                    preferred_end_hour = int(value)
+                elif key == 'day' or key == 'weekday':
+                    specific_day = value.lower()
+        
+        # Obtener la fecha y hora actual en Chile
+        now_chile = datetime.now(CHILE_TZ)
+        
+        # Lista para almacenar las fechas disponibles
+        available_slots = []
+        
+        # Mapeo de días en español a números de día de la semana
+        dias_map = {
+            'lunes': 0, 'martes': 1, 'miércoles': 2, 'miercoles': 2,
+            'jueves': 3, 'viernes': 4, 'sábado': 5, 'sabado': 5, 'domingo': 6
+        }
+        
+        # Si se especifica un día, buscar solo en ese día
+        if specific_day:
+            target_weekday = dias_map.get(specific_day)
+            if target_weekday is None:
+                return f"❌ Día no reconocido: {specific_day}. Usa: lunes, martes, miércoles, jueves, viernes, sábado, domingo"
+            
+            # Usar la función helper para buscar horarios disponibles
+            available_slots, first_week_skipped, first_week_date = find_available_slots_for_specific_day(
+                service, target_weekday, now_chile, duration_hours, 
+                preferred_start_hour, preferred_end_hour
+            )
+            
+            if not available_slots:
+                return f"❌ No hay horarios disponibles para {specific_day} en las próximas 4 semanas."
+        else:
+            # Buscar en los próximos 14 días (comportamiento original)
+            for day_offset in range(14):
+                current_date = now_chile.date() + timedelta(days=day_offset)
+                
+                # Saltar fines de semana (opcional, se puede quitar si quieres incluir weekends)
+                if current_date.weekday() >= 5:  # 5=sábado, 6=domingo
+                    continue
+                
+                # Verificar si es feriado usando la herramienta de feriados
+                from app.controler.chat.core.tools.chile_holidays_tool import FERIADOS_2025, FERIADOS_ESPECIFICOS
+                date_str = current_date.strftime("%Y-%m-%d")
+                if date_str in FERIADOS_2025 or date_str in FERIADOS_ESPECIFICOS:
+                    continue
+                
+                # Buscar horarios disponibles en este día
+                for hour in range(preferred_start_hour, preferred_end_hour - int(duration_hours) + 1):
+                    # Si es hoy, no buscar horarios que ya pasaron
+                    if day_offset == 0 and hour <= now_chile.hour:
+                        continue
+                    
+                    # Crear datetime para el slot
+                    slot_start = datetime.combine(current_date, datetime.min.time().replace(hour=hour))
+                    slot_start = CHILE_TZ.localize(slot_start)
+                    slot_end = slot_start + timedelta(hours=duration_hours)
+                    
+                    # Verificar disponibilidad
+                    conflicts = check_time_conflicts(service, slot_start.isoformat(), slot_end.isoformat())
+                    
+                    if not conflicts:
+                        available_slots.append({
+                            'start': slot_start,
+                            'end': slot_end,
+                            'date_str': current_date.strftime("%A %d de %B"),
+                            'time_str': f"{hour:02d}:00 - {(hour + int(duration_hours)):02d}:00"
+                        })
+                        
+                        # Si encontramos 3 slots, paramos
+                        if len(available_slots) >= 3:
+                            break
+                
+                # Si ya tenemos 3 slots, paramos de buscar días
+                if len(available_slots) >= 3:
+                    break
+        
+        if not available_slots:
+            if specific_day:
+                return f"❌ No se encontraron horarios disponibles para {specific_day} en las próximas 4 semanas."
+            else:
+                return "❌ No se encontraron horarios disponibles en los próximos 14 días hábiles."
+        
+        # Formatear respuesta
+        if specific_day:
+            # Si se saltó la primera semana, explicar por qué
+            if first_week_skipped and first_week_date:
+                dias_semana = {'Monday': 'lunes', 'Tuesday': 'martes', 'Wednesday': 'miércoles', 
+                              'Thursday': 'jueves', 'Friday': 'viernes', 'Saturday': 'sábado', 'Sunday': 'domingo'}
+                meses = {'January': 'enero', 'February': 'febrero', 'March': 'marzo', 'April': 'abril',
+                        'May': 'mayo', 'June': 'junio', 'July': 'julio', 'August': 'agosto',
+                        'September': 'septiembre', 'October': 'octubre', 'November': 'noviembre', 'December': 'diciembre'}
+                
+                fecha_bloqueada = first_week_date.strftime("%A %d de %B")
+                for eng, esp in dias_semana.items():
+                    fecha_bloqueada = fecha_bloqueada.replace(eng, esp)
+                for eng, esp in meses.items():
+                    fecha_bloqueada = fecha_bloqueada.replace(eng, esp)
+                
+                response = f"⚠️ El {fecha_bloqueada} no está disponible por compromisos previos.\n\n"
+                response += f"📅 **Horarios disponibles para el próximo {specific_day}:**\n\n"
+            else:
+                response = f"📅 **Horarios disponibles para {specific_day}:**\n\n"
+        else:
+            response = "📅 **Próximas fechas disponibles para reunión:**\n\n"
+        
+        dias_semana = {
+            'Monday': 'lunes', 'Tuesday': 'martes', 'Wednesday': 'miércoles', 
+            'Thursday': 'jueves', 'Friday': 'viernes', 'Saturday': 'sábado', 'Sunday': 'domingo'
+        }
+        
+        meses = {
+            'January': 'enero', 'February': 'febrero', 'March': 'marzo', 'April': 'abril',
+            'May': 'mayo', 'June': 'junio', 'July': 'julio', 'August': 'agosto',
+            'September': 'septiembre', 'October': 'octubre', 'November': 'noviembre', 'December': 'diciembre'
+        }
+        
+        # Formatear cada slot con numeración manual para asegurar correcta enumeración
+        for index, slot in enumerate(available_slots):
+            numero = index + 1  # Asegurar que el número sea correcto
+            
+            # Formatear fecha en español
+            fecha_en = slot['start'].strftime("%A %d de %B")
+            for eng, esp in dias_semana.items():
+                fecha_en = fecha_en.replace(eng, esp)
+            for eng, esp in meses.items():
+                fecha_en = fecha_en.replace(eng, esp)
+            
+            # Debug: log the value
+            logger.info(f"DEBUG: Slot {index} -> numero={numero} - fecha_en: {fecha_en}")
+            response += f"{numero}. {fecha_en.title()} de {slot['start'].year} a las {slot['start'].strftime('%H:%M')} horas\n"
+        
+        if specific_day:
+            response += f"¿Alguno de estos horarios para {specific_day} te acomoda? Solo dime el número o propón otra fecha."
+        else:
+            response += "¿Cuál de estas fechas te acomoda más? Solo dime el número (1, 2 o 3) o propón otra fecha."
+        
+        return response
+        
+    except Exception as e:
+        logger.error(f"Error finding available slots: {str(e)}")
+        return f"Error buscando horarios disponibles: {str(e)}" 

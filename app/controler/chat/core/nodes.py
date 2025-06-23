@@ -10,7 +10,7 @@ from app.controler.chat.core.utils import decorate_message, filter_and_prepare_m
 from app.controler.chat.store.persistence import Persist
 from app.controler.chat.core.llm_adapter import LLMAdapter
 from dotenv import load_dotenv
-from app.resources.constants import DEFAULT_PROMPT, DEFAULT_PROMPT_MEMORY, MODEL_CHATBOT
+from app.resources.constants import DEFAULT_PROMPT, MODEL_CHATBOT
 import datetime 
 
 load_dotenv()
@@ -60,6 +60,18 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
         prompt_general_skeleton = prompt_general_skeleton.replace("{date_range_str}", date_range_str)
         prompt_general_skeleton = prompt_general_skeleton.replace("{now_chile}", now_chile)
         
+
+        
+        # AGREGAR RESUMEN DE CONVERSACIÓN ANTERIOR
+        if summary and summary.strip():
+            prompt_general_skeleton += f"""
+            
+            📋 RESUMEN DE CONVERSACIÓN ANTERIOR:
+            {summary}
+            
+            ⚠️ IMPORTANTE: Usa esta información para NO repetir preguntas que ya fueron respondidas.
+            """
+        
         # INSTRUCCIÓN CRÍTICA: SIEMPRE usar unified_search antes de responder
         if "unified_search" in project.enabled_tools:
             prompt_general_skeleton += f"""
@@ -90,15 +102,22 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
         """
         
         prompt_general_skeleton += f"""
-        MANEJO DE CONTACTOS:
-        - DETECTAR AUTOMÁTICAMENTE cuando el usuario proporcione:
-          * Nombre completo (ej: "pedrito morales")
-          * Email (ej: "sabado@fa.cl")
-          * Teléfono (ej: "+56424231552")
-        - Usar save_contact_tool con los datos detectados
-        - Ejemplo: si el usuario escribe "pedrito morales sabado@fa.cl +56424231552"
-          → save_contact_tool(name="Pedrito Morales", email="sabado@fa.cl", phone_number="+56424231552")
+        MEMORIA Y CONTACTOS - REGLAS CRÍTICAS:
+        
+        ⚠️ ANTES DE PREGUNTAR CUALQUIER INFORMACIÓN:
+        1. REVISA el "RESUMEN DE CONVERSACIÓN ANTERIOR" (si existe) para ver qué información ya tienes
+        2. REVISA los mensajes anteriores de esta conversación
+        3. Si el usuario YA proporcionó información (nombre, email, teléfono), NO la preguntes otra vez
+        4. USA la información que ya tienes del resumen y mensajes anteriores
+        
+        DETECTAR Y GUARDAR AUTOMÁTICAMENTE:
+        - Cuando el usuario dé nombre, email o teléfono → usar save_contact_tool inmediatamente
+        - Ejemplo: Usuario dice "sebastian" → save_contact_tool(name="Sebastian")
+        - Ejemplo: Usuario dice "hokidoki8@gmail.com" → save_contact_tool(email="hokidoki8@gmail.com")
+        - Ejemplo: Usuario dice "998766626" → save_contact_tool(phone_number="998766626")
         - NUNCA digas que guardaste el contacto, solo ejecuta la herramienta
+        
+        CORRECTO: Usar la información del resumen y continuar la conversación desde donde se quedó
         """
         
         
@@ -171,6 +190,11 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
                 CALENDAR:
                 Herramienta: google_calendar_tool
                 
+                ⚠️ CONFIGURACIÓN ESPECÍFICA DEL PROYECTO:
+                - DURACIÓN ESTÁNDAR: Todas las reuniones duran 30 minutos (0.5 horas)
+                - SIEMPRE usar duration=0.5 en find_available_slots
+                - Al crear eventos, calcular hora de fin sumando 30 minutos a la hora de inicio
+                
                 Funcionalidades disponibles:
                 1. Listar eventos:
                    - list_events|days=7 (lista eventos de los próximos 7 días)
@@ -181,9 +205,15 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
                 3. Crear evento:
                    - create_event|title=Reunión|start=2024-03-20T15:00:00|end=2024-03-20T16:00:00|description=Detalles|attendees=email1@ejemplo.com,email2@ejemplo.com
                    - Opcional: force_create=true para crear a pesar de conflictos
+                   - IMPORTANTE: Cuando se incluyen attendees, Google Calendar envía automáticamente invitaciones por correo
+                   - Los invitados reciben recordatorios por email 24 horas antes y popup 10 minutos antes
                 
                 4. Verificar disponibilidad:
                    - check_availability|start=2024-03-20T15:00:00|end=2024-03-20T16:00:00
+                
+                8. Buscar horarios disponibles:
+                   - find_available_slots|duration=0.5 (busca las próximas 3 fechas disponibles de 30 minutos)
+                   - find_available_slots|duration=1.5|start_hour=10|end_hour=16 (personalizado)
                 
                 5. Obtener detalles:
                    - get_event|event_id=abc123
@@ -206,11 +236,41 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
                 - Solo usar force_create=true si el usuario explícitamente lo solicita
                 - El sistema verifica automáticamente conflictos al crear eventos
                 
-                FLUJO DE VALIDACIÓN PARA AGENDAR:
-                1. Verificar si la fecha es feriado: check_chile_holiday_tool
-                2. Si NO es feriado, verificar disponibilidad: check_availability
-                3. Si está disponible, proceder con create_event
-                4. Si hay conflictos o es feriado, sugerir alternativas
+                FLUJO PARA AGENDAR - REGLAS OBLIGATORIAS:
+                
+                1. PRIMERO: Cuando el usuario quiera agendar, usa google_calendar_tool con find_available_slots para mostrarle las próximas 3 fechas disponibles:
+                   - Ejecuta: google_calendar_tool|find_available_slots|duration=0.5
+                   - IMPORTANTE: SIEMPRE usar duration=0.5 (30 minutos) para este proyecto
+                   - Esto le mostrará 3 opciones siempre enumeradas (1, 2, 3) con fechas y horarios libres de 30 minutos
+                
+                2. ESPERA que el usuario elija una opción (enumerada 1, 2 o 3) O proponga su propia fecha/hora O pregunte por un día específico.
+                
+                3. SOLO cuando el usuario responda con una elección específica:
+                   a) Si eligió un número (enumerada 1, 2 o 3): Confirma directamente "¿Confirmas que agende para [fecha/hora de la opción elegida]?"
+                   b) Si propuso su propia fecha/hora: Verifica feriado (check_chile_holiday_tool) y disponibilidad (check_availability)
+                   c) Si pregunta por un día específico (ej: "para el jueves?", "y para el miércoles?", "¿qué tal el viernes?", "tienes para martes?"): 
+                      Ejecuta google_calendar_tool|find_available_slots|day=[día]|duration=0.5
+                      Ejemplos: 
+                      - "para el jueves?" → google_calendar_tool|find_available_slots|day=jueves|duration=0.5
+                      - "y para el miércoles?" → google_calendar_tool|find_available_slots|day=miércoles|duration=0.5
+                   d) Si hay conflictos o es feriado, muestra las opciones disponibles otra vez
+                   e) Si está libre, confirma: "¿Confirmas que agende para [fecha/hora]?"
+                
+                4. Solo cuando tengas CONFIRMACIÓN y TODOS LOS DATOS, usa create_event con attendees=email_del_usuario.
+                   - IMPORTANTE: Los eventos deben durar exactamente 30 minutos
+                   - Si el usuario elige una hora (ej: 15:00), el evento va de 15:00 a 15:30
+                
+                ⚠️ CRÍTICO: NUNCA crees eventos sin tener el email del usuario. SIEMPRE incluye el email como attendee.
+                ⚠️ CRÍTICO: SIEMPRE empieza mostrando las opciones disponibles con find_available_slots|duration=0.5. NO preguntes "¿qué día y hora?" sin antes mostrar las opciones.
+                
+                ⚠️ DETECCIÓN DE DÍAS ESPECÍFICOS:
+                Si el usuario menciona un día de la semana específico (lunes, martes, miércoles, jueves, viernes, sábado, domingo), 
+                INMEDIATAMENTE usa find_available_slots con el parámetro day. NO uses la búsqueda general.
+                Ejemplos de frases que requieren búsqueda específica:
+                - "para el jueves?" → day=jueves
+                - "y el miércoles?" → day=miércoles  
+                - "¿tienes para viernes?" → day=viernes
+                - "qué tal martes?" → day=martes
                 
                 Notas importantes:
                 - Todas las fechas se manejan en zona horaria de Chile (UTC-3)
