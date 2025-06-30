@@ -99,7 +99,7 @@ def get_project_calendar_config(project_id: str, agenda_data: dict = None) -> di
                 "start_hour": earliest_hour if earliest_hour < 24 else config["start_hour"],
                 "end_hour": latest_hour if latest_hour > 0 else config["end_hour"],
                 "working_days": working_days if working_days else config["working_days"],
-                "auto_include_meet": True,
+                "auto_include_meet": general_settings.get("auto_include_meet", config.get("auto_include_meet", True)),
                 "buffer_minutes": agenda_settings.get("buffer_minutes", config["buffer_minutes"]),
                 "timezone": general_settings.get("timezone", config["timezone"])
             })

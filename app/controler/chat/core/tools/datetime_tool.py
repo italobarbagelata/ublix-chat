@@ -19,9 +19,17 @@ except:
 
 @tool(parse_docstring=False)
 def current_datetime_tool(query: str) -> str:
-    """Proporciona información sobre fecha y hora actual, días de la semana, y cálculos de fechas básicos.
+    """Proporciona información sobre fecha y hora actual, días de la semana, y cálculos de fechas.
+
+    🚨 REGLA CRÍTICA: Si el usuario menciona un día de la semana (ej: "viernes", "próximo lunes")
+    sin una fecha completa, DEBES usar esta herramienta para obtener la fecha exacta en formato YYYY-MM-DD.
+    Esto es obligatorio antes de intentar agendar.
+
+    EJEMPLOS DE USO:
+    - User: "quiero agendar para el viernes" -> LLAMAR A ESTA HERRAMIENTA CON query="viernes"
+    - User: "¿qué fecha es el próximo lunes?" -> LLAMAR A ESTA HERRAMIENTA CON query="próximo lunes"
     
-    Esta herramienta maneja consultas como:
+    Esta herramienta también maneja consultas como:
     - ¿Qué día es hoy?
     - ¿Qué fecha es mañana?
     - ¿Qué hora es?
@@ -32,7 +40,8 @@ def current_datetime_tool(query: str) -> str:
         query: Pregunta sobre fecha, hora, día de la semana o cálculos de tiempo
         
     Returns:
-        Información específica sobre fechas y tiempo
+        Información específica sobre fechas y tiempo. Si la consulta es un día de la semana,
+        devuelve la fecha en formato YYYY-MM-DD (ej: "2025-07-11").
     """
     try:
         logger.info(f"Procesando consulta de fecha/tiempo: '{query}'")
@@ -51,6 +60,32 @@ def current_datetime_tool(query: str) -> str:
             1: "enero", 2: "febrero", 3: "marzo", 4: "abril", 5: "mayo", 6: "junio",
             7: "julio", 8: "agosto", 9: "septiembre", 10: "octubre", 11: "noviembre", 12: "diciembre"
         }
+        
+        # 🆕 LÓGICA MEJORADA PARA RESOLVER DÍAS DE LA SEMANA A FECHAS EXACTAS
+        # Esta es la lógica prioritaria para resolver ambigüedades
+        palabra_dia_encontrada = None
+        for i, dia in enumerate(dias_semana.values()):
+            if dia in query_lower:
+                palabra_dia_encontrada = dia
+                
+                # Calcular la fecha del próximo día de la semana solicitado
+                dias_hasta = (i - ahora.weekday() + 7) % 7
+                
+                # Si el día es hoy y el usuario no dice "próximo", es hoy
+                if dias_hasta == 0 and "próximo" not in query_lower and "proximo" not in query_lower:
+                    pass
+                # Si el día es hoy pero dice "próximo", tomar el de la siguiente semana
+                elif dias_hasta == 0 and ("próximo" in query_lower or "proximo" in query_lower):
+                    dias_hasta = 7
+                # Si el día ya pasó esta semana, tomar el de la próxima semana
+                elif i < ahora.weekday():
+                    dias_hasta += 7
+
+                fecha_futura = ahora + timedelta(days=dias_hasta)
+                fecha_formato_iso = fecha_futura.strftime('%Y-%m-%d')
+                
+                logger.info(f"Día '{palabra_dia_encontrada}' resuelto a fecha: {fecha_formato_iso}")
+                return fecha_formato_iso
         
         # ¿Qué día es hoy?
         if any(palabra in query_lower for palabra in ["qué día es hoy", "que día es hoy", "día de hoy", "hoy qué día", "qué día es", "que día es"]):

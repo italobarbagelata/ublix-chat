@@ -237,7 +237,8 @@ class AgendaTool(BaseTool):
         description: Optional[str] = None,
         event_id: Optional[str] = None,
         include_meet: Optional[bool] = None,
-        conversation_summary: Optional[str] = None
+        conversation_summary: Optional[str] = None,
+        additional_fields: Optional[Dict[str, Any]] = None
     ) -> str:
         """Ejecuta el workflow especificado con configuración optimizada"""
         try:
@@ -269,7 +270,7 @@ class AgendaTool(BaseTool):
                 logger.info(f"✅ Validaciones AGENDA_COMPLETA pasadas - Email: {attendee_email or 'No proporcionado'}")
                 return await self._agenda_completa_workflow(
                     title, start_datetime, end_datetime, attendee_email, attendee_name, attendee_phone,
-                    description, include_meet, conversation_summary
+                    description, include_meet, conversation_summary, additional_fields
                 )
             elif workflow_type == "COMUNICACION_EVENTO":
                 return await self._comunicacion_evento_workflow(event_id)
@@ -291,7 +292,8 @@ class AgendaTool(BaseTool):
     
     async def _agenda_completa_workflow(
         self, title: str, start_datetime: str, end_datetime: str, 
-        attendee_email: str, attendee_name: str, attendee_phone: str, description: str, include_meet: bool, conversation_summary: str = None
+        attendee_email: str, attendee_name: str, attendee_phone: str, description: str, include_meet: bool, 
+        conversation_summary: str = None, additional_fields: Optional[Dict[str, Any]] = None
     ) -> str:
         """Workflow completo de agendamiento OPTIMIZADO con validaciones granulares"""
         try:
@@ -397,16 +399,19 @@ class AgendaTool(BaseTool):
             except:
                 formatted_date = start_datetime
 
-            # Incluir URL de Meet en la respuesta
-            meet_section = ""
+            # 🆕 CONSTRUCCIÓN DE RESPUESTA CONDICIONAL
+            # Generar sección de Meet solo si existe la URL
+            meet_response_section = ""
             if meet_url:
-                meet_section = f"\n\n🎥 **Link de Google Meet:** {meet_url}"
-            
+                meet_response_section = f"\n\nLa reunión incluirá un enlace de Google Meet para que puedas unirte virtualmente."
+            else:
+                # Si no hay Meet, indicar que no es una reunión virtual
+                meet_response_section = "\n\nEsta es una reunión presencial y no incluye un enlace de videollamada."
+
+            # Construir respuesta final usando la sección condicional
             immediate_response = f"""✅ ¡Listo! Tu cita ha sido agendada para el **{formatted_date}**.
 
-📧 Te enviaremos un correo de confirmación a **{attendee_email}** con todos los detalles.
-
-🔗 El evento incluye Google Meet para la reunión virtual.{meet_section}
+📧 Te enviaremos un correo de confirmación a **{attendee_email}** con todos los detalles.{meet_response_section}
 
 ¡Nos vemos pronto! 😊"""
             
@@ -414,7 +419,7 @@ class AgendaTool(BaseTool):
             # Lanzar task en background sin esperar
             asyncio.create_task(self._execute_background_notifications(
                 title, start_datetime, end_datetime, attendee_email, attendee_name, attendee_phone, description, 
-                conversation_summary, meet_url
+                conversation_summary, meet_url, additional_fields
             ))
             
             logger.info("🚀 Respuesta inmediata enviada - Background tasks iniciados")
@@ -427,7 +432,7 @@ class AgendaTool(BaseTool):
     async def _execute_background_notifications(
         self, title: str, start_datetime: str, end_datetime: str, 
         attendee_email: str, attendee_name: str, attendee_phone: str, description: str, 
-        conversation_summary: str, meet_url: str = None
+        conversation_summary: str, meet_url: str = None, additional_fields: Optional[Dict[str, Any]] = None
     ):
         """Ejecuta notificaciones en segundo plano sin bloquear respuesta"""
         try:
@@ -490,7 +495,8 @@ class AgendaTool(BaseTool):
             # BACKGROUND TASK 3: Webhook
             logger.info(f"🔍 [Background] Debug conversation_summary recibido: {conversation_summary}")
             webhook_result = await self._send_webhook_notification(
-                title, start_datetime, end_datetime, attendee_email, description, conversation_summary
+                title, start_datetime, end_datetime, attendee_email, attendee_name, attendee_phone, description, 
+                conversation_summary, additional_fields
             )
             if webhook_result:
                 logger.info(f"✅ [Background] {webhook_result}")
@@ -1005,7 +1011,8 @@ class AgendaTool(BaseTool):
     
     async def _send_webhook_notification(
         self, title: str, start_datetime: str, end_datetime: str, 
-        attendee_email: str, description: str, conversation_summary: str = None
+        attendee_email: str, attendee_name: str, attendee_phone: str, 
+        description: str, conversation_summary: str = None, additional_fields: Optional[Dict[str, Any]] = None
     ) -> str:
         """Envía datos de la conversación al webhook configurado si está habilitado"""
         try:
@@ -1041,12 +1048,18 @@ class AgendaTool(BaseTool):
                     "client_email": attendee_email,
                     "scheduled_at": datetime.now().isoformat()
                 },
-                "project_config": {
-                    "company_info": general_settings.get("company_info", {}),
-                    "timezone": general_settings.get("timezone", "America/Santiago")
+                "user_data": {
+                    "name": attendee_name,
+                    "email": attendee_email,
+                    "phone": attendee_phone
                 }
             }
             
+            # Fusionar additional_fields si existen
+            if additional_fields and isinstance(additional_fields, dict):
+                webhook_data["user_data"].update(additional_fields)
+                logger.info(f"➕ Campos adicionales fusionados en user_data para el webhook")
+
             # Enviar POST al webhook
             async with aiohttp.ClientSession() as session:
                 async with session.post(

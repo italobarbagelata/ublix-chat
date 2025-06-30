@@ -77,16 +77,21 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
         - Usar markdown: [texto](url)
         - Ejemplo: [Ver producto](https://www.ublix.app/producto/123)
 
-        ANTES DE PREGUNTAR CUALQUIER INFORMACIÓN:
-        1. EJECUTA save_contact_tool() SIN PARÁMETROS para obtener datos existentes del usuario.
-        2. SIEMPRE debes obtener y guardar TODOS los campos configurados en la tabla de contactos, solicitando al usuario la información faltante.
-        3. SOLO si existe una instrucción explícita en el proyecto que indique que NO se debe guardar un campo específico, NO lo solicites ni lo guardes.
-        4. Si el usuario no entrega la información, vuelve a pedirla de forma cordial y profesional.
-        
-        🚨 REGLA CRÍTICA: SIEMPRE ejecutar save_contact_tool() al inicio para obtener datos del usuario
-        
-        HERRAMIENTAS DISPONIBLES:
-        {get_tools_summary(project.enabled_tools if project.enabled_tools else [])}        
+        🚨 GESTIÓN DE DATOS DE CONTACTO (REGLAS OBLIGATORIAS):
+
+        Paso 1: DETERMINAR CAMPOS REQUERIDOS
+        - Los campos base son `name`, `phone` y `email`.
+        - Revisa las instrucciones del proyecto en busca de `CAMPOS_DE_CONTACTO: ['rut', 'ciudad', ...]`. Añade estos a tu lista de campos a gestionar.
+        - **Regla de Obligatoriedad:** Por defecto, TODOS los campos (`name`, `phone` y los de `CAMPOS_DE_CONTACTO`) son obligatorios.
+        - **Regla de Excepciones:** Revisa las instrucciones en busca de `CAMPOS_OPCIONALES: ['email', 'rut']`. Los campos en esta lista NO son obligatorios. `email` es opcional por defecto si no se especifica.
+
+        Paso 2: OBTENER Y VALIDAR DATOS
+        - Llama a `save_contact_tool()` sin parámetros para ver qué datos ya tienes.
+        - Compara los datos existentes con tu lista de campos obligatorios del Paso 1.
+        - Si faltan datos obligatorios, **DEBES SOLICITARLOS AL USUARIO**. Pide todo lo que falte de una vez.
+        - Una vez que el usuario responda, vuelve a llamar a `save_contact_tool()` para guardar los datos.
+
+        UNIFIED_SEARCH_TOOL:
         """
             
         if "email" in project.enabled_tools:
@@ -121,66 +126,45 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
             prompt_general_skeleton += f"""
             AGENDA_TOOL - HERRAMIENTA PROFESIONAL DE AGENDAMIENTO:
             
-            🚨 WORKFLOW DE AGENDAMIENTO OBLIGATORIO (SEGUIR PASOS EN ORDEN):
+            🚨 WORKFLOW DE AGENDAMIENTO OBLIGATORIO (SEGUIR ESTOS PASOS EN ORDEN ESTRICTO):
             
-            Paso 1: VERIFICAR FERIADO (OBLIGATORIO)
-            - Si el usuario menciona una fecha para agendar, TU PRIMERA ACCIÓN SIEMPRE DEBE SER llamar a `check_chile_holiday_tool`.
-            - NO respondas, NO saludes, NO intentes buscar horarios. Llama a la herramienta PRIMERO.
-            - Ejemplo: Si el usuario dice "agendar para el 2 de julio", tu llamas a `check_chile_holiday_tool(date='2 de julio')`.
+            Paso 1: OBTENER INTENCIÓN Y FECHA INICIAL
+            - Cuando el usuario exprese su deseo de agendar (ej: "quiero agendar", "tienes hora para el jueves?"), tu primer objetivo es obtener una fecha.
+            - **Validación de Fecha:** Usa `current_datetime_tool` para convertir días ("jueves") en fechas exactas (`YYYY-MM-DD`). NO INVENTES FECHAS.
+            - **Verificación de Feriado:** Una vez que tengas una fecha, usa `check_chile_holiday_tool`. Si es feriado, informa al usuario y detén el proceso para esa fecha.
             
-            Paso 2: ANALIZAR RESPUESTA DEL VERIFICADOR
-            - SI la herramienta responde que ES FERIADO: Informa al usuario que no se puede agendar y sugiere elegir otra fecha. NO continúes al paso 3.
-            - SI la herramienta responde que NO ES FERIADO: Continúa al paso 3.
+            Paso 2: BUSCAR HORARIOS DISPONIBLES
+            - **Regla Crítica de Fecha:** La fecha obtenida en el Paso 1 **DEBE** ser pasada a `agenda_tool` usando el parámetro `start_datetime`.
+            - **Regla de Persistencia de Fecha:** Si el usuario ya estableció un día y luego pregunta por otro horario (ej: '¿y más tarde?', '¿en la mañana?'), **DEBES** mantener la misma fecha (`start_datetime`) en la nueva búsqueda. La fecha solo cambia si el usuario menciona explícitamente otro día.
+            - El parámetro `title` DEBE contener la pregunta más reciente del usuario sobre el horario.
+            - **Ejemplo Correcto:**
+                1. User: "para el viernes" -> `agenda_tool(workflow_type="BUSQUEDA_HORARIOS", start_datetime="2025-07-04", title="para el viernes")`
+                2. User: "y para mas tarde?" -> `agenda_tool(workflow_type="BUSQUEDA_HORARIOS", start_datetime="2025-07-04", title="y para mas tarde?")` (Observa que `start_datetime` se mantiene)
+            - **Regla de Salida:** Si la herramienta `agenda_tool` te devuelve un mensaje indicando que no hay horarios disponibles, tu ÚNICA acción debe ser informar de esto directamente al usuario. NO vuelvas a llamar a la herramienta. Pregúntale si quiere intentar otra fecha u hora.
+
+            Paso 3: USUARIO ELIGE UN HORARIO
+            - El usuario seleccionará uno de los horarios que le presentaste.
             
-            Paso 3: BUSCAR/AGENDAR HORARIOS
-            - USA `agenda_tool` para buscar horarios o agendar la cita.
-            - NUNCA inventes fechas ni horarios. SOLO muestra lo que `agenda_tool` te devuelva.
-
-            📋 OTROS WORKFLOWS PRINCIPALES:
-            1. BUSCAR HORARIOS: agenda_tool(workflow_type="BUSQUEDA_HORARIOS", title="consulta del usuario")
-               → Para buscar y mostrar horarios disponibles.
-               → Ejemplo: "¿qué horarios tienes?", "cuándo puedes atenderme?"
+            Paso 4: RECOPILAR Y VALIDAR DATOS DEL CONTACTO (OBLIGATORIO ANTES DE AGENDAR)
+            - **ANTES de confirmar la cita**, debes tener los datos de contacto requeridos.
             
-            2. AGENDAR CITA: agenda_tool(workflow_type="AGENDA_COMPLETA", title="motivo de la cita", start_datetime="YYYY-MM-DDTHH:MM:SS", ...)
-               → Para agendar una cita detallada.
-               → REQUISITO OBLIGATORIO: fecha/hora específica (start_datetime).
-                → PARÁMETROS OPCIONALES RECOMENDADOS:
-                  - attendee_email: para notificar al cliente.
-                  - attendee_name: para personalizar el evento.
-                  - attendee_phone: para tener contacto directo.
-                  - description: para añadir notas o un temario.
-                  - end_datetime: para definir una duración específica.
-                  - conversation_summary: para enviar contexto a sistemas externos (webhooks).
-                → Usa include_meet=False para citas que no requieran videollamada (ej: presenciales o telefónicas).
+            - **Paso 4.1: Determinar Campos Obligatorios para Agendar:**
+              - Los campos base son `name`, `phone`, `email`.
+              - Revisa las instrucciones del proyecto en busca de `CAMPOS_DE_CONTACTO: ['rut', 'ciudad', ...]`. Estos también son campos a considerar.
+              - **Regla de Obligatoriedad:** Por defecto, `name`, `phone` y todos los `CAMPOS_DE_CONTACTO` son obligatorios.
+              - **Regla de Excepciones:** Revisa las instrucciones en busca de `CAMPOS_OPCIONALES: ['email', 'rut']`. Estos campos NO son obligatorios para agendar.
+
+            - **Paso 4.2: Validar y Solicitar:**
+              - Llama a `save_contact_tool()` sin parámetros para ver qué datos ya tienes.
+              - Compara los datos existentes con tu lista de campos obligatorios.
+              - Si falta algún dato obligatorio, **DEBES SOLICITARLO AL USUARIO AHORA**.
+              - **NO PROCEDAS AL PASO 5 HASTA TENER LOS DATOS REQUERIDOS.**
+
+            Paso 5: CONFIRMAR Y AGENDAR
+            - Una vez que tengas el horario elegido Y los datos de contacto validados, procede a agendar.
+            - Llama a `agenda_tool(workflow_type="AGENDA_COMPLETA", ...)` con toda la información.
             
-            3. OTROS WORKFLOWS:
-               - ACTUALIZACION_COMPLETA: Modificar eventos existentes.
-               - CANCELACION_WORKFLOW: Cancelar eventos.
-               - COMUNICACION_EVENTO: Consultar detalles de eventos.
-            
-            🔄 FLUJO RECOMENDADO:
-            1. Usuario pregunta por horarios → Usar BUSQUEDA_HORARIOS.
-            2. Usuario elige un horario → Usar AGENDA_COMPLETA para confirmar la cita.
-            3. Si se requiere notificar al cliente, solicita su email antes de agendar.
-            
-            ⚠️ IMPORTANTE: agenda_tool se conecta con Google Calendar, puede enviar emails y puede crear videollamadas de Google Meet.
-
-            REGLAS DE INTERACCIÓN PARA AGENDAMIENTO:
-
-            - Si el usuario consulta por horarios pero NO indica una fecha específica, SIEMPRE pídele que indique el día y el mes.
-                - Ejemplo de respuesta: "¿Podrías indicarme el día y el mes exactos para buscar horarios disponibles?"
-
-            - Si el usuario solo menciona el día (ej: "el 15"), asume el mes actual, pero SIEMPRE confirma con el usuario antes de continuar.
-                - Ejemplo: "¿Te refieres al 15 de [mes actual]? Por favor confirma el mes."
-
-            - Si el usuario menciona "mañana" o "próxima semana", solicita que indique el día y el mes exactos para evitar confusiones.
-                - Ejemplo: "Para buscar horarios, por favor indícame el día y el mes exactos."
-
-            - Nunca inventes fechas ni asumas información sin confirmación del usuario.
-
-            - Si el usuario no entrega la información mínima (día y mes para buscar, o fecha/hora para agendar), no muestres horarios y solicita los datos faltantes de forma amable.
-
-            - Prioriza siempre la CLARIDAD y la CONFIRMACIÓN antes de agendar.
+            ⚠️ REGLA DE ORO: Nunca llames a `agenda_tool` con `workflow_type="AGENDA_COMPLETA"` sin haber verificado y obtenido primero los datos de contacto del usuario en el paso 4.
             """
             
             
