@@ -30,21 +30,13 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
         date_range_str = ", ".join(date_range)
         
         now_chile = datetime.datetime.now(pytz.timezone("America/Santiago")).isoformat()
-        logging.info(f"now_chile: {now_chile}")
-
         project_id = state["project"].id
-
-        # Inicializa el modelo LLM según la configuración
         model = LLMAdapter.get_llm(MODEL_CHATBOT, 0)
         summary = Persist().get_summary(state)
-        # Filtra y prepara los mensajes para el agente
         messages = filter_and_prepare_messages_for_agent_node(state)
         
-        # Obtiene las herramientas disponibles para el agente
-        # tools = asyncio.run(agent_tools(project_id, user_id, name, number_phone_agent, unique_id))
         tools = await agent_tools(project_id, user_id, name, number_phone_agent, unique_id, project)
         
-        # Vincula las herramientas al modelo
         model_with_tools = model.bind_tools(tools)
         project_name = project.name
         personality_prompt = project.personality
@@ -52,299 +44,149 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
         
         prompt_general_skeleton = project.prompt if project else DEFAULT_PROMPT
         
+        if summary and summary.strip():
+            prompt_general_skeleton += f"""
+            RESUMEN DE CONVERSACIÓN ANTERIOR:
+            
+            {summary}
+            
+            IMPORTANTE: Usa esta información para NO repetir preguntas que ya fueron respondidas.
+            """
+            logging.info(f"summary: {summary}")
+        
         prompt_general_skeleton = prompt_general_skeleton.replace("{name}", project_name)
         prompt_general_skeleton = prompt_general_skeleton.replace("{personality}", personality_prompt)
-        prompt_general_skeleton = prompt_general_skeleton.replace("{instructions}", instructions)
+        
+        
+        
+        #prompt_general_skeleton = prompt_general_skeleton.replace("{instructions}", instructions)
+        instructions_message = SystemMessage(content=instructions)
+        messages.insert(0, instructions_message)
+        
         prompt_general_skeleton = prompt_general_skeleton.replace("{utc_now}", now.isoformat())
         prompt_general_skeleton = prompt_general_skeleton.replace("{date_range_str}", date_range_str)
         prompt_general_skeleton = prompt_general_skeleton.replace("{now_chile}", now_chile)
         
-
+        prompt_general_skeleton += f"""        
+        CONTEXTO TEMPORAL Y GEOGRÁFICO:
+        - Zona horaria: America/Santiago (Chile)
+        - Fecha y hora actual: {now_chile}
+        - Fechas de referencia próximas: {date_range_str}
         
-        # AGREGAR RESUMEN DE CONVERSACIÓN ANTERIOR
-        if summary and summary.strip():
-            prompt_general_skeleton += f"""
-            
-            📋 RESUMEN DE CONVERSACIÓN ANTERIOR:
-            {summary}
-            
-            ⚠️ IMPORTANTE: Usa esta información para NO repetir preguntas que ya fueron respondidas.
-            """
-        
-        # INSTRUCCIÓN CRÍTICA: SIEMPRE usar unified_search antes de responder
-        if "unified_search" in project.enabled_tools:
-            prompt_general_skeleton += f"""
-            
-            ⚠️ INSTRUCCIÓN CRÍTICA - OBLIGATORIA:
-            - ANTES de responder CUALQUIER consulta del usuario, SIEMPRE ejecuta unified_search_tool
-            - NO respondas NUNCA sin haber buscado primero con unified_search_tool
-            - Usa unified_search_tool con la consulta exacta del usuario
-            - Esta herramienta busca automáticamente en FAQs, documentos y productos
-            - Solo después de obtener resultados, procede a responder
-            - Si no hay resultados relevantes, entonces puedes responder basándote en tu conocimiento
-            - Esta regla es ABSOLUTA y no tiene excepciones
-            - unified_search_tool es la HERRAMIENTA PRINCIPAL de búsqueda híbrida
-            
-            """
-        
-        prompt_general_skeleton += f"""
-        MANEJO DE FECHAS Y HORAS:
-        - Zona horaria: Chile (UTC-3)
-        - Hora actual: {now_chile}
-        - Fechas de referencia: {date_range_str}
-        
-        Reglas:
-        - Usar current_datetime_tool para validar fechas
-        - Verificar feriados con check_chile_holiday_tool
-        - Formato: DD-MM-YYYY HH:mm
-        - Prohibido calcular fechas manualmente
-        """
-        
-        prompt_general_skeleton += f"""
-        MEMORIA Y CONTACTOS - REGLAS CRÍTICAS:
-        
-        ⚠️ ANTES DE PREGUNTAR CUALQUIER INFORMACIÓN:
-        1. REVISA el "RESUMEN DE CONVERSACIÓN ANTERIOR" (si existe) para ver qué información ya tienes
-        2. REVISA los mensajes anteriores de esta conversación
-        3. Si el usuario YA proporcionó información (nombre, email, teléfono), NO la preguntes otra vez
-        4. USA la información que ya tienes del resumen y mensajes anteriores
-        
-        DETECTAR Y GUARDAR AUTOMÁTICAMENTE:
-        - Cuando el usuario dé nombre, email o teléfono → usar save_contact_tool inmediatamente
-        - Ejemplo: Usuario dice "sebastian" → save_contact_tool(name="Sebastian")
-        - Ejemplo: Usuario dice "hokidoki8@gmail.com" → save_contact_tool(email="hokidoki8@gmail.com")
-        - Ejemplo: Usuario dice "998766626" → save_contact_tool(phone_number="998766626")
-        - NUNCA digas que guardaste el contacto, solo ejecuta la herramienta
-        
-        CORRECTO: Usar la información del resumen y continuar la conversación desde donde se quedó
-        """
-        
-        
-        prompt_general_skeleton += f"""
         FORMATO DE URLs:
         - Usar markdown: [texto](url)
-        - Ejemplo: [Ver producto](https://ejemplo.com/producto)
-        """
-                
-        logging.info(f"project: {project.enabled_tools}")
+        - Ejemplo: [Ver producto](https://www.ublix.app/producto/123)
+
+        ANTES DE PREGUNTAR CUALQUIER INFORMACIÓN:
+        1. EJECUTA save_contact_tool() SIN PARÁMETROS para obtener datos existentes del usuario.
+        2. SIEMPRE debes obtener y guardar TODOS los campos configurados en la tabla de contactos, solicitando al usuario la información faltante.
+        3. SOLO si existe una instrucción explícita en el proyecto que indique que NO se debe guardar un campo específico, NO lo solicites ni lo guardes.
+        4. Si el usuario no entrega la información, vuelve a pedirla de forma cordial y profesional.
         
-        if(project.enabled_tools):
-            if "unified_search" in project.enabled_tools:
-                prompt_general_skeleton += f"""
-                BÚSQUEDA UNIFICADA (unified_search_tool) - HERRAMIENTA PRINCIPAL:
-                - Herramienta OBLIGATORIA para buscar en TODOS los tipos de contenido
-                - SIEMPRE ejecutar ANTES de responder cualquier consulta del usuario
-                - Busca automáticamente en: documentos, FAQs y productos
-                - Combina búsqueda semántica y por texto para mejores resultados
-                - Prioriza FAQs para respuestas rápidas, luego documentos, luego productos
-                - Parámetros: query (obligatorio), content_types (opcional), limit (opcional, default 15), category (opcional)
-                - Ejemplo: unified_search_tool(query="política de devoluciones", limit=10)
-                - NO usar las herramientas separadas (document_retriever, faq_retriever, search_products_unified)
-                - Esta herramienta es MÁS EFICIENTE y RÁPIDA que usar 3 herramientas separadas
-                - Es la HERRAMIENTA PRINCIPAL de búsqueda híbrida del sistema
-                """
-            elif "products_search" in project.enabled_tools:
-                prompt_general_skeleton += f"""
-                BÚSQUEDA DE PRODUCTOS:
-                - Usa search_products_unified para buscar productos
-                - Parámetros: query (texto de búsqueda), category (opcional), limit=15
-                - Muestra: título, precio (CLP), descripción, stock e imágenes
-                - Formatea URLs con markdown: [texto](url)
-                - Si no hay resultados, sugiere términos alternativos
-                """
-            elif "retriever" in project.enabled_tools:
-                prompt_general_skeleton += f"""
-                RETRIEVER:
-                - Usa document_retriever para buscar información específica
-                - Parámetros: query (texto de búsqueda)
-                - Devuelve: documentos relevantes con título, contenido y relevancia
-                - SIEMPRE buscar en documentos cuando el usuario haga consultas sobre el proyecto
-                - Usar para: información técnica, procedimientos, políticas, contenido detallado
-                """
-            elif "faq_retriever" in project.enabled_tools:
-                prompt_general_skeleton += f"""
-                FAQ RETRIEVER - OBLIGATORIO:
-                - SIEMPRE ejecuta faq_retriever ANTES de responder cualquier consulta
-                - Usa faq_retriever con la consulta exacta del usuario
-                - Parámetros: query (texto de búsqueda), limit (opcional, por defecto 8)
-                - Devuelve: FAQs con pregunta, respuesta, título y metadatos
-                - NO respondas sin haber buscado primero en FAQs
-                - Si no hay FAQs relevantes, entonces puedes responder basándote en tu conocimiento
-                - Esta herramienta es PRIORITARIA sobre todas las demás
-                """
-            if "retriever" in project.enabled_tools and "faq_retriever" in project.enabled_tools and "unified_search" not in project.enabled_tools:
-                prompt_general_skeleton += f"""
-                ESTRATEGIA DE BÚSQUEDA COMBINADA:
-                - SIEMPRE usar AMBAS herramientas (document_retriever Y faq_retriever) cuando el usuario haga consultas
-                - Buscar primero en FAQs para respuestas rápidas y directas
-                - Buscar en documentos para información más detallada y técnica
-                - Combinar los resultados para dar respuestas completas
-                - Priorizar FAQs cuando la consulta sea una pregunta directa
-                - Usar documentos para complementar con información adicional
-                - NO esperar a que el usuario pida específicamente buscar en una herramienta
-                - Ser proactivo: buscar automáticamente en ambas fuentes
-                """
-            if "calendar" in project.enabled_tools:
-                prompt_general_skeleton += f"""
-                CALENDAR:
-                Herramienta: google_calendar_tool
-                
-                ⚠️ CONFIGURACIÓN ESPECÍFICA DEL PROYECTO:
-                - DURACIÓN ESTÁNDAR: Todas las reuniones duran 60 minutos (1 hora)
-                - SIEMPRE usar duration=1 en find_available_slots
-                - Al crear eventos, calcular hora de fin sumando 60 minutos a la hora de inicio
-                
-                Funcionalidades disponibles:
-                1. Listar eventos:
-                   - list_events|days=7 (lista eventos de los próximos 7 días)
-                
-                2. Buscar eventos:
-                   - search_events|title=Reunión|date=2024-03-20
-                
-                3. Crear evento:
-                   - create_event|title=Reunión|start=2024-03-20T15:00:00|end=2024-03-20T16:00:00|description=Detalles|attendees=email1@ejemplo.com,email2@ejemplo.com
-                   - Opcional: force_create=true para crear a pesar de conflictos
-                   - Opcional: meet=true para agregar Google Meet automáticamente
-                   - IMPORTANTE: Cuando se incluyen attendees, Google Calendar envía automáticamente invitaciones por correo
-                   - Los invitados reciben recordatorios por email 24 horas antes y popup 10 minutos antes
-                   - GOOGLE MEET: Si meet=true, se genera un enlace de Google Meet automáticamente y se incluye en las invitaciones
-                
-                4. Verificar disponibilidad:
-                   - check_availability|start=2024-03-20T15:00:00|end=2024-03-20T16:00:00
-                
-                8. Buscar horarios disponibles:
-                   - find_available_slots|duration=1 (busca las próximas 3 fechas disponibles de 60 minutos)
-                   - find_available_slots|duration=1.5|start_hour=10|end_hour=16 (personalizado)
-                
-                5. Obtener detalles:
-                   - get_event|event_id=abc123
-                
-                6. Actualizar evento:
-                   - update_event|event_id=abc123|title=Nuevo título|description=Nueva descripción
-                
-                7. Eliminar evento:
-                   - delete_event|event_id=abc123
-                
-                REGLAS IMPORTANTES PARA AGENDAMIENTO:
-                - SIEMPRE verificar disponibilidad antes de crear eventos
-                - NUNCA agendar si la hora ya está ocupada
-                - SIEMPRE verificar si es feriado antes de agendar con check_chile_holiday_tool
-                - Usar check_availability primero para confirmar que el horario está libre
-                - Usar check_chile_holiday_tool para verificar si la fecha es feriado
-                - NO agendar eventos en feriados chilenos
-                - Si hay conflictos, mostrar los eventos existentes y sugerir horarios alternativos
-                - Si es feriado, informar al usuario y sugerir otra fecha
-                - Solo usar force_create=true si el usuario explícitamente lo solicita
-                - El sistema verifica automáticamente conflictos al crear eventos
-                
-                FLUJO PARA AGENDAR - REGLAS OBLIGATORIAS:
-                
-                1. PRIMERO: Cuando el usuario quiera agendar, usa google_calendar_tool con find_available_slots para mostrarle las próximas 3 fechas disponibles:
-                   - Ejecuta: google_calendar_tool|find_available_slots|duration=1
-                   - IMPORTANTE: SIEMPRE usar duration=1 (60 minutos) para este proyecto
-                   - Esto le mostrará 3 opciones siempre enumeradas (1, 2, 3) con fechas y horarios libres de 60 minutos
-                
-                2. ESPERA que el usuario elija una opción (enumerada 1, 2 o 3) O proponga su propia fecha/hora O pregunte por un día específico.
-                
-                3. SOLO cuando el usuario responda con una elección específica:
-                   a) Si eligió un número (enumerada 1, 2 o 3): Confirma directamente "¿Confirmas que agende para [fecha/hora de la opción elegida]?"
-                   b) Si propuso su propia fecha/hora: Verifica feriado (check_chile_holiday_tool) y disponibilidad (check_availability)
-                   c) Si pregunta por un día específico (ej: "para el jueves?", "y para el miércoles?", "¿qué tal el viernes?", "tienes para martes?"): 
-                      Ejecuta google_calendar_tool|find_available_slots|day=[día]|duration=1
-                      Ejemplos: 
-                      - "para el jueves?" → google_calendar_tool|find_available_slots|day=jueves|duration=1
-                      - "y para el miércoles?" → google_calendar_tool|find_available_slots|day=miércoles|duration=1
-                   d) Si hay conflictos o es feriado, muestra las opciones disponibles otra vez
-                   e) Si está libre, confirma: "¿Confirmas que agende para [fecha/hora]?"
-                
-                4. Solo cuando tengas CONFIRMACIÓN y TODOS LOS DATOS, usa create_event con attendees=email_del_usuario.
-                   - IMPORTANTE: Los eventos deben durar exactamente 60 minutos
-                   - Si el usuario elige una hora (ej: 15:00), el evento va de 15:00 a 16:00
-                   - GOOGLE MEET: Agregar meet=true automáticamente para todas las reuniones (es la configuración estándar)
-                   - Ejemplo: create_event|title=Reunión|start=2024-03-20T15:00:00|end=2024-03-20T16:00:00|attendees=usuario@email.com|meet=true
-                
-                ⚠️ CRÍTICO: NUNCA crees eventos sin tener el email del usuario. SIEMPRE incluye el email como attendee.
-                ⚠️ CRÍTICO: SIEMPRE empieza mostrando las opciones disponibles con find_available_slots|duration=1. NO preguntes "¿qué día y hora?" sin antes mostrar las opciones.
-                
-                ⚠️ DETECCIÓN DE DÍAS ESPECÍFICOS:
-                Si el usuario menciona un día de la semana específico (lunes, martes, miércoles, jueves, viernes, sábado, domingo), 
-                INMEDIATAMENTE usa find_available_slots con el parámetro day. NO uses la búsqueda general.
-                Ejemplos de frases que requieren búsqueda específica:
-                - "para el jueves?" → day=jueves
-                - "y el miércoles?" → day=miércoles  
-                - "¿tienes para viernes?" → day=viernes
-                - "qué tal martes?" → day=martes
-                
-                Notas importantes:
-                - Todas las fechas se manejan en zona horaria de Chile (UTC-3)
-                - Se verifica automáticamente conflictos de horario
-                - Formato de fecha: YYYY-MM-DDThh:mm:ss
-                - Para eventos con invitados, separar emails por coma
-                - NUNCA digas "el horario está disponible" sin ejecutar check_availability primero
-                - NUNCA agendes en feriados sin verificar primero con check_chile_holiday_tool
-                """
-            if "tienda" in project.enabled_tools:
-                prompt_general_skeleton += f"""
-                TIENDA:
-                - Herramientas disponibles:
-                  * buscar_productos_tienda: busca productos por nombre, talla, color
-                  * consultar_info_tienda: información sobre contacto, devoluciones, envíos
-                  * gestionar_carrito: ver, agregar, eliminar productos, aplicar cupones
-                - Usar cuando: necesites buscar productos o gestionar compras
-                """
-            if "openai_vector" in project.enabled_tools:
-                prompt_general_skeleton += f"""
-                OPENAI VECTOR:
-                - Usa openai_vector_search para buscar información en documentos
-                - Parámetros: query (texto de búsqueda)
-                - Devuelve: 
-                  * Contenido relevante de los documentos
-                  * Nombre del archivo fuente
-                  * Puntuación de relevancia
-                  * Citas y referencias
-                - Usar cuando: necesites información específica de documentos subidos
-                - Formato de respuesta:
-                  * Título con la consulta
-                  * Resultados ordenados por relevancia
-                  * Fuentes citadas cuando aplique
-                """
-            if "api" in project.enabled_tools:
-                prompt_general_skeleton += f"""
-                API:
-                - Herramientas disponibles: funciones específicas generadas para cada API configurada
-                - Uso: ejecutar automáticamente cuando el usuario solicite información o acciones que requieran APIs externas
-                - Parámetros: seguir la documentación específica de cada función API
-                - Respuesta: procesar y presentar los datos de forma clara y útil
-                - Manejo de errores: informar al usuario si hay problemas de conexión o datos
-                """
-            if "email" in project.enabled_tools:
+        🚨 REGLA CRÍTICA: SIEMPRE ejecutar save_contact_tool() al inicio para obtener datos del usuario
+        
+        HERRAMIENTAS DISPONIBLES:
+        {get_tools_summary(project.enabled_tools if project.enabled_tools else [])}        
+        """
+            
+        if "email" in project.enabled_tools:
                 prompt_general_skeleton += f"""
                 EMAIL (send_email):
                 API: Resend | Params: from_email, to, subject, html/text, cc, bcc, reply_to
                 Default from: "noreply@ublix.app" | Multi emails: "email1@domain.com, email2@domain.com"
                 Use when: user wants to send email, mentions "enviar email", "mandar correo"
                 Examples: send_email(to="user@domain.com", subject="Test", html="<h1>Hola</h1>")
-                """
-            if "image_processor" in project.enabled_tools:
+                """   
+        if "api" in project.enabled_tools:
                 prompt_general_skeleton += f"""
-                PROCESAMIENTO DE IMÁGENES:
-                Herramienta: image_processor
-                - Parámetro: image_url (URL de la imagen a procesar)
-                - Ejecutar automáticamente cuando el mensaje contenga una imagen
-                - Devuelve el texto extraído como string plano
-                - NUNCA digas que recibiste una imagen o una url de una imagen
+                API TOOLS DINÁMICAS (api_tool):
+                Herramientas API personalizadas configuradas específicamente para este proyecto.
+                Las funciones disponibles se generan dinámicamente basadas en las configuraciones de API almacenadas.
+                Cada API tiene su propia configuración de endpoints, parámetros y métodos HTTP.
+                Usa estas herramientas cuando necesites interactuar con APIs externas específicas del proyecto.
                 """
+        if "unified_search" in project.enabled_tools:
+                prompt_general_skeleton += f"""
+                INSTRUCCIÓN CRÍTICA - OBLIGATORIA:
+                - ANTES de responder CUALQUIER consulta del usuario, SIEMPRE ejecuta unified_search_tool
+                - NO respondas NUNCA sin haber buscado primero con unified_search_tool
+                - Usa unified_search_tool con la consulta exacta del usuario
+                - Esta herramienta busca automáticamente en FAQs, documentos y productos
+                - Solo después de obtener resultados, procede a responder
+                - Si no hay resultados relevantes, entonces puedes responder basándote en tu conocimiento
+                - Esta regla es ABSOLUTA y no tiene excepciones
+                - unified_search_tool es la HERRAMIENTA PRINCIPAL de búsqueda híbrida
+                """ 
+        if "agenda_tool" in project.enabled_tools:
+            prompt_general_skeleton += f"""
+            AGENDA_TOOL - HERRAMIENTA PROFESIONAL DE AGENDAMIENTO:
+            
+            🚨 WORKFLOW DE AGENDAMIENTO OBLIGATORIO (SEGUIR PASOS EN ORDEN):
+            
+            Paso 1: VERIFICAR FERIADO (OBLIGATORIO)
+            - Si el usuario menciona una fecha para agendar, TU PRIMERA ACCIÓN SIEMPRE DEBE SER llamar a `check_chile_holiday_tool`.
+            - NO respondas, NO saludes, NO intentes buscar horarios. Llama a la herramienta PRIMERO.
+            - Ejemplo: Si el usuario dice "agendar para el 2 de julio", tu llamas a `check_chile_holiday_tool(date='2 de julio')`.
+            
+            Paso 2: ANALIZAR RESPUESTA DEL VERIFICADOR
+            - SI la herramienta responde que ES FERIADO: Informa al usuario que no se puede agendar y sugiere elegir otra fecha. NO continúes al paso 3.
+            - SI la herramienta responde que NO ES FERIADO: Continúa al paso 3.
+            
+            Paso 3: BUSCAR/AGENDAR HORARIOS
+            - USA `agenda_tool` para buscar horarios o agendar la cita.
+            - NUNCA inventes fechas ni horarios. SOLO muestra lo que `agenda_tool` te devuelva.
 
-        
-        PROMPT_GENERAL = prompt_general_skeleton
-        
-        #logging.info(f"PROMPT_GENERAL: {PROMPT_GENERAL}")
-        
-        messages.insert(0, SystemMessage(content=PROMPT_GENERAL))
+            📋 OTROS WORKFLOWS PRINCIPALES:
+            1. BUSCAR HORARIOS: agenda_tool(workflow_type="BUSQUEDA_HORARIOS", title="consulta del usuario")
+               → Para buscar y mostrar horarios disponibles.
+               → Ejemplo: "¿qué horarios tienes?", "cuándo puedes atenderme?"
+            
+            2. AGENDAR CITA: agenda_tool(workflow_type="AGENDA_COMPLETA", title="motivo de la cita", start_datetime="YYYY-MM-DDTHH:MM:SS", ...)
+               → Para agendar una cita detallada.
+               → REQUISITO OBLIGATORIO: fecha/hora específica (start_datetime).
+                → PARÁMETROS OPCIONALES RECOMENDADOS:
+                  - attendee_email: para notificar al cliente.
+                  - attendee_name: para personalizar el evento.
+                  - attendee_phone: para tener contacto directo.
+                  - description: para añadir notas o un temario.
+                  - end_datetime: para definir una duración específica.
+                  - conversation_summary: para enviar contexto a sistemas externos (webhooks).
+                → Usa include_meet=False para citas que no requieran videollamada (ej: presenciales o telefónicas).
+            
+            3. OTROS WORKFLOWS:
+               - ACTUALIZACION_COMPLETA: Modificar eventos existentes.
+               - CANCELACION_WORKFLOW: Cancelar eventos.
+               - COMUNICACION_EVENTO: Consultar detalles de eventos.
+            
+            🔄 FLUJO RECOMENDADO:
+            1. Usuario pregunta por horarios → Usar BUSQUEDA_HORARIOS.
+            2. Usuario elige un horario → Usar AGENDA_COMPLETA para confirmar la cita.
+            3. Si se requiere notificar al cliente, solicita su email antes de agendar.
+            
+            ⚠️ IMPORTANTE: agenda_tool se conecta con Google Calendar, puede enviar emails y puede crear videollamadas de Google Meet.
 
-        if summary:
-            system_message = f"Summary of conversation earlier: {summary}"
-            messages.insert(0, SystemMessage(content=system_message))
+            REGLAS DE INTERACCIÓN PARA AGENDAMIENTO:
+
+            - Si el usuario consulta por horarios pero NO indica una fecha específica, SIEMPRE pídele que indique el día y el mes.
+                - Ejemplo de respuesta: "¿Podrías indicarme el día y el mes exactos para buscar horarios disponibles?"
+
+            - Si el usuario solo menciona el día (ej: "el 15"), asume el mes actual, pero SIEMPRE confirma con el usuario antes de continuar.
+                - Ejemplo: "¿Te refieres al 15 de [mes actual]? Por favor confirma el mes."
+
+            - Si el usuario menciona "mañana" o "próxima semana", solicita que indique el día y el mes exactos para evitar confusiones.
+                - Ejemplo: "Para buscar horarios, por favor indícame el día y el mes exactos."
+
+            - Nunca inventes fechas ni asumas información sin confirmación del usuario.
+
+            - Si el usuario no entrega la información mínima (día y mes para buscar, o fecha/hora para agendar), no muestres horarios y solicita los datos faltantes de forma amable.
+
+            - Prioriza siempre la CLARIDAD y la CONFIRMACIÓN antes de agendar.
+            """
+            
+            
+
+                
+        messages.insert(0, SystemMessage(content=prompt_general_skeleton))
 
         response = model_with_tools.invoke(messages)
         decorate_message(response, state["exec_init"], state["conversation_id"])
@@ -352,6 +194,50 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
         return {"messages": [response]}
 
     return agent
+
+def get_tools_summary(enabled_tools: list) -> str:
+    """
+    Genera un resumen dinámico de las herramientas habilitadas basado en enabled_tools
+    """
+    tools_descriptions = {
+        "unified_search": "🔍 unified_search_tool: Búsqueda unificada en documentos, FAQs y productos",
+        "retriever": "📚 document_retriever: Búsqueda en documentos específicos del proyecto",
+        "faq_retriever": "❓ faq_retriever: Búsqueda en preguntas frecuentes",
+        "products_search": "🛍️ search_products_unified: Búsqueda de productos en el catálogo",
+        "calendar": "📅 google_calendar_tool: Gestión completa de calendario Google",
+        "email": "📧 send_email: Envío de emails profesionales",
+        "contact": "👤 save_contact_tool: Gestión de información de contacto",
+        "tienda": "🏪 Herramientas de tienda: buscar_productos_tienda, consultar_info_tienda, gestionar_carrito",
+        "openai_vector": "🤖 openai_vector_search: Búsqueda vectorial en documentos",
+        "api": "🔌 API Tools: Herramientas dinámicas generadas según configuración del proyecto",
+        "image_processor": "🖼️ image_processor: Análisis y procesamiento de imágenes",
+        "mongo_db": "🗄️ mongo_db_tool: Operaciones en base de datos MongoDB",
+        "agenda_tool": "🗓️ agenda_tool: Gestión de horarios y agendamiento con Google Calendar",
+        "agenda_smart_booking_tool": "🗓️ agenda_smart_booking_tool: Gestión de horarios y agendamiento con Google Calendar"
+    }
+    
+    # Herramientas que siempre están disponibles
+    always_available = [
+        "📅 current_datetime_tool, week_info_tool: Información de fecha y hora actual",
+        "🎌 check_chile_holiday_tool, next_chile_holidays_tool: Verificación de feriados chilenos",
+        "👤 save_contact_tool: Gestión de contactos"
+    ]
+    
+    summary = []
+    
+    # Añadir herramientas habilitadas
+    for tool in enabled_tools:
+        if tool in tools_descriptions:
+            summary.append(f"  • {tools_descriptions[tool]}")
+    
+    # Añadir herramientas siempre disponibles
+    for tool in always_available:
+        summary.append(f"  • {tool}")
+    
+    if summary:
+        return "Las siguientes herramientas están disponibles:\n" + "\n".join(summary)
+    else:
+        return "Solo las herramientas básicas de fecha y contacto están disponibles."
 
 def get_date_range() -> list:
     """
@@ -376,7 +262,6 @@ def resume_conversation(state: CustomState):
     logging.info(f"Delete Messages:\n {delete_messages}")
 
     return {"messages": delete_messages}
-
 
 async def tools_node(project_id, user_id, name, number_phone_agent, unique_id, project):
     logging.info(unique_id + " Initiating tools node...")

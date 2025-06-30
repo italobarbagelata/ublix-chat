@@ -6,7 +6,8 @@ langchain==0.3.1
 langchain-core==0.3.51
 langchain-openai==0.2.1
 langchain-community==0.3.1
-
+langchain-google-community[calendar]
+langchain-google-community
 
 # LangGraph
 langgraph==0.2.28

@@ -38,11 +38,12 @@ def generate_summary(payload: SummaryPayload):
         {DEFAULT_PROMPT_MEMORY}
 
         <memory_instructions>
-
-        The summary should act as a long-term memory with detailed information. 
-        Do not use emojis and ensure the summary is generated in Spanish. 
-        Limit the summary to a maximum of 4 paragraphs or 1023 characters. 
         
+        The summary should act as a long-term memory focusing on CONVERSATION FLOW and CONTEXT.
+        Do NOT include basic contact data (name, email, phone, age, city, etc.) as these are stored in contact_tool.
+        Focus on: conversation progress, user interests, specific requests, project status, next steps.
+        Do not use emojis and ensure the summary is generated in Spanish. 
+        Limit the summary to a maximum of 4 paragraphs or 1023 characters.  
         Current conversation summary: {previous_summary}
     """
 

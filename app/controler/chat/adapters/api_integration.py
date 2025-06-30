@@ -1,213 +1,162 @@
 import requests
 import logging
-import re
+import time
 import json
 
+
+def generate_docstring(api_json):
+    """ Builds the docstring for the API function if longer than 1024, the chatbot will crash"""
+
+    headers = api_json['api_headers']
+    params = api_json['api_parameters']
+    body = api_json['api_body']
+
+    docstring = f"Executes a {api_json['api_request_type']} request to {api_json['api_name']} API.\n\n"
+    docstring += f"{api_json['api_description']}\n\n"
+    docstring += "Parameters:\n"
+    for item in headers + params + body:
+        if 'description' in item:
+            if item['description'] != "":
+                param_name = item['key'].replace("-", "_")
+                description = item['description']
+                if 'value' in item and item["value"] != "":
+                    description += f" (default value: {item['value']})"
+                docstring += f"    {param_name}: {description}\n"
+            else:
+                continue
+
+    return '    """ ' + docstring + '    """'
+
+
+def generate_function_body(api_json):
+
+    headers = api_json['api_headers']
+    params = api_json['api_parameters']
+    body = api_json['api_body']
+
+    function_body = ""
+
+    if body:
+        function_body += "    data = {\n"
+        for item in body:
+            if 'description' in item or ('value' not in item and 'description' not in item):
+                function_body += f"        '{item['key']}': {item['key'].replace('-', '_')},\n"
+            elif 'value' in item and 'description' not in item:
+                function_body += f"        '{item['key']}': {item['key'].replace('-', '_')},\n"
+        function_body += "    }\n\n"
+    else:
+        function_body += "    data = None\n\n"
+
+    if headers:
+        function_body += "    headers = {\n"
+        for item in headers:
+            function_body += f"        '{item['key']}': {item['key'].replace('-', '_')},\n"
+        function_body += "    }\n\n"
+    else:
+        function_body += "    headers = None\n\n"
+
+    if params:
+        function_body += "    params = {\n"
+        for item in params:
+            if 'description' in item or ('value' not in item and 'description' not in item):
+                function_body += f"        '{item['key']}': {item['key'].replace('-', '_')},\n"
+            elif 'value' in item and 'description' not in item:
+                function_body += f"        '{item['key']}': {item['key'].replace('-', '_')},\n"
+        function_body += "    }\n\n"
+    else:
+        function_body += "    params = None\n\n"
+
+    urlenc_present = any(
+        header.get('value') == 'application/x-www-form-urlencoded'
+        for header in headers
+    )
+
+    data_key = 'data' if urlenc_present else 'json'
+
+    function_body += "    kwargs = {}\n"
+    function_body += "    if data:\n"
+    function_body += f"        kwargs['{data_key}'] = data\n"
+    function_body += "    if headers:\n"
+    function_body += "        kwargs['headers'] = headers\n"
+    function_body += "    if params:\n"
+    function_body += "        kwargs['params'] = params\n\n"
+
+    VERB = api_json['api_request_type'].lower()
+    ENDPOINT = api_json['api_endpoint']
+    CONTENTS = "**kwargs"
+
+    # Agregar logging simplificado para mostrar solo los datos enviados
+    function_body += f"    # Log de datos enviados al API\n"
+    function_body += f"    logging.info(f'🚀 API {api_json['api_name']}: {{data}}')\n"
+    function_body += f"    \n"
+    function_body += f"    start_time = time.time()\n"
+    function_body += f"    \n"
+    function_body += f"    try:\n"
+    function_body += f"        response = requests.{VERB}('{ENDPOINT}',{CONTENTS}, timeout=30)\n"
+    function_body += f"        execution_time = time.time() - start_time\n"
+    function_body += f"        \n"
+    function_body += f"        if response.status_code >= 200 and response.status_code < 300:\n"
+    function_body += f"            logging.info(f'✅ API {api_json['api_name']} ejecutada exitosamente en {{execution_time:.2f}}s')\n"
+    function_body += f"            try:\n"
+    function_body += f"                response_json = response.json()\n"
+    function_body += f"                return response_json\n"
+    function_body += f"            except ValueError as json_error:\n"
+    function_body += f"                response_text = response.text\n"
+    function_body += f"                return response_text\n"
+    function_body += f"        else:\n"
+    function_body += f"            error_text = response.text\n"
+    function_body += f"            logging.error(f'❌ API {api_json['api_name']} Error: Status {{response.status_code}}, Response: {{error_text}}')\n"
+    function_body += f"            return {{'error': f'HTTP {{response.status_code}}: {{error_text}}', 'status_code': response.status_code}}\n"
+    function_body += f"            \n"
+    function_body += f"    except requests.exceptions.Timeout as timeout_error:\n"
+    function_body += f"        logging.error(f'❌ API {api_json['api_name']} Timeout después de 30s')\n"
+    function_body += f"        return {{'error': 'Timeout: La API no respondió en 30 segundos', 'timeout': True}}\n"
+    function_body += f"        \n"
+    function_body += f"    except requests.exceptions.ConnectionError as conn_error:\n"
+    function_body += f"        logging.error(f'❌ API {api_json['api_name']} Connection Error: {{str(conn_error)}}')\n"
+    function_body += f"        return {{'error': f'Error de conexión: {{str(conn_error)}}', 'connection_error': True}}\n"
+    function_body += f"        \n"
+    function_body += f"    except Exception as general_error:\n"
+    function_body += f"        execution_time = time.time() - start_time\n"
+    function_body += f"        logging.error(f'❌ API {api_json['api_name']} Error después de {{execution_time:.2f}}s: {{str(general_error)}}')\n"
+    function_body += f"        return {{'error': f'Error general: {{str(general_error)}}', 'error_type': type(general_error).__name__}}\n"
+
+    return function_body
+
+
 def create_api_function(api_json):
-    def extract_placeholders_from_json(json_string):
-        """Extrae placeholders {{variable}} de un string JSON"""
-        if not isinstance(json_string, str):
-            return []
-        
-        # Buscar placeholders con formato {{variable_name}}
-        placeholders = re.findall(r'\{\{(\w+)\}\}', json_string)
-        return list(set(placeholders))  # Eliminar duplicados
-    
-    def generate_docstring(headers, params, body, json_placeholders=None):
-        # Asegurar que todos los parámetros sean listas
-        headers = headers if isinstance(headers, list) else []
-        params = params if isinstance(params, list) else []
-        body = body if isinstance(body, list) else []
-        json_placeholders = json_placeholders or []
-        
-        docstring = f"Executes a {api_json['api_request_type']} request to {api_json['api_name']} API.\n\n"
-        docstring += f"{api_json['api_description']}\n\n"
-        docstring += "Parameters:\n"
-        
-        # Agregar placeholders del JSON como parámetros
-        for placeholder in json_placeholders:
-            docstring += f"    {placeholder}: Variable para reemplazar en el cuerpo JSON\n"
-        
-        for item in headers+params+body:
-            if 'description' in item:
-                if item['description'] != "":
-                    param_name = item['key']
-                    description = item['description']
-                    if 'value' in item and item["value"] != "":
-                        description += f" (default value: {item['value']})"
-                    docstring += f"    {param_name}: {description}\n"
-                else:
-                    continue
-        
-        return docstring
 
-    def generate_function_body(headers, params, body, raw_body=None, json_placeholders=None):
-        # Asegurar que todos los parámetros sean listas
-        headers = headers if isinstance(headers, list) else []
-        params = params if isinstance(params, list) else []
-        body = body if isinstance(body, list) else []
-        json_placeholders = json_placeholders or []
-        
-        function_body = ""
+    function_name = f'{api_json["api_name"].replace(" ", "_").lower()}_api'
 
-        # Si hay un raw_body (JSON string), usarlo directamente
-        if raw_body and isinstance(raw_body, str):
-            try:
-                # Verificar que sea JSON válido (con placeholders reemplazados temporalmente)
-                temp_body = raw_body
-                for placeholder in json_placeholders:
-                    temp_body = temp_body.replace(f"{{{{{placeholder}}}}}", "placeholder_value")
-                json.loads(temp_body)
-                
-                # Generar código para reemplazar placeholders dinámicamente
-                if json_placeholders:
-                    function_body += "    # Preparar el cuerpo JSON con variables\n"
-                    function_body += "    import json\n"
-                    function_body += f"    json_template = {repr(raw_body)}\n"
-                    for placeholder in json_placeholders:
-                        function_body += f"    json_template = json_template.replace('{{{{{placeholder}}}}}', str({placeholder}))\n"
-                    function_body += "    data = json.loads(json_template)\n\n"
-                else:
-                    function_body += f"    data = {raw_body}\n\n"
-                logging.info(f"Usando raw_body como JSON con {len(json_placeholders)} placeholders: {raw_body[:100]}...")
-            except json.JSONDecodeError:
-                logging.warning(f"raw_body no es JSON válido, usando body lista: {raw_body[:100]}...")
-                function_body += "    data = {\n"
-                for item in body:
-                    if 'description' in item or ('value' not in item and 'description' not in item):
-                        function_body += f"        '{item['key']}': {item['key']},\n"
-                    elif 'value' in item and 'description' not in item:
-                        function_body += f"        '{item['key']}': {item['key']},\n"
-                function_body += "    }\n\n"
-        else:
-            function_body += "    data = {\n"
-            for item in body:
-                if 'description' in item or ('value' not in item and 'description' not in item):
-                    function_body += f"        '{item['key']}': {item['key']},\n"
-                elif 'value' in item and 'description' not in item:
-                    function_body += f"        '{item['key']}': {item['key']},\n"
-            function_body += "    }\n\n"
-
-        # Prepare headers
-        if headers:
-            function_body += "    headers = {\n"
-            for item in headers:
-                function_body += f"        '{item['key']}':'{item['value']}',\n"
-            function_body += "    }\n\n"
-        else:
-            function_body += "    headers = {}\n\n"
-
-        # Prepare params
-        if params:
-            function_body += "    params = {\n"
-            for item in params:
-                if 'description' in item or ('value' not in item and 'description' not in item):
-                    function_body += f"        '{item['key']}': {item['key']},\n"
-                elif 'value' in item and 'description' not in item:
-                    function_body += f"        '{item['key']}': {item['key']},\n"
-            function_body += "    }\n\n"
-                 
-        else:
-            function_body += "    params = {}\n\n"
-
-        # Make the request with error handling
-        function_body += f"    response = requests.{api_json['api_request_type'].lower()}('{api_json['api_endpoint']}', json=data, headers=headers, params=params)\n"
-        function_body += "    try:\n"
-        function_body += "        # Check content type to handle different response formats\n"
-        function_body += "        content_type = response.headers.get('content-type', '').lower()\n"
-        function_body += "        if 'application/json' in content_type:\n"
-        function_body += "            # JSON response\n"
-        function_body += "            if response.text.strip():\n"
-        function_body += "                return response.json()\n"
-        function_body += "            else:\n"
-        function_body += "                return {'status': response.status_code, 'message': 'Empty JSON response'}\n"
-        function_body += "        elif 'text/plain' in content_type:\n"
-        function_body += "            # Plain text response\n"
-        function_body += "            return {'status': response.status_code, 'message': 'Text response received', 'content': response.text}\n"
-        function_body += "        else:\n"
-        function_body += "            # Other content types\n"
-        function_body += "            if response.text.strip():\n"
-        function_body += "                try:\n"
-        function_body += "                    return response.json()\n"
-        function_body += "                except ValueError:\n"
-        function_body += "                    return {'status': response.status_code, 'message': f'Non-JSON response with content-type: {content_type}', 'content': response.text}\n"
-        function_body += "            else:\n"
-        function_body += "                return {'status': response.status_code, 'message': 'Empty response with content-type: ' + content_type}\n"
-        function_body += "    except ValueError as e:\n"
-        function_body += "        return {'status': response.status_code, 'message': f'Invalid JSON response: {str(e)}', 'content': response.text}\n"
-
-        return function_body
-
-    function_name = f'{api_json["api_name"].replace(" ","_").lower()}_api'
-
-    # Generate the function signature
     signature = f"def {function_name}("
+
+    CONTENTS_LIST = (api_json['api_headers']
+                     + api_json['api_parameters']
+                     + api_json['api_body']
+                     )
+
     non_default_args = []
     default_args = []
-    
-    # Asegurar que api_parameters y api_body sean listas
-    api_parameters = api_json.get('api_parameters', [])
-    raw_api_body = api_json.get('api_body', [])
-    api_body = []
-    
-    if not isinstance(api_parameters, list):
-        logging.warning(f"api_parameters no es una lista: {type(api_parameters)}, convirtiendo a lista vacía")
-        api_parameters = []
-    
-    # Manejar api_body - puede ser lista o string JSON
-    json_placeholders = []
-    if isinstance(raw_api_body, list):
-        api_body = raw_api_body
-        raw_api_body = None
-    elif isinstance(raw_api_body, str):
-        logging.info(f"api_body es string JSON, lo mantendré para usar directamente")
-        # Extraer placeholders del JSON
-        json_placeholders = extract_placeholders_from_json(raw_api_body)
-        if json_placeholders:
-            logging.info(f"Placeholders encontrados en api_body: {json_placeholders}")
-        api_body = []  # Lista vacía para parámetros, pero usaré raw_api_body para el cuerpo
-    else:
-        logging.warning(f"api_body no es lista ni string: {type(raw_api_body)}, convirtiendo a lista vacía")
-        api_body = []
-        raw_api_body = None
-    
-    # Combinar parámetros tradicionales con placeholders del JSON
-    all_params = api_parameters + api_body
-    for item in all_params:
+
+    for item in CONTENTS_LIST:
+        key = item['key'].replace("-", "_")
         if 'description' in item or ('value' not in item and 'description' not in item):
             if 'value' in item:
                 value = item['value']
                 if value == "" or value == "''":
-                    # Treat empty strings as non-default arguments
-                    non_default_args.append(item['key'])
+                    non_default_args.append(key)
                 else:
-                    # Parameter has a default value
-                    default_args.append(f"{item['key']}={repr(value)}")
+                    default_args.append(f"{key}={repr(value)}")
             else:
-                # No default value provided
-                non_default_args.append(item['key'])
-    
-    # Agregar placeholders del JSON como parámetros obligatorios
-    for placeholder in json_placeholders:
-        non_default_args.append(placeholder)
-    
-    # Combine non-default and default arguments in the correct order
+                non_default_args.append(key)
+
     signature += ", ".join(non_default_args + default_args) + "):"
 
-    # Asegurar que api_headers también sea una lista
-    api_headers = api_json.get('api_headers', [])
-    if not isinstance(api_headers, list):
-        logging.warning(f"api_headers no es una lista: {type(api_headers)}, convirtiendo a lista vacía")
-        api_headers = []
-    
-    # Generate the complete function
     function_str = signature + "\n"
-    function_str += '    """' + generate_docstring(api_headers, api_parameters, api_body, json_placeholders) + '    """' + "\n"
-    function_str += generate_function_body(api_headers, api_parameters, api_body, raw_api_body, json_placeholders)
-    logging.info("function_str signature")
-    logging.info(signature)
-    # Create the function object
-    exec_globals = {'requests': requests}
+    function_str += generate_docstring(api_json) + "\n"
+    function_str += generate_function_body(api_json)
+
+    exec_globals = {'requests': requests, 'logging': logging, 'time': time, 'json': json}
     exec(function_str, exec_globals)
     created_function = exec_globals[function_name]
 

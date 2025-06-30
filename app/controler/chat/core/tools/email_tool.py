@@ -19,26 +19,255 @@ def extract_value(value):
     else:
         return value
 
+async def send_email_async(
+    to: str | List[str],
+    subject: str,
+    html: Optional[str] = None,
+    text: Optional[str] = None,
+    from_email: str = "noreply@ublix.app",
+    cc: Optional[str | List[str]] = None,
+    bcc: Optional[str | List[str]] = None,
+    reply_to: Optional[str | List[str]] = None,
+    headers: Optional[Dict[str, str]] = None
+) -> Dict[str, Any]:
+    """
+    Función independiente para enviar emails usando Resend.
+    
+    Parámetros:
+    - to: Email(s) del destinatario (string o lista)
+    - subject: Asunto del email
+    - html: Contenido HTML del email (opcional)
+    - text: Contenido de texto plano del email (opcional)
+    - from_email: Email del remitente (por defecto: "noreply@ublix.app")
+    - cc: Email(s) en copia (opcional)
+    - bcc: Email(s) en copia oculta (opcional)
+    - reply_to: Email(s) para responder (opcional)
+    - headers: Headers personalizados (opcional)
+    
+    Retorna:
+    - Dict con 'success': bool y 'email_id' o 'error'
+    
+    Ejemplo de uso:
+    ```python
+    from app.controler.chat.core.tools.email_tool import send_email_async
+    
+    # Uso básico
+    result = await send_email_async(
+        to="cliente@email.com",
+        subject="Confirmación de cita",
+        html="<h2>Su cita ha sido confirmada</h2>"
+    )
+    
+    # Con múltiples destinatarios
+    result = await send_email_async(
+        to=["cliente1@email.com", "cliente2@email.com"],
+        subject="Newsletter",
+        html="<p>Contenido del newsletter</p>",
+        cc="manager@empresa.com"
+    )
+    ```
+    """
+    api_key = os.getenv("RESEND_API_KEY")
+    
+    if not api_key:
+        logger.error("RESEND_API_KEY no configurada")
+        return {"success": False, "error": "API key de Resend no configurada"}
+        
+    try:
+        logger.info(f"Intentando enviar email desde {from_email} a {to}")
+        
+        # Validar que hay contenido
+        if not html and not text:
+            return {"success": False, "error": "Se requiere contenido HTML o texto"}
+        
+        # Preparar el payload
+        payload = {
+            "from": from_email,
+            "to": to,
+            "subject": subject
+        }
+        
+        # Agregar campos opcionales si están presentes
+        if html:
+            payload["html"] = html
+        if text:
+            payload["text"] = text
+        if cc:
+            payload["cc"] = cc
+        if bcc:
+            payload["bcc"] = bcc
+        if reply_to:
+            payload["reply_to"] = reply_to
+        if headers:
+            payload["headers"] = headers
+            
+        logger.info(f"Payload preparado: {payload}")
+            
+        # Headers de la petición
+        request_headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        base_url = "https://api.resend.com"
+        logger.info(f"Enviando petición a {base_url}/emails")
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"{base_url}/emails",
+                json=payload,
+                headers=request_headers
+            ) as response:
+                logger.info(f"Respuesta de Resend: {response.status}")
+                
+                if response.status == 200:
+                    result = await response.json()
+                    logger.info(f"Email enviado exitosamente. ID: {result.get('id')}")
+                    return {
+                        "success": True,
+                        "email_id": result.get("id"),
+                        "message": "Email enviado correctamente"
+                    }
+                else:
+                    error_text = await response.text()
+                    logger.error(f"Error enviando email: {response.status} - {error_text}")
+                    return {
+                        "success": False,
+                        "error": f"Error {response.status}: {error_text}"
+                    }
+                    
+    except Exception as e:
+        logger.error(f"Error en send_email_async: {str(e)}")
+        return {
+            "success": False,
+            "error": f"Error enviando email: {str(e)}"
+        }
+
+def send_email_sync(
+    to: str | List[str],
+    subject: str,
+    html: Optional[str] = None,
+    text: Optional[str] = None,
+    from_email: str = "noreply@ublix.app",
+    cc: Optional[str | List[str]] = None,
+    bcc: Optional[str | List[str]] = None,
+    reply_to: Optional[str | List[str]] = None,
+    headers: Optional[Dict[str, str]] = None
+) -> Dict[str, Any]:
+    """
+    Función síncrona para enviar emails usando Resend.
+    
+    Wrapper síncrono para send_email_async usando asyncio.
+    
+    Ejemplo de uso:
+    ```python
+    from app.controler.chat.core.tools.email_tool import send_email_sync
+    
+    # Uso síncrono
+    result = send_email_sync(
+        to="cliente@email.com",
+        subject="Confirmación de cita",
+        html="<h2>Su cita ha sido confirmada</h2>"
+    )
+    
+    if result['success']:
+        print(f"Email enviado con ID: {result['email_id']}")
+    else:
+        print(f"Error: {result['error']}")
+    ```
+    """
+    import asyncio
+    
+    try:
+        # Crear o usar el event loop existente
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # Si ya hay un loop corriendo, crear una tarea
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(
+                    lambda: asyncio.run(send_email_async(
+                        to=to, subject=subject, html=html, text=text,
+                        from_email=from_email, cc=cc, bcc=bcc,
+                        reply_to=reply_to, headers=headers
+                    ))
+                )
+                return future.result()
+        else:
+            # Si no hay loop corriendo, usar asyncio.run
+            return asyncio.run(send_email_async(
+                to=to, subject=subject, html=html, text=text,
+                from_email=from_email, cc=cc, bcc=bcc,
+                reply_to=reply_to, headers=headers
+            ))
+    except Exception as e:
+        logger.error(f"Error en send_email_sync: {str(e)}")
+        return {
+            "success": False,
+            "error": f"Error enviando email: {str(e)}"
+        }
+
 class EmailTool(BaseTool):
     name: str = "send_email"
     description: str = """
-    Herramienta para enviar emails usando Resend.
+    Herramienta profesional para envío de emails usando Resend. Gestiona automáticamente el formato y validaciones.
     
-    Parámetros disponibles:
-    - from: Email del remitente (requerido)
-    - to: Email(s) del destinatario (requerido, puede ser string o lista)
-    - subject: Asunto del email (requerido)
-    - html: Contenido HTML del email
-    - text: Contenido de texto plano del email
-    - cc: Email(s) en copia
-    - bcc: Email(s) en copia oculta
-    - reply_to: Email(s) para responder
-    - headers: Headers personalizados (opcional)
+    🎯 PROPÓSITO: Envío de emails profesionales con soporte completo para HTML, texto plano, y gestión de destinatarios.
+    
+    📧 CASOS DE USO PRINCIPALES:
+    - Confirmaciones de citas y eventos (integración automática con calendario)
+    - Notificaciones profesionales y comunicación con clientes
+    - Respuestas automáticas y seguimiento de procesos
+    - Emails promocionales y newsletters
+    
+    📋 PARÁMETROS DISPONIBLES:
+    
+    ✅ REQUERIDOS:
+    - to: Email(s) del destinatario (string o lista separada por comas)
+    - subject: Asunto del email
+    
+    📝 CONTENIDO (al menos uno requerido):
+    - html: Contenido HTML del email (recomendado para emails profesionales)
+    - text: Contenido de texto plano del email (alternativa o complemento)
+    
+    ⚙️ OPCIONALES:
+    - from_email: Email del remitente (por defecto: "noreply@ublix.app")
+    - cc: Email(s) en copia (string o lista separada por comas)
+    - bcc: Email(s) en copia oculta (string o lista separada por comas)
+    - reply_to: Email(s) para responder (string o lista separada por comas)
+    - headers: Headers personalizados (diccionario, uso avanzado)
+    
+    🔄 INTEGRACIÓN AUTOMÁTICA:
+    - Se ejecuta automáticamente después de crear eventos de calendario cuando está configurado
+    - Extrae información de contacto del usuario usando save_contact_tool
+    - Valida formatos de email antes del envío
+    - Maneja múltiples destinatarios automáticamente
+    
+    📐 FORMATO DE EMAILS:
+    - HTML: Usar para emails profesionales con formato, logos, y estilos
+    - Texto plano: Para máxima compatibilidad y emails simples
+    - Ambos: El cliente elegirá automáticamente la mejor versión
+    
+    🛡️ VALIDACIONES AUTOMÁTICAS:
+    - Formato de email válido
+    - Presencia de contenido (HTML o texto)
+    - API key configurada correctamente
+    - Gestión de errores con mensajes informativos
+    
+    💡 MEJORES PRÁCTICAS:
+    - Usar HTML para emails con información de eventos, confirmaciones
+    - Incluir información de contacto del proyecto en la firma
+    - Personalizar asunto según el tipo de comunicación
+    - Extraer nombre del usuario de la conversación para personalización
+    
+    ⚡ EJECUCIÓN AUTOMÁTICA:
+    Esta herramienta puede ejecutarse automáticamente según las instrucciones del proyecto.
+    Por ejemplo, después de crear eventos de calendario o completar procesos específicos.
     
     Ejemplos de uso:
-    - Enviar email simple: from="sender@domain.com", to="recipient@domain.com", subject="Hola", html="<h1>Hola mundo</h1>"
-    - Enviar con copia: from="sender@domain.com", to="recipient@domain.com", cc="copy@domain.com", subject="Test", html="<p>Contenido</p>"
-    - Enviar a múltiples destinatarios: from="sender@domain.com", to=["user1@domain.com", "user2@domain.com"], subject="Newsletter", html="<p>Contenido</p>"
+    - Confirmación de cita: send_email(to="cliente@email.com", subject="Confirmación de cita", html="<h2>Cita confirmada</h2><p>Su cita ha sido agendada para...</p>")
+    - Múltiples destinatarios: send_email(to="cliente1@email.com,cliente2@email.com", subject="Newsletter", html="<p>Contenido newsletter</p>")
+    - Con copia: send_email(to="cliente@email.com", cc="manager@empresa.com", subject="Propuesta", html="<p>Propuesta adjunta</p>")
     """
     
     class Config:
@@ -66,76 +295,19 @@ class EmailTool(BaseTool):
         headers: Optional[Dict[str, str]] = None
     ) -> Dict[str, Any]:
         """
-        Envía un email usando la API de Resend.
+        Envía un email usando la función independiente send_email_async.
         """
-        if not self._api_key:
-            logger.error("RESEND_API_KEY no configurada")
-            return {"error": "API key de Resend no configurada"}
-            
-        try:
-            logger.info(f"Intentando enviar email desde {from_email} a {to}")
-            
-            # Preparar el payload
-            payload = {
-                "from": from_email,
-                "to": to,
-                "subject": subject
-            }
-            
-            # Agregar campos opcionales si están presentes
-            if html:
-                payload["html"] = html
-            if text:
-                payload["text"] = text
-            if cc:
-                payload["cc"] = cc
-            if bcc:
-                payload["bcc"] = bcc
-            if reply_to:
-                payload["reply_to"] = reply_to
-            if headers:
-                payload["headers"] = headers
-                
-            logger.info(f"Payload preparado: {payload}")
-                
-            # Headers de la petición
-            headers = {
-                "Authorization": f"Bearer {self._api_key}",
-                "Content-Type": "application/json"
-            }
-            
-            logger.info(f"Enviando petición a {self._base_url}/emails")
-            
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    f"{self._base_url}/emails",
-                    json=payload,
-                    headers=headers
-                ) as response:
-                    logger.info(f"Respuesta de Resend: {response.status}")
-                    
-                    if response.status == 200:
-                        result = await response.json()
-                        logger.info(f"Email enviado exitosamente. ID: {result.get('id')}")
-                        return {
-                            "success": True,
-                            "email_id": result.get("id"),
-                            "message": "Email enviado correctamente"
-                        }
-                    else:
-                        error_text = await response.text()
-                        logger.error(f"Error enviando email: {response.status} - {error_text}")
-                        return {
-                            "success": False,
-                            "error": f"Error {response.status}: {error_text}"
-                        }
-                        
-        except Exception as e:
-            logger.error(f"Error en send_email: {str(e)}")
-            return {
-                "success": False,
-                "error": f"Error enviando email: {str(e)}"
-            }
+        return await send_email_async(
+            to=to,
+            subject=subject,
+            html=html,
+            text=text,
+            from_email=from_email,
+            cc=cc,
+            bcc=bcc,
+            reply_to=reply_to,
+            headers=headers
+        )
     
     async def _arun(
         self,

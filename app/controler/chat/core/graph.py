@@ -151,8 +151,11 @@ class Graph():
         if not isinstance(nested_dict, OrderedDict):
             nested_dict = OrderedDict(nested_dict)
 
-        MAX_KEYS = 1
+        # MEJORADO: Aumentar límite de memoria para preservar más información
+        # Cambiar de 1 a 5 claves para mantener datos importantes como contactos
+        MAX_KEYS = 5
         while len(nested_dict) > MAX_KEYS:
+            # Preservar las claves más recientes (LIFO)
             nested_dict.popitem(last=False)
 
         state_dict[''] = nested_dict
@@ -258,7 +261,7 @@ class Graph():
             if not isinstance(nested_dict, OrderedDict):
                 nested_dict = OrderedDict(nested_dict)
                 
-            MAX_KEYS = 1
+            MAX_KEYS = 5
             while len(nested_dict) > MAX_KEYS:
                 nested_dict.popitem(last=False)
                 
