@@ -56,13 +56,7 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
         
         prompt_general_skeleton = prompt_general_skeleton.replace("{name}", project_name)
         prompt_general_skeleton = prompt_general_skeleton.replace("{personality}", personality_prompt)
-        
-        
-        
-        #prompt_general_skeleton = prompt_general_skeleton.replace("{instructions}", instructions)
-        instructions_message = SystemMessage(content=instructions)
-        messages.insert(0, instructions_message)
-        
+        prompt_general_skeleton = prompt_general_skeleton.replace("{instructions}", instructions)
         prompt_general_skeleton = prompt_general_skeleton.replace("{utc_now}", now.isoformat())
         prompt_general_skeleton = prompt_general_skeleton.replace("{date_range_str}", date_range_str)
         prompt_general_skeleton = prompt_general_skeleton.replace("{now_chile}", now_chile)
@@ -70,37 +64,25 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
         prompt_general_skeleton += f"""        
         CONTEXTO TEMPORAL Y GEOGRÁFICO:
         - Zona horaria: America/Santiago (Chile)
-        - Fecha y hora actual: {now_chile}
-        - Fechas de referencia próximas: {date_range_str}
+
         
         FORMATO DE URLs:
         - Usar markdown: [texto](url)
         - Ejemplo: [Ver producto](https://www.ublix.app/producto/123)
 
-        🚨 GESTIÓN DE DATOS DE CONTACTO (REGLAS OBLIGATORIAS):
-
-        Paso 1: DETERMINAR CAMPOS REQUERIDOS
-        - Los campos base son `name`, `phone` y `email`.
-        - Revisa las instrucciones del proyecto en busca de `CAMPOS_DE_CONTACTO: ['rut', 'ciudad', ...]`. Añade estos a tu lista de campos a gestionar.
-        - **Regla de Obligatoriedad:** Por defecto, TODOS los campos (`name`, `phone` y los de `CAMPOS_DE_CONTACTO`) son obligatorios.
-        - **Regla de Excepciones:** Revisa las instrucciones en busca de `CAMPOS_OPCIONALES: ['email', 'rut']`. Los campos en esta lista NO son obligatorios. `email` es opcional por defecto si no se especifica.
-
-        Paso 2: OBTENER Y VALIDAR DATOS
-        - Llama a `save_contact_tool()` sin parámetros para ver qué datos ya tienes.
-        - Compara los datos existentes con tu lista de campos obligatorios del Paso 1.
-        - Si faltan datos obligatorios, **DEBES SOLICITARLOS AL USUARIO**. Pide todo lo que falte de una vez.
-        - Una vez que el usuario responda, vuelve a llamar a `save_contact_tool()` para guardar los datos.
-
-        UNIFIED_SEARCH_TOOL:
+        🚨 GESTIÓN DE DATOS DE CONTACTO (save_contact_tool):
+        - Usa esta herramienta para guardar o actualizar la información del usuario (nombre, email, teléfono, o campos personalizados definidos en las instrucciones).
+        - Puedes llamarla sin parámetros para verificar los datos que ya tienes.
+        - Las instrucciones del proyecto te indicarán qué datos solicitar y cuándo.
         """
             
         if "email" in project.enabled_tools:
                 prompt_general_skeleton += f"""
                 EMAIL (send_email):
-                API: Resend | Params: from_email, to, subject, html/text, cc, bcc, reply_to
-                Default from: "noreply@ublix.app" | Multi emails: "email1@domain.com, email2@domain.com"
-                Use when: user wants to send email, mentions "enviar email", "mandar correo"
-                Examples: send_email(to="user@domain.com", subject="Test", html="<h1>Hola</h1>")
+                Herramienta para enviar correos.
+                - Parámetros: from_email, to, subject, html/text, cc, bcc, reply_to.
+                - El `from_email` por defecto es "noreply@ublix.app".
+                - El parámetro `to` puede recibir múltiples correos separados por coma.
                 """   
         if "api" in project.enabled_tools:
                 prompt_general_skeleton += f"""
@@ -112,63 +94,24 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
                 """
         if "unified_search" in project.enabled_tools:
                 prompt_general_skeleton += f"""
-                INSTRUCCIÓN CRÍTICA - OBLIGATORIA:
-                - ANTES de responder CUALQUIER consulta del usuario, SIEMPRE ejecuta unified_search_tool
-                - NO respondas NUNCA sin haber buscado primero con unified_search_tool
-                - Usa unified_search_tool con la consulta exacta del usuario
-                - Esta herramienta busca automáticamente en FAQs, documentos y productos
-                - Solo después de obtener resultados, procede a responder
-                - Si no hay resultados relevantes, entonces puedes responder basándote en tu conocimiento
-                - Esta regla es ABSOLUTA y no tiene excepciones
-                - unified_search_tool es la HERRAMIENTA PRINCIPAL de búsqueda híbrida
+                UNIFIED SEARCH (unified_search_tool):
+                Herramienta de búsqueda principal. Úsala para responder a las consultas de los usuarios buscando en la base de conocimiento del proyecto (FAQs, documentos, productos).
+                Para obtener los mejores resultados, úsala con la consulta del usuario sin modificar.
+                Las instrucciones del proyecto pueden requerir que uses esta herramienta antes de intentar responder desde tu conocimiento general.
                 """ 
         if "agenda_tool" in project.enabled_tools:
             prompt_general_skeleton += f"""
-            AGENDA_TOOL - HERRAMIENTA PROFESIONAL DE AGENDAMIENTO:
+            AGENDA_TOOL (agenda_tool):
+            Herramienta para agendar citas. Tiene dos modos de operación principales definidos por `workflow_type`:
+            1. `BUSQUEDA_HORARIOS`: Busca horarios disponibles. Requiere `start_datetime` (la fecha para buscar) y `title` (la consulta del usuario, ej: "horas para la tarde").
+            2. `AGENDA_COMPLETA`: Confirma y agenda una cita. Requiere todos los detalles del evento, incluyendo el `start_datetime` exacto elegido por el usuario y la información del contacto. **Si el contacto tiene campos adicionales (additional_fields), debes pasarlos también en este workflow.**
             
-            🚨 WORKFLOW DE AGENDAMIENTO OBLIGATORIO (SEGUIR ESTOS PASOS EN ORDEN ESTRICTO):
-            
-            Paso 1: OBTENER INTENCIÓN Y FECHA INICIAL
-            - Cuando el usuario exprese su deseo de agendar (ej: "quiero agendar", "tienes hora para el jueves?"), tu primer objetivo es obtener una fecha.
-            - **Validación de Fecha:** Usa `current_datetime_tool` para convertir días ("jueves") en fechas exactas (`YYYY-MM-DD`). NO INVENTES FECHAS.
-            - **Verificación de Feriado:** Una vez que tengas una fecha, usa `check_chile_holiday_tool`. Si es feriado, informa al usuario y detén el proceso para esa fecha.
-            
-            Paso 2: BUSCAR HORARIOS DISPONIBLES
-            - **Regla Crítica de Fecha:** La fecha obtenida en el Paso 1 **DEBE** ser pasada a `agenda_tool` usando el parámetro `start_datetime`.
-            - **Regla de Persistencia de Fecha:** Si el usuario ya estableció un día y luego pregunta por otro horario (ej: '¿y más tarde?', '¿en la mañana?'), **DEBES** mantener la misma fecha (`start_datetime`) en la nueva búsqueda. La fecha solo cambia si el usuario menciona explícitamente otro día.
-            - El parámetro `title` DEBE contener la pregunta más reciente del usuario sobre el horario.
-            - **Ejemplo Correcto:**
-                1. User: "para el viernes" -> `agenda_tool(workflow_type="BUSQUEDA_HORARIOS", start_datetime="2025-07-04", title="para el viernes")`
-                2. User: "y para mas tarde?" -> `agenda_tool(workflow_type="BUSQUEDA_HORARIOS", start_datetime="2025-07-04", title="y para mas tarde?")` (Observa que `start_datetime` se mantiene)
-            - **Regla de Salida:** Si la herramienta `agenda_tool` te devuelve un mensaje indicando que no hay horarios disponibles, tu ÚNICA acción debe ser informar de esto directamente al usuario. NO vuelvas a llamar a la herramienta. Pregúntale si quiere intentar otra fecha u hora.
-
-            Paso 3: USUARIO ELIGE UN HORARIO
-            - El usuario seleccionará uno de los horarios que le presentaste.
-            
-            Paso 4: RECOPILAR Y VALIDAR DATOS DEL CONTACTO (OBLIGATORIO ANTES DE AGENDAR)
-            - **ANTES de confirmar la cita**, debes tener los datos de contacto requeridos.
-            
-            - **Paso 4.1: Determinar Campos Obligatorios para Agendar:**
-              - Los campos base son `name`, `phone`, `email`.
-              - Revisa las instrucciones del proyecto en busca de `CAMPOS_DE_CONTACTO: ['rut', 'ciudad', ...]`. Estos también son campos a considerar.
-              - **Regla de Obligatoriedad:** Por defecto, `name`, `phone` y todos los `CAMPOS_DE_CONTACTO` son obligatorios.
-              - **Regla de Excepciones:** Revisa las instrucciones en busca de `CAMPOS_OPCIONALES: ['email', 'rut']`. Estos campos NO son obligatorios para agendar.
-
-            - **Paso 4.2: Validar y Solicitar:**
-              - Llama a `save_contact_tool()` sin parámetros para ver qué datos ya tienes.
-              - Compara los datos existentes con tu lista de campos obligatorios.
-              - Si falta algún dato obligatorio, **DEBES SOLICITARLO AL USUARIO AHORA**.
-              - **NO PROCEDAS AL PASO 5 HASTA TENER LOS DATOS REQUERIDOS.**
-
-            Paso 5: CONFIRMAR Y AGENDAR
-            - Una vez que tengas el horario elegido Y los datos de contacto validados, procede a agendar.
-            - Llama a `agenda_tool(workflow_type="AGENDA_COMPLETA", ...)` con toda la información.
-            
-            ⚠️ REGLA DE ORO: Nunca llames a `agenda_tool` con `workflow_type="AGENDA_COMPLETA"` sin haber verificado y obtenido primero los datos de contacto del usuario en el paso 4.
+            Usa `current_datetime_tool` y `check_chile_holiday_tool` para validar fechas antes de buscar horarios.
+            Las instrucciones específicas del proyecto te indicarán el flujo exacto a seguir para solicitar datos y confirmar la cita.
             """
             
             
-
+        #logging.info(f"PROMPT FINAL ANTES DE SYSTEM MESSAGE:\n{prompt_general_skeleton}")
                 
         messages.insert(0, SystemMessage(content=prompt_general_skeleton))
 
