@@ -496,7 +496,7 @@ class AgendaTool(BaseTool):
             logger.info(f"🔍 [Background] Debug conversation_summary recibido: {conversation_summary}")
             webhook_result = await self._send_webhook_notification(
                 title, start_datetime, end_datetime, attendee_email, attendee_name, attendee_phone, description, 
-                conversation_summary, additional_fields
+                conversation_summary, meet_url, additional_fields
             )
             if webhook_result:
                 logger.info(f"✅ [Background] {webhook_result}")
@@ -1014,7 +1014,7 @@ class AgendaTool(BaseTool):
         attendee_email: str, attendee_name: str, attendee_phone: str, 
         description: str, conversation_summary: str = None, additional_fields: Optional[Dict[str, Any]] = None
     ) -> str:
-        """Envía datos de la conversación al webhook configurado si está habilitado"""
+        """Envía datos de la conversación al webhook configurado si está habilitado, enriqueciendo con datos del contacto desde la BD."""
         try:
             if not self._cached_project_config:
                 return None
@@ -1028,7 +1028,49 @@ class AgendaTool(BaseTool):
                 return None
             
             logger.info(f"📡 Enviando datos al webhook: {webhook_url}")
-            logger.info(f"🔍 Debug conversation_summary en webhook: '{conversation_summary}' (tipo: {type(conversation_summary)})")
+            
+            # --- BÚSQUEDA DE CONTACTO EN SUPABASE ---
+            contact_info = {}
+            if attendee_email and self.project_id:
+                try:
+                    logger.info(f"🔍 Buscando contacto con email '{attendee_email}' para proyecto '{self.project_id}'")
+                    response = self.supabase_client.client.table("contacts").select("*").eq("email", attendee_email).eq("project_id", self.project_id).limit(1).execute()
+                    if response.data:
+                        contact_info = response.data[0]
+                        logger.info(f"✅ Contacto encontrado: {contact_info.get('id')}")
+                    else:
+                        logger.info("ℹ️ No se encontró un contacto existente con ese email.")
+                except Exception as e:
+                    logger.error(f"❌ Error buscando contacto en Supabase: {str(e)}")
+
+            # --- PREPARACIÓN DE DATOS PARA WEBHOOK (user_data) ---
+            
+            # 1. Empezar con la información del contacto si se encontró
+            user_data = {}
+            if contact_info:
+                # Aplanar el campo 'fields' si existe
+                if 'fields' in contact_info and isinstance(contact_info.get('fields'), dict):
+                    user_data.update(contact_info['fields'])
+                
+                # Copiar otros campos relevantes, excluyendo metadatos y 'fields'
+                for key, value in contact_info.items():
+                    if key not in ['id', 'project_id', 'created_at', 'updated_at', 'fields']:
+                        user_data[key] = value
+
+            # 2. Superponer datos de los argumentos (tienen precedencia si no son None)
+            if attendee_name:
+                user_data['name'] = attendee_name
+            if attendee_email:
+                user_data['email'] = attendee_email
+            if attendee_phone:
+                user_data['phone'] = attendee_phone
+            
+            # 3. Superponer campos adicionales (máxima precedencia)
+            if additional_fields and isinstance(additional_fields, dict):
+                user_data.update(additional_fields)
+                logger.info(f"➕ Campos adicionales fusionados en user_data para el webhook")
+
+            logger.info(f"👤 User data final para el webhook: {user_data}")
             
             # Preparar datos del evento y conversación
             webhook_data = {
@@ -1048,17 +1090,8 @@ class AgendaTool(BaseTool):
                     "client_email": attendee_email,
                     "scheduled_at": datetime.now().isoformat()
                 },
-                "user_data": {
-                    "name": attendee_name,
-                    "email": attendee_email,
-                    "phone": attendee_phone
-                }
+                "user_data": user_data
             }
-            
-            # Fusionar additional_fields si existen
-            if additional_fields and isinstance(additional_fields, dict):
-                webhook_data["user_data"].update(additional_fields)
-                logger.info(f"➕ Campos adicionales fusionados en user_data para el webhook")
 
             # Enviar POST al webhook
             async with aiohttp.ClientSession() as session:

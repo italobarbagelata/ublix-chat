@@ -7,12 +7,12 @@ en calendar_tool.py y otras herramientas de calendario.
 
 import logging
 from datetime import datetime
-import pytz
+from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
 
 # 🌎 Zona horaria de Chile
-CHILE_TZ = pytz.timezone('America/Santiago')
+CHILE_TZ = ZoneInfo('America/Santiago')
 
 # 📅 MAPEOS CENTRALIZADOS - Eliminan duplicación de código
 DIAS_ES = ['lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo']
@@ -38,7 +38,7 @@ MESES_EN_ES = {
 
 def normalize_to_chile_timezone(datetime_str: str) -> str:
     """
-    Normaliza una fecha/hora a la zona horaria de Chile
+    Normaliza una fecha/hora a la zona horaria de Chile de forma robusta usando zoneinfo.
     
     Args:
         datetime_str: String de fecha/hora en formato ISO
@@ -47,40 +47,28 @@ def normalize_to_chile_timezone(datetime_str: str) -> str:
         String de fecha/hora normalizado a zona horaria de Chile
     """
     try:
-        logger.info(f"Normalizing timezone for: {datetime_str}")
+        logger.info(f"Normalizing timezone for: {datetime_str} using zoneinfo")
         
-        # Si ya tiene zona horaria
-        if datetime_str.endswith('Z'):
-            # UTC -> Chile
-            dt = datetime.fromisoformat(datetime_str.replace('Z', '+00:00'))
-            dt_utc = pytz.UTC.localize(dt.replace(tzinfo=None))
-            dt_chile = dt_utc.astimezone(CHILE_TZ)
-        elif '+' in datetime_str[-6:] or '-' in datetime_str[-6:]:
-            # Ya tiene zona horaria -> Chile
-            dt = datetime.fromisoformat(datetime_str)
+        # Parsear la fecha. fromisoformat maneja offsets.
+        # El replace de 'Z' es por compatibilidad con versiones antiguas de Python
+        dt = datetime.fromisoformat(datetime_str.replace('Z', '+00:00'))
+
+        if dt.tzinfo:
+            # Si ya tiene zona horaria, la convertimos a la de Chile
             dt_chile = dt.astimezone(CHILE_TZ)
         else:
-            # Sin zona horaria -> asumir que es hora de Chile
-            dt_naive = datetime.fromisoformat(datetime_str)
-            dt_chile = CHILE_TZ.localize(dt_naive)
-        
+            # Si es 'naive' (sin zona horaria), la localizamos a Chile
+            # Con zoneinfo, esto es seguro y maneja DST correctamente.
+            dt_chile = dt.replace(tzinfo=CHILE_TZ)
+
         result = dt_chile.isoformat()
         logger.info(f"Normalized result: {result}")
-        
-        # Verificar que el resultado no tenga formato inválido (zona horaria + Z)
-        if result.endswith('Z') and ('+' in result[:-1] or '-' in result[-10:-1]):
-            logger.error(f"Invalid format detected: {result}")
-            # Remover la Z si ya tiene zona horaria
-            result = result[:-1]
-            logger.info(f"Fixed format: {result}")
         
         return result
     except Exception as e:
         logger.error(f"Error normalizing timezone for {datetime_str}: {e}")
-        # Si falla, devolver original con zona horaria de Chile
-        fallback = datetime_str + '-03:00' if 'T' in datetime_str and not any(x in datetime_str for x in ['Z', '+', '-03:00', '-04:00']) else datetime_str
-        logger.info(f"Fallback result: {fallback}")
-        return fallback
+        # Fallback simple para evitar romper la ejecución
+        return datetime_str
 
 def format_date_spanish(date: datetime, include_year: bool = True) -> str:
     """

@@ -1,7 +1,6 @@
 import os
 import logging
 from datetime import datetime, timedelta
-import pytz
 from typing_extensions import Annotated
 from langchain.tools import tool
 from langgraph.prebuilt import InjectedState
@@ -1108,7 +1107,7 @@ def find_next_available_slots(service, params, project_config=None, state=None):
                         
                         # Crear datetime para el slot
                         slot_start = datetime.combine(target_date, datetime.min.time().replace(hour=hour))
-                        slot_start = CHILE_TZ.localize(slot_start)
+                        slot_start = slot_start.replace(tzinfo=CHILE_TZ)
                         slot_end = slot_start + timedelta(hours=duration_hours)
                         
                         # Verificar que el slot termine dentro de la franja horaria
@@ -1192,7 +1191,7 @@ def find_next_available_slots(service, params, project_config=None, state=None):
                     
                     for hour in range(effective_start_hour, effective_end_hour - int(duration_hours) + 1):
                         slot_start = datetime.combine(current_date, datetime.min.time().replace(hour=hour))
-                        slot_start = CHILE_TZ.localize(slot_start)
+                        slot_start = slot_start.replace(tzinfo=CHILE_TZ)
                         slot_end = slot_start + timedelta(hours=duration_hours)
 
                         is_available, _ = check_slot_availability_safe(slot_start, slot_end)
@@ -1234,7 +1233,7 @@ def find_next_available_slots(service, params, project_config=None, state=None):
 
                         for hour in range(effective_start_hour, effective_end_hour - int(duration_hours) + 1):
                             slot_start = datetime.combine(current_date, datetime.min.time().replace(hour=hour))
-                            slot_start = CHILE_TZ.localize(slot_start)
+                            slot_start = slot_start.replace(tzinfo=CHILE_TZ)
                             slot_end = slot_start + timedelta(hours=duration_hours)
                             
                             is_available, _ = check_slot_availability_safe(slot_start, slot_end)
@@ -1293,7 +1292,7 @@ def find_next_available_slots(service, params, project_config=None, state=None):
                             continue
                         
                         slot_start = datetime.combine(current_date, datetime.min.time().replace(hour=hour))
-                        slot_start = CHILE_TZ.localize(slot_start)
+                        slot_start = slot_start.replace(tzinfo=CHILE_TZ)
                         slot_end = slot_start + timedelta(hours=duration_hours)
                         
                         # Verificar disponibilidad
