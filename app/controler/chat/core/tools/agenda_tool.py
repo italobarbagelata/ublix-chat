@@ -1012,7 +1012,7 @@ class AgendaTool(BaseTool):
     async def _send_webhook_notification(
         self, title: str, start_datetime: str, end_datetime: str, 
         attendee_email: str, attendee_name: str, attendee_phone: str, 
-        description: str, conversation_summary: str = None, additional_fields: Optional[Dict[str, Any]] = None
+        description: str, conversation_summary: str = None, meet_url: str = None, additional_fields: Optional[Dict[str, Any]] = None
     ) -> str:
         """Envía datos de la conversación al webhook configurado si está habilitado, enriqueciendo con datos del contacto desde la BD."""
         try:
@@ -1031,13 +1031,38 @@ class AgendaTool(BaseTool):
             
             # --- BÚSQUEDA DE CONTACTO EN SUPABASE ---
             contact_info = {}
-            if attendee_email and self.project_id:
+            
+            # Priorizar búsqueda por user_id si está disponible (más específico)
+            if self.user_id and self.project_id:
                 try:
-                    logger.info(f"🔍 Buscando contacto con email '{attendee_email}' para proyecto '{self.project_id}'")
+                    logger.info(f"🔍 Buscando contacto con user_id '{self.user_id}' para proyecto '{self.project_id}'")
+                    response = self.supabase_client.client.table("contacts").select("*").eq("user_id", self.user_id).eq("project_id", self.project_id).limit(1).execute()
+                    if response.data:
+                        contact_info = response.data[0]
+                        logger.info(f"✅ Contacto encontrado por user_id: {contact_info.get('id')}")
+                        logger.info(f"🔍 [DEBUG] Datos completos del contacto: {contact_info}")
+                        logger.info(f"🔍 [DEBUG] Additional fields raw: {contact_info.get('additional_fields')}")
+                        logger.info(f"🔍 [DEBUG] Tipo de additional_fields: {type(contact_info.get('additional_fields'))}")
+                    else:
+                        logger.info("ℹ️ No se encontró contacto con ese user_id, intentando con email...")
+                        # Fallback: buscar por email si no se encuentra por user_id
+                        if attendee_email:
+                            response = self.supabase_client.client.table("contacts").select("*").eq("email", attendee_email).eq("project_id", self.project_id).limit(1).execute()
+                            if response.data:
+                                contact_info = response.data[0]
+                                logger.info(f"✅ Contacto encontrado por email: {contact_info.get('id')}")
+                            else:
+                                logger.info("ℹ️ No se encontró contacto con ese email tampoco.")
+                except Exception as e:
+                    logger.error(f"❌ Error buscando contacto en Supabase: {str(e)}")
+            elif attendee_email and self.project_id:
+                # Fallback solo por email (cuando no hay user_id)
+                try:
+                    logger.info(f"🔍 Buscando contacto con email '{attendee_email}' para proyecto '{self.project_id}' (sin user_id)")
                     response = self.supabase_client.client.table("contacts").select("*").eq("email", attendee_email).eq("project_id", self.project_id).limit(1).execute()
                     if response.data:
                         contact_info = response.data[0]
-                        logger.info(f"✅ Contacto encontrado: {contact_info.get('id')}")
+                        logger.info(f"✅ Contacto encontrado por email: {contact_info.get('id')}")
                     else:
                         logger.info("ℹ️ No se encontró un contacto existente con ese email.")
                 except Exception as e:
@@ -1048,13 +1073,23 @@ class AgendaTool(BaseTool):
             # 1. Empezar con la información del contacto si se encontró
             user_data = {}
             if contact_info:
-                # Aplanar el campo 'fields' si existe
-                if 'fields' in contact_info and isinstance(contact_info.get('fields'), dict):
-                    user_data.update(contact_info['fields'])
+                logger.info(f"🔍 [DEBUG] Procesando contacto para webhook...")
                 
-                # Copiar otros campos relevantes, excluyendo metadatos y 'fields'
+                # Aplanar el campo 'additional_fields' si existe
+                additional_fields_raw = contact_info.get('additional_fields')
+                logger.info(f"🔍 [DEBUG] additional_fields_raw = {additional_fields_raw} (tipo: {type(additional_fields_raw)})")
+                
+                if 'additional_fields' in contact_info and isinstance(contact_info.get('additional_fields'), dict):
+                    user_data.update(contact_info['additional_fields'])
+                    logger.info(f"📋 Additional fields agregados al webhook: {contact_info['additional_fields']}")
+                elif 'additional_fields' in contact_info and contact_info.get('additional_fields'):
+                    logger.warning(f"⚠️ Additional fields existe pero no es dict: {additional_fields_raw} (tipo: {type(additional_fields_raw)})")
+                else:
+                    logger.info(f"ℹ️ No hay additional_fields válidos en el contacto")
+                
+                # Copiar otros campos relevantes, excluyendo metadatos y 'additional_fields'
                 for key, value in contact_info.items():
-                    if key not in ['id', 'project_id', 'created_at', 'updated_at', 'fields']:
+                    if key not in ['id', 'project_id', 'created_at', 'updated_at', 'additional_fields']:
                         user_data[key] = value
 
             # 2. Superponer datos de los argumentos (tienen precedencia si no son None)
@@ -1083,7 +1118,8 @@ class AgendaTool(BaseTool):
                     "start_datetime": start_datetime,
                     "end_datetime": end_datetime,
                     "attendee_email": attendee_email,
-                    "description": description
+                    "description": description,
+                    "meet_url": meet_url
                 },
                 "conversation_data": {
                     "summary": conversation_summary or "Resumen no disponible",
