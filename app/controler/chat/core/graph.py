@@ -15,6 +15,66 @@ from app.controler.chat.store.persistence_state import MemoryStatePersistence
 from collections import OrderedDict
 from app.controler.chat.core.generate_summary import generate_summary, SummaryPayload
 from uuid import uuid4
+from datetime import datetime
+import time
+
+# 🚀 RESPUESTAS INMEDIATAS - Placeholders para diferentes tipos de consultas
+IMMEDIATE_RESPONSES = {
+    "agenda": "📅 Revisando tu agenda...",
+    "productos": "🛍️ Buscando productos...",
+    "informacion": "🔍 Buscando información...",
+    "email": "📧 Preparando email...",
+    "api": "🔌 Consultando datos...",
+    "default": "⏳ Procesando tu mensaje..."
+}
+
+def detect_query_type(message: str) -> str:
+    """Detecta el tipo de consulta para enviar respuesta inmediata apropiada"""
+    message_lower = message.lower()
+    
+    # Palabras clave para agenda
+    agenda_keywords = ['agenda', 'cita', 'reunión', 'reunión', 'horario', 'agendar', 'calendario', 'disponible']
+    if any(keyword in message_lower for keyword in agenda_keywords):
+        return "agenda"
+    
+    # Palabras clave para productos
+    product_keywords = ['producto', 'precio', 'comprar', 'vender', 'catálogo', 'tienda', 'oferta']
+    if any(keyword in message_lower for keyword in product_keywords):
+        return "productos"
+    
+    # Palabras clave para email
+    email_keywords = ['enviar', 'email', 'correo', 'notificar', 'mensaje']
+    if any(keyword in message_lower for keyword in email_keywords):
+        return "email"
+    
+    # Palabras clave para información general
+    info_keywords = ['qué', 'cómo', 'cuándo', 'dónde', 'información', 'ayuda']
+    if any(keyword in message_lower for keyword in info_keywords):
+        return "informacion"
+    
+    return "default"
+
+async def get_user_accumulated_context(user_id: str, project_id: str) -> list:
+    """
+    🧠 NUEVA FUNCIÓN: Obtiene el contexto acumulado del usuario desde el módulo principal
+    """
+    try:
+        # Import dinámico para evitar circular imports
+        from app.controler.chat import get_and_clear_accumulated_context
+        return await get_and_clear_accumulated_context(user_id, project_id)
+    except Exception as e:
+        logging.error(f"❌ Error obteniendo contexto acumulado: {str(e)}")
+        return []
+
+def build_message_with_context(original_message: str, accumulated_context: list) -> str:
+    """
+    Simplifica el mensaje final: 'mensaje principal extra: extra1 | extra2 | ...'
+    """
+    if not accumulated_context:
+        return original_message
+    extras = [ctx.get('message', '') for ctx in accumulated_context if ctx.get('message')]
+    extras_str = ' | '.join(extras)
+    return f"{original_message} extra: {extras_str}"
 
 class Graph():
     @classmethod
@@ -95,9 +155,39 @@ class Graph():
         else:
             self.logger.info(f"No previous state found for user {self.state.user_id}. Starting with empty memory.")
         return memory
+    
+    async def execute_with_immediate_response(self, message, background_tasks):
+        """
+        🚀 NUEVA FUNCIÓN: Ejecuta con respuesta inmediata
+        ✅ MEJORADO: Incluye contexto acumulado de mensajes encolados
+        """
+        # 1. Obtener contexto acumulado si existe
+        accumulated_context = await get_user_accumulated_context(self.user_id, self.project_id)
+        
+        # 2. Construir mensaje final con contexto
+        final_message = build_message_with_context(message, accumulated_context)
+        
+        # 3. Detectar tipo de consulta y enviar respuesta inmediata
+        query_type = detect_query_type(message)
+        immediate_response = IMMEDIATE_RESPONSES.get(query_type, IMMEDIATE_RESPONSES["default"])
+        
+        # 4. Ejecutar el procesamiento real con el mensaje completo
+        response = await self.execute(final_message, background_tasks)
+        
+        # 5. Agregar metadatos de timing y contexto
+        response['immediate_response'] = immediate_response
+        response['query_type'] = query_type
+        response['processing_time'] = response.get('processing_time', 0)
+        
+        if accumulated_context:
+            response['messages_processed'] = len(accumulated_context) + 1
+            response['includes_queued_messages'] = True
+        
+        return response
         
     async def execute(self, message, debug=False):
         unique_id = self.unique_id
+        start_time = time.time()
         logging.info(unique_id + " Execution init!")
         loop = asyncio.get_event_loop()
 
@@ -179,13 +269,18 @@ class Graph():
         conversation = final_state["messages"]
         ai_response = conversation[-1]
 
+        # Calcular tiempo de procesamiento
+        processing_time = time.time() - start_time
+
         logging.info(unique_id + " Execution finished")
         logging.info(unique_id + " Response: " + ai_response.content)
+        logging.info(unique_id + f" Processing time: {processing_time:.2f}s")
 
         response = {
             'response': ai_response.content,
             "message_id": "message_id",
             "user_id": user_id,
+            "processing_time": processing_time
         }
 
         return response
@@ -193,6 +288,7 @@ class Graph():
     async def execute_stream(self, message, background_tasks):
         """
         Ejecuta el grafo en modo streaming, devolviendo chunks de respuesta en tiempo real.
+        ✅ MEJORADO: Incluye contexto acumulado de mensajes encolados
         
         Args:
             message (str): Mensaje del usuario
@@ -212,13 +308,39 @@ class Graph():
         logging.info(f"{unique_id} Iniciando ejecución en modo streaming")
         
         try:
+            # 🧠 OBTENER CONTEXTO ACUMULADO - Verificar si hay mensajes adicionales
+            accumulated_context = await get_user_accumulated_context(self.user_id, self.project_id)
+            
+            # 📝 CONSTRUIR MENSAJE FINAL - Incluir contexto si existe
+            final_message = build_message_with_context(message, accumulated_context)
+            
+            # 🚀 RESPUESTA INMEDIATA - Detectar tipo de consulta y enviar respuesta inmediata
+            query_type = detect_query_type(message)
+            immediate_response = IMMEDIATE_RESPONSES.get(query_type, IMMEDIATE_RESPONSES["default"])
+            
+            # Enviar respuesta inmediata con información de contexto
+            immediate_yield = {
+                "type": "immediate_response",
+                "content": immediate_response,
+                "query_type": query_type,
+                "is_complete": False
+            }
+            
+            # Añadir información de contexto si hay mensajes adicionales
+            if accumulated_context:
+                immediate_yield["messages_processed"] = len(accumulated_context) + 1
+                immediate_yield["includes_queued_messages"] = True
+                immediate_yield["content"] = f"{immediate_response} (procesando {len(accumulated_context)} mensajes adicionales)"
+            
+            yield immediate_yield
+            
             # Preparar datos iniciales
             user_id = self.state.user_id
             initial_time = self.state.datetime
             conversation_id = str(uuid4())
             
-            # Crear mensaje humano
-            human_message = HumanMessage(content=message)
+            # Crear mensaje humano con el mensaje final (incluye contexto)
+            human_message = HumanMessage(content=final_message)
             decorate_message(human_message, initial_time, conversation_id)
             
             # Estado inicial para el grafo

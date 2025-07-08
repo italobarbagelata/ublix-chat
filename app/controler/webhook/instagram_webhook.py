@@ -6,6 +6,7 @@ from typing import Dict, Any, List, Optional
 from fastapi import Request, HTTPException, BackgroundTasks
 from fastapi.responses import PlainTextResponse
 from dotenv import load_dotenv
+from datetime import datetime, timedelta
 from app.controler.chat.store.persistence import SupabaseDatabase
 from app.models import ChatRequest
 from app.chatbot import chatbot
@@ -24,6 +25,10 @@ load_dotenv()
 
 INSTAGRAM_COLLECTION = "integration_instagram"
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
+
+# Cache para deduplicación de mensajes
+message_cache = {}
+CACHE_EXPIRY_MINUTES = 30
 
 
 ########################################################
@@ -63,6 +68,48 @@ async def verify_webhook_instagram(request: Request):
 ########################################################
 # Funciones auxiliares
 ########################################################
+def is_message_duplicate(message_id: str, timestamp: int) -> bool:
+    """
+    Verifica si un mensaje ya fue procesado usando message_id y timestamp.
+    
+    Args:
+        message_id: ID único del mensaje de Instagram
+        timestamp: Timestamp del mensaje
+        
+    Returns:
+        True si el mensaje ya fue procesado, False si es nuevo
+    """
+    try:
+        # Crear clave única combinando message_id y timestamp
+        cache_key = f"{message_id}_{timestamp}"
+        
+        # Obtener tiempo actual
+        current_time = datetime.now()
+        
+        # Limpiar cache de mensajes expirados
+        expired_keys = []
+        for key, cached_time in message_cache.items():
+            if current_time - cached_time > timedelta(minutes=CACHE_EXPIRY_MINUTES):
+                expired_keys.append(key)
+        
+        # Remover claves expiradas
+        for key in expired_keys:
+            del message_cache[key]
+            
+        # Verificar si el mensaje ya existe en cache
+        if cache_key in message_cache:
+            logger.info(f"Mensaje duplicado detectado: {message_id} con timestamp {timestamp}")
+            return True
+            
+        # Agregar mensaje al cache
+        message_cache[cache_key] = current_time
+        logger.debug(f"Mensaje agregado al cache: {cache_key}")
+        return False
+        
+    except Exception as e:
+        logger.error(f"Error verificando duplicación de mensaje: {e}")
+        # En caso de error, no bloquear el mensaje
+        return False
 async def save_webhook_to_file(webhook_data: Dict[str, Any]):
     """Guarda un webhook en un archivo para referencia futura."""
     try:
@@ -105,6 +152,11 @@ def extract_instagram_messages(body: Dict[str, Any]) -> List[Dict[str, Any]]:
                     message_id = message_obj.get("mid")
                     
                     logger.debug(f"Mensaje encontrado - Sender: {sender_id}, Recipient: {recipient_id}, Message ID: {message_id}")
+                    
+                    # Verificar duplicación antes de procesar
+                    if is_message_duplicate(message_id, timestamp):
+                        logger.info(f"Mensaje duplicado ignorado: {message_id} con timestamp {timestamp}")
+                        continue
                     
                     # Procesar mensajes de texto
                     if "text" in message_obj:
@@ -296,7 +348,6 @@ async def process_instagram_message(message: Dict[str, Any], background_tasks: B
                     response = await client.get(message.get("attachment_url"))
                     if response.status_code == 200:
                         # Crear un archivo temporal con la imagen
-                        import tempfile
                         import os
                         from datetime import datetime
                         
