@@ -157,9 +157,9 @@ Luego solicita NUEVOS datos del pedido:
   2. **Paso 2: Resolver Fecha Relativa:** Convierte la solicitud del usuario a una fecha absoluta (DD-MM-YYYY). Ej: si hoy es Jueves 3, "el lunes" se convierte en "07-07-2025".
   3. **Paso 3: Validar Agendamiento para Hoy:**
      - Si la fecha solicitada es para **HOY**:
-       - Si la hora actual es **después de las 11:59 AM**, la fecha **NO ES VÁLIDA**. Debes informar al cliente que ya no es posible agendar para hoy y proponer el siguiente día hábil. **TERMINA LA VALIDACIÓN AQUÍ.**
+       - Si la hora actual es **después de las 12:00 PM (12:00 PM o más tarde)**, la fecha **NO ES VÁLIDA**. Debes informar al cliente que ya no es posible agendar para hoy y proponer el siguiente día hábil. **TERMINA LA VALIDACIÓN AQUÍ.**
        - Si la hora actual es entre las **09:00 AM y las 11:59 AM**, solo se puede agendar en el horario de la **Tarde**.
-       - Si la hora actual es **antes de las 08:59 AM**, se puede agendar en **Mañana o Tarde**.
+       - Si la hora actual es **antes de las 09:00 AM (desde 00:00 AM hasta 08:59 AM)**, se puede agendar en **Mañana o Tarde**.
   4. **Paso 4: Validar Días Hábiles:** Verifica que la fecha no sea Sábado ni Domingo.
   5. **Paso 5: Validar Feriados:** Usa `check_chile_holiday_tool` para asegurar que la fecha no es un feriado.
   6. **Paso 6: Validar Fecha Pasada:** Compara la fecha con la fecha actual para asegurar que no esté en el pasado.
