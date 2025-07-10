@@ -336,6 +336,7 @@ class SaveContactTool(BaseTool):
     def __init__(self, project_id: str, user_id: str):
         super().__init__(
             name="save_contact_tool",
+            coroutine=self._arun,  # Usar método asíncrono por defecto para mejor rendimiento
             description="""
             🚀 HERRAMIENTA INTELIGENTE DE GESTIÓN DE CONTACTOS CON CONTROL DE CALIDAD
             
@@ -553,6 +554,36 @@ class SaveContactTool(BaseTool):
     ) -> str:
         """
         Herramienta para gestión completa de contactos con campos dinámicos.
+        Usar _arun() para mejor rendimiento en contextos asíncronos.
+        """
+        try:
+            # Detectar si estamos en un contexto asíncrono
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # Si estamos en un contexto asíncrono, usar ThreadPoolExecutor
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(self._run_sync_helper, name, email, phone_number, additional_fields, conversation_text, field_config, auto_extract)
+                    return future.result()
+            else:
+                # Contexto síncrono, usar directamente
+                return self._run_sync_helper(name, email, phone_number, additional_fields, conversation_text, field_config, auto_extract)
+                
+        except Exception as e:
+            return f"❌ Error al procesar contacto: {str(e)}"
+
+    def _run_sync_helper(
+        self, 
+        name: Optional[str] = None, 
+        email: Optional[str] = None, 
+        phone_number: Optional[str] = None,
+        additional_fields: Optional[str] = None,
+        conversation_text: Optional[str] = None,
+        field_config: Optional[str] = None,
+        auto_extract: Optional[bool] = None
+    ) -> str:
+        """
+        Helper síncrono para ejecutar la lógica de contact_tool sin bloquear el hilo principal.
         """
         try:
             # Modo 1A: Extracción automática usando configuración del proyecto

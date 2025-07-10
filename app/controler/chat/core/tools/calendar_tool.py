@@ -1057,8 +1057,13 @@ def find_next_available_slots(service, params, project_config=None, state=None):
         # 🆕 NUEVA LÓGICA: Si se especifica una fecha específica, buscar solo en esa fecha
         if specific_date:
             try:
-                # Parsear la fecha específica
-                target_date = datetime.strptime(specific_date, "%Y-%m-%d").date()
+                # Parsear la fecha específica - soportar múltiples formatos
+                if 'T' in specific_date:
+                    # Formato ISO datetime: 2025-07-21T09:00:00
+                    target_date = datetime.fromisoformat(specific_date.replace('T', ' ').split('.')[0]).date()
+                else:
+                    # Formato simple: 2025-07-21
+                    target_date = datetime.strptime(specific_date, "%Y-%m-%d").date()
                 target_weekday = target_date.weekday()
                 day_names = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
                 target_day_name = day_names[target_weekday]
