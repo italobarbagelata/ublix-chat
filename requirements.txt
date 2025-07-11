@@ -1,4 +1,4 @@
-fastapi==0.115.0
+fastapi
 uvicorn==0.29.0
 
 # LangChain
@@ -13,7 +13,7 @@ langchain-google-community
 langgraph==0.2.28
 
 # MCP (Model Context Protocol)
-mcp==1.0.0
+mcp
 
 # otros
 pydantic==2.8.0
