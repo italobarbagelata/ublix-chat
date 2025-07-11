@@ -6,6 +6,7 @@ import pytz
 import concurrent.futures
 from app.controler.chat.core.state import CustomState
 from app.controler.chat.core.tools import agent_tools
+from app.controler.chat.core.tools_cache import ToolsCache, cached_tools
 from app.controler.chat.core.utils import decorate_message, filter_and_prepare_messages_for_agent_node, filter_and_prepare_messages_for_summary_node
 from app.controler.chat.store.persistence import Persist
 from app.controler.chat.core.llm_adapter import LLMAdapter
@@ -109,12 +110,43 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
             Usa `current_datetime_tool` y `check_chile_holiday_tool` para validar fechas antes de buscar horarios.
             Las instrucciones específicas del proyecto te indicarán el flujo exacto a seguir para solicitar datos y confirmar la cita.
             """
+        if "image_processor" in project.enabled_tools:
+            prompt_general_skeleton += f"""
+            IMAGE_PROCESSOR (image_processor):
+            Herramienta para procesar imágenes enviadas por el usuario.
+            - Parámetros: image_url (URL de la imagen a procesar)
+            - Función: Extrae todo el texto visible en la imagen
+            
+            🚨 DETECCIÓN AUTOMÁTICA DE IMÁGENES - OBLIGATORIO:
+            - Cuando detectes el patrón ![Imagen](URL) en un mensaje, es OBLIGATORIO llamar a image_processor
+            - NO respondas sobre la imagen sin usar la herramienta primero
+            - SIEMPRE debes detectar este patrón y extraer la URL
+            - Llama inmediatamente a image_processor con la URL extraída
+            - CRÍTICO: SIEMPRE usa el resultado del image_processor en tu respuesta
+            - PROHIBIDO decir "no he podido leer la imagen" - usa siempre el texto extraído
+            - Menciona qué texto encontraste y luego sigue las instrucciones específicas del proyecto
+            
+            Ejemplo de uso:
+            1. Usuario envía imagen → aparece como ![Imagen](https://storage.url/imagen.jpg)
+            2. Extraer URL: https://storage.url/imagen.jpg
+            3. Llamar: image_processor(image_url="https://storage.url/imagen.jpg")
+            4. Usar el texto extraído según las instrucciones del proyecto
+            """
             
             
-        #logging.info(f"PROMPT FINAL ANTES DE SYSTEM MESSAGE:\n{prompt_general_skeleton}")
+        # Log para debug de imágenes y prompt
+        for msg in messages:
+            if hasattr(msg, 'content') and '![Imagen](' in str(msg.content):
+                logging.info(f"🖼️ IMAGEN DETECTADA EN MENSAJE: {msg.content}")
+        
+        # Log del prompt específico del proyecto cuando hay imágenes
+        if any('![Imagen](' in str(msg.content) for msg in messages if hasattr(msg, 'content')):
+            logging.info(f"📝 PROMPT ESPECÍFICO DEL PROYECTO:\n{project.prompt}")
+            logging.info(f"📝 PROMPT COMPLETO FINAL:\n{prompt_general_skeleton}")
                 
         messages.insert(0, SystemMessage(content=prompt_general_skeleton))
 
+        logging.info(f"🔧 TOOLS DISPONIBLES: {[tool.name for tool in tools]}")
         response = model_with_tools.invoke(messages)
         decorate_message(response, state["exec_init"], state["conversation_id"])
 

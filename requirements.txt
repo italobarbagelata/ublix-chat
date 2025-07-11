@@ -12,6 +12,8 @@ langchain-google-community
 # LangGraph
 langgraph==0.2.28
 
+# MCP (Model Context Protocol)
+mcp==1.0.0
 
 # otros
 pydantic==2.7.4

@@ -65,7 +65,10 @@ class ImageProcessorTool(BaseTool):
         Procesa la imagen usando GPT-4 Vision.
         """
         try:
-            return await self._process_image_with_gpt(image_url)
+            logger.info(f"🖼️ IMAGE_PROCESSOR TOOL LLAMADO con URL: {image_url}")
+            result = await self._process_image_with_gpt(image_url)
+            logger.info(f"🖼️ IMAGE_PROCESSOR RESULTADO: {result[:100]}...")
+            return result
         except Exception as e:
             logger.error(f"Error in image processor: {str(e)}")
             return f"Error procesando la imagen: {str(e)}"
@@ -76,6 +79,18 @@ class ImageProcessorTool(BaseTool):
         run_manager: Optional[CallbackManagerForToolRun] = None
     ) -> str:
         """
-        Implementación síncrona (no se usa, pero es requerida por la clase base).
+        Implementación síncrona usando asyncio.
         """
-        raise NotImplementedError("This tool only supports async execution") 
+        import asyncio
+        try:
+            # Ejecutar la versión async de manera síncrona
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                result = loop.run_until_complete(self._arun(image_url, run_manager))
+                return result
+            finally:
+                loop.close()
+        except Exception as e:
+            logger.error(f"Error in sync image processor: {str(e)}")
+            return f"Error procesando la imagen: {str(e)}" 

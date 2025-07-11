@@ -781,6 +781,8 @@ class AgendaTool(BaseTool):
             text_lower = text.lower()
             chile_tz = pytz.timezone("America/Santiago")
             now = datetime.now(chile_tz)
+            
+            logger.info(f"🔍 DETECTANDO FECHA: texto='{text}' | texto_lower='{text_lower}' | hoy={now.strftime('%Y-%m-%d %A')} | hora_actual={now.hour}")
 
             # 1. Detectar fechas específicas "X de mes"
             fecha_pattern = r'(\d{1,2})\s+de\s+([a-záéíóúñ]+)'
@@ -832,13 +834,20 @@ class AgendaTool(BaseTool):
             for day_name, weekday in {
                 "lunes": 0, "martes": 1, "miércoles": 2, "miercoles": 2, "jueves": 3, "viernes": 4, "sábado": 5, "sabado": 5, "domingo": 6
             }.items():
-                # Detectar "próximo X" o "el próximo X" o "el X de la otra semana"
-                if f"próximo {day_name}" in text_lower or f"proximo {day_name}" in text_lower or f"el próximo {day_name}" in text_lower or f"el proximo {day_name}" in text_lower:
+                # Detectar "próximo X" o "el próximo X" (pero NO "el X" simple)
+                proximo_patterns = [f"próximo {day_name}", f"proximo {day_name}", f"el próximo {day_name}", f"el proximo {day_name}"]
+                tiene_proximo = any(pattern in text_lower for pattern in proximo_patterns)
+                excluir_para_el = f"para el {day_name}" in text_lower
+                
+                logger.info(f"🔍 VERIFICANDO PRÓXIMO: day_name={day_name} | tiene_proximo={tiene_proximo} | excluir_para_el={excluir_para_el}")
+                
+                if tiene_proximo and not excluir_para_el:
                     # Siempre ir a la semana siguiente
                     days_ahead = (weekday - now.weekday() + 7) % 7
                     if days_ahead == 0:
                         days_ahead = 7
                     target_date = now + timedelta(days=days_ahead)
+                    logger.info(f"✅ DETECTADO PRÓXIMO: {day_name} → {target_date.strftime('%Y-%m-%d %A')}")
                     return target_date.strftime("%Y-%m-%d")
                 # Detectar "el {day_name} de la otra semana"
                 if f"el {day_name} de la otra semana" in text_lower:
@@ -862,10 +871,20 @@ class AgendaTool(BaseTool):
             }.items():
                 if day_name in text_lower:
                     days_ahead = (weekday - now.weekday()) % 7
+                    logger.info(f"📅 ENCONTRADO DÍA: {day_name} | weekday={weekday} | now.weekday()={now.weekday()} | days_ahead_inicial={days_ahead}")
+                    
                     if days_ahead == 0:
-                        # Si es hoy pero ya pasó la hora laboral, ir a la próxima semana
-                        days_ahead = 7
+                        # Si es hoy, verificar si aún hay horarios disponibles (antes de las 15:00)
+                        if now.hour >= 15:
+                            # Ya es muy tarde para hoy, ir al próximo día de la semana
+                            days_ahead = 7
+                            logger.info(f"⏰ ES TARDE (>= 15:00): cambiando a próxima semana, days_ahead={days_ahead}")
+                        else:
+                            logger.info(f"⏰ ES TEMPRANO (< 15:00): manteniendo hoy, days_ahead={days_ahead}")
+                        # Si es antes de las 15:00, mantener days_ahead = 0 (hoy)
+                    
                     target_date = now + timedelta(days=days_ahead)
+                    logger.info(f"🎯 FECHA FINAL: {target_date.strftime('%Y-%m-%d %A')} | days_ahead={days_ahead}")
                     return target_date.strftime("%Y-%m-%d")
 
             return None

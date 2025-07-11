@@ -82,9 +82,28 @@ def normalize_message(
     return message
 
 
-def get_execution_time(initial_date: str):
+def get_execution_time(initial_date: Union[str, datetime.datetime]):
     end_time = datetime.datetime.now()
-    return (end_time - initial_date).total_seconds()
+    
+    # Handle both string (ISO format) and datetime objects
+    if isinstance(initial_date, str):
+        # Parse ISO format string to datetime
+        if 'Z' in initial_date or '+' in initial_date:
+            # Handle timezone-aware strings
+            start_time = datetime.datetime.fromisoformat(initial_date.replace('Z', '+00:00'))
+            # Convert to naive datetime for comparison
+            start_time = start_time.replace(tzinfo=None)
+        else:
+            # Handle timezone-naive strings
+            start_time = datetime.datetime.fromisoformat(initial_date)
+    elif isinstance(initial_date, datetime.datetime):
+        # Ensure datetime is timezone-naive for comparison
+        start_time = initial_date.replace(tzinfo=None) if initial_date.tzinfo else initial_date
+    else:
+        # Fallback: assume it's current time
+        start_time = end_time
+    
+    return (end_time - start_time).total_seconds()
 
 
 def calculate_execution_duration(initial_date: datetime.datetime, end_date: datetime.datetime):

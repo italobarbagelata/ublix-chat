@@ -617,6 +617,12 @@ def create_event(service, params, state=None, project_config=None):
         # Debug final state
         logger.info(f"Final force_create value: {force_create}")
         logger.info(f"Final add_meet value: {add_meet}")
+
+        # 🚫 VALIDACIÓN: No permitir crear eventos en el pasado
+        start_dt = datetime.fromisoformat(event_data['start']['dateTime'])
+        now_chile = datetime.now(CHILE_TZ)
+        if start_dt < now_chile:
+            return f"❌ No se puede crear un evento en el pasado. La fecha de inicio ({start_dt.strftime('%Y-%m-%d %H:%M')}) ya pasó. Por favor elige una fecha y hora futura."
         
         # Agregar Google Meet si se solicita
         if add_meet:

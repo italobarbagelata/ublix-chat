@@ -1,0 +1,706 @@
+"""
+🚀 Enhanced Chat Controller - Migración Simple
+
+Este archivo muestra cómo migrar tu controlador de chat al nuevo sistema.
+Solo necesitas cambiar 1 línea de import!
+
+Instrucciones:
+1. Respalda tu __init__.py actual
+2. Reemplaza la línea de import de Graph
+3. ¡Listo! Todo funciona igual pero más rápido y mejor
+
+Todos tus endpoints existentes funcionarán exactamente igual.
+"""
+
+import json
+import asyncio
+from app.resources.constants import STATUS_BAD_REQUEST
+from app.resources.validations import (
+    ValidationException,
+    validate_json_body,
+    validate_required_body_param,
+)
+from fastapi import HTTPException, Request, BackgroundTasks, UploadFile, Form, Depends
+from fastapi.responses import JSONResponse, StreamingResponse
+
+# 🚀 CAMBIO PRINCIPAL: Esta línea reemplaza la importación original
+# ANTES: from .core.graph import Graph
+from .enhanced_graph_bridge import Graph
+
+# Todo lo demás permanece exactamente igual
+from .core.message_queue import MessageQueue, QueuedMessage
+import logging
+from .store.file_storage import FileStorage
+from bson import ObjectId
+from app.controler.chat.store.persistence import Persist
+from datetime import datetime
+
+logger = logging.getLogger(__name__)
+
+# 🔒 CONTROL DE CONCURRENCIA - Diccionario para rastrear conversaciones activas
+active_conversations = {}
+conversation_lock = asyncio.Lock()
+
+# 📬 SISTEMA DE COLAS - Instancia global para conservar mensajes
+message_queue = MessageQueue(max_queue_size=100)
+
+# 🧠 CONTEXTO ACUMULADO - Mantener el contexto de mensajes encolados por usuario
+user_accumulated_context = {}
+context_lock = asyncio.Lock()
+
+async def add_to_accumulated_context(user_id: str, project_id: str, message: str):
+    """Añade un mensaje al contexto acumulado del usuario"""
+    async with context_lock:
+        context_key = f"{project_id}_{user_id}"
+        if context_key not in user_accumulated_context:
+            user_accumulated_context[context_key] = []
+        
+        user_accumulated_context[context_key].append({
+            "message": message,
+            "timestamp": datetime.now().isoformat()
+        })
+        
+        # Limitar el contexto acumulado a los últimos 10 mensajes para evitar sobrecarga
+        if len(user_accumulated_context[context_key]) > 10:
+            user_accumulated_context[context_key] = user_accumulated_context[context_key][-10:]
+        
+        logger.info(f"📝 Añadido al contexto acumulado para {user_id}: {len(user_accumulated_context[context_key])} mensajes")
+
+async def get_and_clear_accumulated_context(user_id: str, project_id: str) -> list:
+    """Obtiene y limpia el contexto acumulado del usuario"""
+    async with context_lock:
+        context_key = f"{project_id}_{user_id}"
+        accumulated = user_accumulated_context.get(context_key, [])
+        if context_key in user_accumulated_context:
+            del user_accumulated_context[context_key]
+        return accumulated
+
+async def process_chat_message(message: QueuedMessage) -> dict:
+    """
+    🚀 Handler para procesar mensajes de chat desde la cola - MEJORADO
+    
+    Ahora usa el sistema Enhanced automáticamente y proporciona más información.
+    """
+    try:
+        # Obtener contexto acumulado si existe
+        accumulated_context = await get_and_clear_accumulated_context(
+            message.user_id, 
+            message.project_id
+        )
+        
+        # Construir mensaje final con contexto acumulado
+        final_message = message.content
+        if accumulated_context:
+            context_messages = []
+            for ctx in accumulated_context:
+                context_messages.append(f"[{ctx['timestamp']}] {ctx['message']}")
+            
+            final_message = f"""Mensaje principal: {message.content}
+
+Mensajes adicionales recibidos mientras procesaba:
+{chr(10).join(context_messages)}
+
+Por favor responde considerando toda esta información."""
+            
+            logger.info(f"📨 Procesando mensaje con contexto acumulado: {len(accumulated_context)} mensajes adicionales")
+        
+        # Obtener metadatos del mensaje
+        metadata = message.metadata
+        background_tasks = metadata.get('background_tasks')
+        
+        # 🚀 Procesar con el sistema ENHANCED (automáticamente usa la nueva arquitectura)
+        graph = await Graph.create(
+            project_id=message.project_id,
+            user_id=message.user_id,
+            name=metadata.get('name', 'no name'),
+            number_phone_agent=metadata.get('number_phone_agent', 'no number'),
+            source=metadata.get('source', 'default'),
+            source_id=metadata.get('source_id', 'default'),
+            unique_id=metadata.get('unique_id', str(ObjectId())),
+            project=metadata.get('project')
+        )
+        
+        response = await graph.execute_with_immediate_response(final_message, background_tasks)
+        
+        # ✨ El nuevo sistema proporciona información adicional automáticamente
+        if accumulated_context:
+            response['messages_processed'] = len(accumulated_context) + 1
+            response['includes_queued_messages'] = True
+        
+        # 📊 Agregar métricas del nuevo sistema si están disponibles
+        if hasattr(response, 'execution_route'):
+            logger.info(f"🎯 Ruta ejecutada: {response.get('execution_route', 'unknown')}")
+        if hasattr(response, 'intent_category'):
+            logger.info(f"🧠 Intención detectada: {response.get('intent_category', 'unknown')}")
+        
+        return response
+        
+    except Exception as e:
+        logger.error(f"❌ Error procesando mensaje desde cola: {str(e)}")
+        raise e
+
+# Registrar el handler para mensajes de chat
+message_queue.register_handler("chat", process_chat_message)
+
+async def acquire_conversation_lock(user_id: str, project_id: str) -> bool:
+    """
+    Adquiere un lock para el usuario. Retorna True si puede procesar, False si ya está procesando.
+    """
+    async with conversation_lock:
+        conversation_key = f"{project_id}_{user_id}"
+        
+        if conversation_key in active_conversations:
+            logger.warning(f"⚠️ Usuario {user_id} ya tiene una conversación activa en proyecto {project_id}")
+            return False
+        
+        active_conversations[conversation_key] = True
+        logger.info(f"🔓 Lock adquirido para usuario {user_id} en proyecto {project_id}")
+        return True
+
+async def release_conversation_lock(user_id: str, project_id: str):
+    """
+    Libera el lock del usuario.
+    """
+    async with conversation_lock:
+        conversation_key = f"{project_id}_{user_id}"
+        
+        if conversation_key in active_conversations:
+            del active_conversations[conversation_key]
+            logger.info(f"🔓 Lock liberado para usuario {user_id} en proyecto {project_id}")
+
+async def chat(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    image: UploadFile = None
+):
+    """
+    🚀 Endpoint unificado para chat - MEJORADO CON ENHANCED GRAPH
+    
+    Mantiene toda la funcionalidad existente pero usa el nuevo sistema mejorado
+    que proporciona:
+    - Routing inteligente
+    - Mejor manejo de errores
+    - Validación de seguridad
+    - Performance mejorada
+    - Métricas detalladas
+    """
+    try:
+        # Parsear el FormData
+        form_data = await request.form()
+        
+        # Obtener los campos requeridos
+        message = form_data.get("message", "")
+        project_id = form_data.get("project_id")
+        user_id = form_data.get("user_id")
+        
+        # Validar campos requeridos
+        if not project_id:
+            raise HTTPException(status_code=400, detail="project_id es requerido")
+        if not user_id:
+            raise HTTPException(status_code=400, detail="user_id es requerido")
+        
+        # Obtener campos opcionales
+        name = form_data.get("name", "no name")
+        number_phone_agent = form_data.get("number_phone_agent", "no number")
+        source_id = form_data.get("source_id", "default")
+        source = form_data.get("source", "default")
+
+        logger.info(f"🚀 Recibiendo mensaje ENHANCED - project_id: {project_id}, user_id: {user_id}")
+
+        # 🔒 CONTROL DE CONCURRENCIA - Verificar si el usuario ya tiene una conversación activa
+        can_process = await acquire_conversation_lock(user_id, project_id)
+        
+        if not can_process:
+            # 📬 CONSERVAR MENSAJE: En lugar de rechazar, encolar para procesamiento posterior
+            try:
+                # Procesar imagen si existe
+                image_url = None
+                if image:
+                    if not image.content_type.startswith('image/'):
+                        raise HTTPException(
+                            status_code=400,
+                            detail="El archivo debe ser una imagen"
+                        )
+                    file_storage = FileStorage()
+                    image_url = await file_storage.save_image(project_id, image)
+                
+                # Construir mensaje final
+                final_message = message
+                if image_url:
+                    if message:
+                        final_message = f"{message}\n\n![Imagen]({image_url})"
+                    else:
+                        final_message = f"![Imagen]({image_url})"
+                
+                # Añadir al contexto acumulado
+                await add_to_accumulated_context(user_id, project_id, final_message)
+                
+                return JSONResponse(
+                    status_code=200,
+                    content={
+                        "response": "Recibido, dame un momento...",
+                        "status": "queued",
+                        "message": "Mensaje conservado en contexto",
+                        "queued_message": True,
+                        "will_be_processed": True,
+                        "system": "enhanced"  # ✨ Nueva información
+                    }
+                )
+                
+            except Exception as e:
+                logger.error(f"❌ Error conservando mensaje: {str(e)}")
+                return JSONResponse(
+                    status_code=429,
+                    content={
+                        "response": "⏳ Estoy procesando tu mensaje anterior. Por favor espera un momento.",
+                        "status": "processing",
+                        "message": "Conversación en progreso",
+                        "system": "enhanced"  # ✨ Nueva información
+                    }
+                )
+            
+        try:
+            # Si hay una imagen, procesarla
+            image_url = None
+            if image:
+                if not image.content_type.startswith('image/'):
+                    raise HTTPException(
+                        status_code=400,
+                        detail="El archivo debe ser una imagen"
+                    )
+                
+                # Guardar imagen en Supabase
+                file_storage = FileStorage()
+                image_url = await file_storage.save_image(project_id, image)
+
+            # Obtener proyecto y unique_id
+            unique_id = str(ObjectId())
+            database = Persist()
+            
+            try:
+                project = database.find_project(project_id)
+                logger.info(f"Proyecto encontrado: {project_id}")
+            except ValueError as e:
+                logger.error(f"Project not found: {project_id}")
+                raise HTTPException(status_code=404, detail="Project not found")
+            except Exception as e:
+                logger.error(f"Error fetching project: {str(e)}")
+                raise HTTPException(status_code=500, detail="Internal server error")
+
+            # 🚀 Procesar chat con ENHANCED GRAPH
+            graph = await Graph.create(
+                project_id=project_id,
+                user_id=user_id,
+                name=name,
+                number_phone_agent=number_phone_agent,
+                source=source,
+                source_id=source_id,
+                unique_id=unique_id,
+                project=project
+            )
+
+            # Construir el mensaje final
+            final_message = message
+            if image_url:
+                if message:
+                    final_message = f"{message}\n\n![Imagen]({image_url})"
+                else:
+                    final_message = f"![Imagen]({image_url})"
+
+            response = await graph.execute_with_immediate_response(final_message, background_tasks)
+            
+            # ✨ Agregar información del nuevo sistema
+            response['system'] = 'enhanced'
+            
+            # Si hubo imagen, agregar su URL a la respuesta
+            if image_url:
+                response['image_url'] = image_url
+                # Asegurarnos de que el content contenga tanto el mensaje como la imagen
+                if 'content' in response:
+                    response['content'] = final_message
+
+            # 📊 Log de métricas mejoradas
+            if 'execution_route' in response:
+                logger.info(f"🎯 Ruta ejecutada: {response['execution_route']}")
+            if 'intent_category' in response:
+                logger.info(f"🧠 Intención detectada: {response['intent_category']}")
+            if 'tools_used' in response:
+                logger.info(f"🔧 Herramientas usadas: {response['tools_used']}")
+
+            return JSONResponse(status_code=200, content=response)
+
+        finally:
+            # 🔓 SIEMPRE liberar el lock, incluso si hay error
+            await release_conversation_lock(user_id, project_id)
+
+    except HTTPException as e:
+        # Liberar lock en caso de error HTTP
+        if 'user_id' in locals() and 'project_id' in locals():
+            await release_conversation_lock(user_id, project_id)
+        raise e
+    except Exception as e:
+        # Liberar lock en caso de error general
+        if 'user_id' in locals() and 'project_id' in locals():
+            await release_conversation_lock(user_id, project_id)
+        logger.error(f"Error en chat: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error procesando mensaje: {str(e)}"
+        )
+
+
+async def chat_stream(request: Request, background_tasks: BackgroundTasks):
+    """
+    🚀 Endpoint de streaming - MEJORADO CON ENHANCED GRAPH
+    
+    Ahora proporciona:
+    - Streaming más suave y detallado
+    - Información de progreso por nodo
+    - Métricas en tiempo real
+    - Mejor manejo de errores
+    """
+    try:
+        req_body = await validate_json_body(request)
+        message = await validate_required_body_param(req_body, "message")
+        project_id = await validate_required_body_param(req_body, "project_id")
+        user_id = await validate_required_body_param(req_body, "user_id")
+
+        name = req_body.get("name", "no name")
+        number_phone_agent = req_body.get("number_phone_agent", "no number")
+        source_id = req_body.get("source", "default")
+        source = req_body.get("source_name", "default")
+
+    except ValidationException as e:
+        raise HTTPException(status_code=STATUS_BAD_REQUEST, detail=str(e))
+
+    # 🔒 CONTROL DE CONCURRENCIA - Verificar si el usuario ya tiene una conversación activa
+    can_process = await acquire_conversation_lock(user_id, project_id)
+    if not can_process:
+        # 📬 CONSERVAR MENSAJE: En lugar de rechazar, encolar para procesamiento posterior
+        try:
+            # Añadir al contexto acumulado
+            await add_to_accumulated_context(user_id, project_id, message)
+            
+            # Para streaming, enviar evento de confirmación
+            async def queued_message_generator():
+                queued_event = {
+                    "type": "queued_message",
+                    "message": "Recibido, dame un momento...",
+                    "status": "queued",
+                    "queued_message": True,
+                    "will_be_processed": True,
+                    "is_complete": True,
+                    "system": "enhanced"  # ✨ Nueva información
+                }
+                yield f"data: {json.dumps(queued_event, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'type': 'stream_end'})}\n\n"
+            
+            return StreamingResponse(
+                queued_message_generator(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Headers": "*",
+                }
+            )
+            
+        except Exception as e:
+            logger.error(f"❌ Error conservando mensaje en streaming: {str(e)}")
+            # Fallback al comportamiento anterior
+            async def error_generator():
+                error_event = {
+                    "type": "error",
+                    "error": "⏳ Estoy procesando tu mensaje anterior. Por favor espera un momento.",
+                    "status": "processing",
+                    "is_complete": True,
+                    "system": "enhanced"  # ✨ Nueva información
+                }
+                yield f"data: {json.dumps(error_event, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'type': 'stream_end'})}\n\n"
+            
+            return StreamingResponse(
+                error_generator(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Headers": "*",
+                }
+            )
+
+    try:
+        # Obtener proyecto y unique_id
+        unique_id = str(ObjectId())
+        database = Persist()
+        
+        try:
+            project = database.find_project(project_id)
+            logger.info(f"Proyecto encontrado: {project_id}")
+        except ValueError as e:
+            logger.error(f"Project not found: {project_id}")
+            raise HTTPException(status_code=404, detail="Project not found")
+        except Exception as e:
+            logger.error(f"Error fetching project: {str(e)}")
+            raise HTTPException(status_code=500, detail="Internal server error")
+
+        # 🚀 Crear ENHANCED GRAPH
+        graph = await Graph.create(
+            project_id=project_id,
+            user_id=user_id,
+            name=name,
+            number_phone_agent=number_phone_agent,
+            source=source,
+            source_id=source_id,
+            unique_id=unique_id,
+            project=project
+        )
+        
+        # Generador para Server-Sent Events MEJORADO
+        async def event_generator():
+            try:
+                logger.info(f"🚀 Iniciando streaming ENHANCED para {user_id}")
+                
+                async for chunk in graph.execute_stream(message, background_tasks):
+                    # ✨ El nuevo sistema proporciona más tipos de eventos
+                    chunk['system'] = 'enhanced'
+                    
+                    # Log de eventos interesantes
+                    if chunk.get('type') == 'node_start':
+                        logger.info(f"📍 Nodo iniciado: {chunk.get('node_name')}")
+                    elif chunk.get('type') == 'tool_execution':
+                        logger.info(f"🔧 Ejecutando herramienta en nodo: {chunk.get('node_name')}")
+                    elif chunk.get('type') == 'completion':
+                        logger.info(f"✅ Streaming completado en {chunk.get('execution_time', 0):.2f}s")
+                    
+                    # Formatear como Server-Sent Event
+                    event_data = json.dumps(chunk, ensure_ascii=False)
+                    yield f"data: {event_data}\n\n"
+                    
+                    # Pequeña pausa para no saturar
+                    await asyncio.sleep(0.01)
+                    
+            except Exception as e:
+                # Enviar error como evento
+                error_event = {
+                    "type": "error",
+                    "error": str(e),
+                    "is_complete": True,
+                    "system": "enhanced"  # ✨ Nueva información
+                }
+                yield f"data: {json.dumps(error_event, ensure_ascii=False)}\n\n"
+            finally:
+                # 🔓 Liberar el lock cuando termine el streaming
+                await release_conversation_lock(user_id, project_id)
+            
+            # Evento final de cierre
+            yield f"data: {json.dumps({'type': 'stream_end', 'system': 'enhanced'})}\n\n"
+        
+        # Retornar StreamingResponse con headers apropiados
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "*",
+            }
+        )
+    
+    except Exception as e:
+        # Liberar lock en caso de error
+        await release_conversation_lock(user_id, project_id)
+        raise e
+
+
+# ✨ NUEVAS FUNCIONES MEJORADAS
+
+async def get_enhanced_system_stats(request: Request):
+    """
+    📊 NUEVO: Estadísticas del sistema ENHANCED
+    
+    Proporciona métricas detalladas del nuevo sistema.
+    """
+    try:
+        from app.controler.chat.enhanced_graph_bridge import performance_monitor
+        from app.chat_new.tools.registry import get_tool_registry
+        
+        # Estadísticas del sistema original
+        original_stats = await get_system_stats(request)
+        
+        # Estadísticas del tool registry mejorado
+        tool_registry = get_tool_registry()
+        enhanced_tool_stats = tool_registry.get_registry_stats()
+        
+        # Combinar estadísticas
+        enhanced_stats = {
+            **original_stats.body.decode() if hasattr(original_stats, 'body') else {},
+            "enhanced_system": {
+                "tool_registry": enhanced_tool_stats,
+                "active_conversations": len(active_conversations),
+                "system_type": "enhanced",
+                "features": [
+                    "intelligent_routing",
+                    "security_validation", 
+                    "circuit_breakers",
+                    "mcp_support",
+                    "advanced_streaming",
+                    "performance_monitoring"
+                ]
+            }
+        }
+        
+        return JSONResponse(status_code=200, content=enhanced_stats)
+        
+    except Exception as e:
+        logger.error(f"Error obteniendo estadísticas enhanced: {str(e)}")
+        # Fallback a estadísticas originales
+        return await get_system_stats(request)
+
+
+async def test_enhanced_performance(request: Request):
+    """
+    🧪 NUEVO: Endpoint para probar performance del sistema enhanced
+    
+    Compara el rendimiento entre sistemas original y mejorado.
+    """
+    try:
+        req_body = await request.json()
+        message = req_body.get("message", "Test message")
+        project_id = req_body.get("project_id")
+        user_id = req_body.get("user_id", "test_user")
+        
+        if not project_id:
+            raise HTTPException(status_code=400, detail="project_id es requerido")
+        
+        # Obtener proyecto
+        database = Persist()
+        project = database.find_project(project_id)
+        
+        # Ejecutar comparación
+        from app.controler.chat.enhanced_graph_bridge import performance_monitor
+        
+        comparison = await performance_monitor.compare_execution(
+            project_id=project_id,
+            user_id=user_id,
+            name="Test User",
+            number_phone_agent="test",
+            source="test",
+            source_id="test",
+            unique_id=str(ObjectId()),
+            project=project,
+            message=message
+        )
+        
+        return JSONResponse(status_code=200, content=comparison)
+        
+    except Exception as e:
+        logger.error(f"Error en test de performance: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error en test: {str(e)}")
+
+
+# Conservar todas las funciones originales
+async def get_queue_status(request: Request):
+    """📊 Obtiene el estado de la cola de un usuario específico."""
+    try:
+        # Obtener parámetros de query
+        user_id = request.query_params.get("user_id")
+        project_id = request.query_params.get("project_id")
+        
+        if not user_id or not project_id:
+            raise HTTPException(
+                status_code=400, 
+                detail="user_id y project_id son requeridos"
+            )
+        
+        from app.controler.chat.core.message_queue import message_queue
+        
+        # Obtener estado de la cola
+        queue_status = await message_queue.get_queue_status(user_id, project_id)
+        
+        # Verificar si hay conversación activa (fuera de cola)
+        conversation_key = f"{project_id}_{user_id}"
+        is_conversation_active = conversation_key in active_conversations
+        
+        response = {
+            "user_id": user_id,
+            "project_id": project_id,
+            "queue_status": queue_status,
+            "conversation_active": is_conversation_active,
+            "timestamp": datetime.now().isoformat(),
+            "system": "enhanced"  # ✨ Nueva información
+        }
+        
+        return JSONResponse(status_code=200, content=response)
+        
+    except Exception as e:
+        logger.error(f"Error obteniendo estado de cola: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error obteniendo estado de cola: {str(e)}"
+        )
+
+
+async def get_system_stats(request: Request):
+    """📈 Estadísticas generales del sistema de chat."""
+    try:
+        from app.controler.chat.core.message_queue import message_queue
+        
+        # Obtener estadísticas
+        stats = message_queue.get_stats()
+        
+        # Agregar información adicional del sistema enhanced
+        stats.update({
+            "active_conversations": len(active_conversations),
+            "concurrent_limit_hit": sum(1 for _ in active_conversations.keys()),
+            "timestamp": datetime.now().isoformat(),
+            "system": "enhanced"  # ✨ Nueva información
+        })
+        
+        return JSONResponse(status_code=200, content=stats)
+        
+    except Exception as e:
+        logger.error(f"Error obteniendo estadísticas: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error obteniendo estadísticas: {str(e)}"
+        )
+
+
+async def cancel_user_queue(request: Request):
+    """🚫 Cancela todos los mensajes pendientes de un usuario."""
+    try:
+        req_body = await validate_json_body(request)
+        user_id = await validate_required_body_param(req_body, "user_id")
+        project_id = await validate_required_body_param(req_body, "project_id")
+        
+        from app.controler.chat.core.message_queue import message_queue
+        
+        # Cancelar mensajes en cola
+        cancelled_count = await message_queue.cancel_user_messages(user_id, project_id)
+        
+        # Liberar lock de conversación si existe
+        await release_conversation_lock(user_id, project_id)
+        
+        response = {
+            "user_id": user_id,
+            "project_id": project_id,
+            "cancelled_messages": cancelled_count,
+            "conversation_cleared": True,
+            "timestamp": datetime.now().isoformat(),
+            "system": "enhanced"  # ✨ Nueva información
+        }
+        
+        return JSONResponse(status_code=200, content=response)
+        
+    except ValidationException as e:
+        raise HTTPException(status_code=STATUS_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error cancelando cola: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error cancelando cola: {str(e)}"
+        )

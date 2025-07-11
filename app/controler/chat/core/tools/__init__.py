@@ -4,7 +4,6 @@ from app.controler.chat.core.tools.api_tool import create_api_tools
 from app.controler.chat.core.tools.mongo_tool import mongo_db_tool
 from app.controler.chat.core.tools.retriever_tool import document_retriever
 from app.controler.chat.core.tools.faq_retriever_tool import faq_retriever
-from app.controler.chat.core.tools.products_fallback_tool import search_products_unified
 from app.controler.chat.core.tools.unified_search_tool import unified_search_tool
 from app.controler.chat.core.tools.openai_vector_tool import openai_vector_search
 from app.controler.chat.core.tools.chile_holidays_tool import check_chile_holiday_tool, next_chile_holidays_tool
@@ -16,15 +15,16 @@ from app.controler.chat.core.tools.email_tool import EmailTool
 from app.controler.chat.core.tools.image_processor_tool import ImageProcessorTool
 from app.controler.chat.core.tools.calendar_tool import google_calendar_tool, test_calendar_connectivity
 from app.controler.chat.core.tools.agenda_tool import AgendaTool
-from app.controler.chat.core.tools.google_calendar_langchain_tool import GoogleCalendarLangChainTool
-from app.controler.chat.core.tools.agenda_smart_booking_tool import AgendaSmartBookingTool
+
 
 import logging
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from typing import List
 from app.controler.chat.store.persistence import Project
+from app.controler.chat.core.tools_cache import cached_tools
 
+@cached_tools(ttl_hours=24)
 async def agent_tools(project_id: str, user_id: str, name: str, number_phone_agent: str, unique_id: str, project: Project) -> List:
     """Versión simplificada de la función que retorna las tools para el agente"""
     
@@ -81,7 +81,6 @@ async def agent_tools(project_id: str, user_id: str, name: str, number_phone_age
     optional_tools = {
         "retriever": [document_retriever],
         "faq_retriever": [faq_retriever],
-        "products_search": [search_products_unified],
         "unified_search": [unified_search_tool],
         "openai_vector": [openai_vector_search],
         "calendar": [google_calendar_tool],
@@ -118,14 +117,6 @@ async def agent_tools(project_id: str, user_id: str, name: str, number_phone_age
     if "agenda_tool" in project.enabled_tools:
         always_available_tools.append(AgendaTool(project_id, project, user_id))
         logging.info("Herramienta habilitada: agenda_tool")
-    
-    if "google_calendar_langchain" in project.enabled_tools:
-        always_available_tools.append(GoogleCalendarLangChainTool(project_id))
-        logging.info("Herramienta habilitada: google_calendar_langchain")
-        
-    if "agenda_smart_booking_tool" in project.enabled_tools:
-        always_available_tools.append(AgendaSmartBookingTool(project_id))
-        logging.info("Herramienta habilitada: agenda_smart_booking_tool")
 
     
     tools.extend(always_available_tools)

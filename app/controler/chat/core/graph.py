@@ -14,6 +14,8 @@ from app.controler.chat.store.persistence import Persist
 from app.controler.chat.store.persistence_state import MemoryStatePersistence
 from collections import OrderedDict
 from app.controler.chat.core.generate_summary import generate_summary, SummaryPayload
+from app.controler.chat.core.intelligent_memory import IntelligentMemoryManager
+from app.controler.chat.core.robust_error_handler import error_handler, RetryConfig, CircuitBreakerOpenError
 from uuid import uuid4
 from datetime import datetime
 import time
@@ -156,10 +158,16 @@ class Graph():
             self.logger.info(f"No previous state found for user {self.state.user_id}. Starting with empty memory.")
         return memory
     
+    @error_handler.with_retry(
+        config=RetryConfig(max_retries=2, base_delay=1.0),
+        circuit_breaker_key="graph_execution",
+        fallback=None
+    )
     async def execute_with_immediate_response(self, message, background_tasks):
         """
         🚀 NUEVA FUNCIÓN: Ejecuta con respuesta inmediata
         ✅ MEJORADO: Incluye contexto acumulado de mensajes encolados
+        ✅ ROBUSTO: Con retry automático y circuit breaker
         """
         # 1. Obtener contexto acumulado si existe
         accumulated_context = await get_user_accumulated_context(self.user_id, self.project_id)
@@ -241,14 +249,12 @@ class Graph():
         if not isinstance(nested_dict, OrderedDict):
             nested_dict = OrderedDict(nested_dict)
 
-        # MEJORADO: Aumentar límite de memoria para preservar más información
-        # Cambiar de 1 a 5 claves para mantener datos importantes como contactos
-        MAX_KEYS = 5
-        while len(nested_dict) > MAX_KEYS:
-            # Preservar las claves más recientes (LIFO)
-            nested_dict.popitem(last=False)
-
-        state_dict[''] = nested_dict
+        # 🧠 SISTEMA DE MEMORIA INTELIGENTE
+        # Usar IntelligentMemoryManager para priorizar mensajes importantes
+        MAX_KEYS = 10  # Aumentado para preservar más contexto importante
+        
+        # Optimizar usando el sistema de memoria inteligente
+        state_dict = IntelligentMemoryManager.optimize_memory_state(state_dict, MAX_KEYS)
         self.state.state = state_dict
 
         logging.info(unique_id + " saving state")
@@ -383,11 +389,9 @@ class Graph():
             if not isinstance(nested_dict, OrderedDict):
                 nested_dict = OrderedDict(nested_dict)
                 
-            MAX_KEYS = 5
-            while len(nested_dict) > MAX_KEYS:
-                nested_dict.popitem(last=False)
-                
-            state_dict[''] = nested_dict
+            # 🧠 SISTEMA DE MEMORIA INTELIGENTE para streaming
+            MAX_KEYS = 10
+            state_dict = IntelligentMemoryManager.optimize_memory_state(state_dict, MAX_KEYS)
             self.state.state = state_dict
             
             # Guardar estado y generar resumen en segundo plano
@@ -401,15 +405,82 @@ class Graph():
                 )
             )
             
-        except Exception as e:
-            logging.error(f"Error en streaming: {str(e)}", exc_info=True)
+        except CircuitBreakerOpenError as e:
+            logging.error(f"🚫 Circuit breaker abierto en streaming: {str(e)}")
             yield {
                 "type": "error",
-                "error": str(e),
-                "is_complete": True
+                "error": "Servicio temporalmente no disponible. Intenta en unos minutos.",
+                "error_type": "circuit_breaker",
+                "is_complete": True,
+                "retry_after": 60
             }
+        except Exception as e:
+            logging.error(f"❌ Error en streaming: {str(e)}", exc_info=True)
+            
+            # Clasificar tipo de error para mejor manejo
+            error_type = type(e).__name__
+            user_friendly_message = self._get_user_friendly_error_message(e)
+            
+            yield {
+                "type": "error",
+                "error": user_friendly_message,
+                "error_type": error_type,
+                "is_complete": True,
+                "technical_details": str(e) if logging.getLogger().isEnabledFor(logging.DEBUG) else None
+            }
+    
+    def _get_user_friendly_error_message(self, error: Exception) -> str:
+        """
+        Convierte errores técnicos en mensajes amigables para el usuario.
         
+        Args:
+            error: Excepción original
+            
+        Returns:
+            Mensaje amigable para el usuario
+        """
+        error_type = type(error).__name__
+        error_message = str(error).lower()
         
+        # Mapeo de errores comunes a mensajes amigables
+        if "timeout" in error_message or "timed out" in error_message:
+            return "⏱️ La operación está tomando más tiempo del esperado. Por favor intenta nuevamente."
+        
+        elif "connection" in error_message or "network" in error_message:
+            return "🌐 Hay un problema de conexión. Verifica tu conexión a internet e intenta nuevamente."
+        
+        elif "permission" in error_message or "unauthorized" in error_message:
+            return "🔒 No tienes permisos para realizar esta operación. Contacta al administrador."
+        
+        elif "not found" in error_message or "404" in error_message:
+            return "🔍 No se pudo encontrar el recurso solicitado. Verifica la información e intenta nuevamente."
+        
+        elif "rate limit" in error_message or "too many requests" in error_message:
+            return "⚡ Se han realizado demasiadas solicitudes. Por favor espera un momento e intenta nuevamente."
+        
+        elif "validation" in error_message or "invalid" in error_message:
+            return "📝 Los datos proporcionados no son válidos. Verifica la información e intenta nuevamente."
+        
+        elif error_type in ["KeyError", "AttributeError", "TypeError"]:
+            return "⚙️ Ocurrió un error interno. El equipo técnico ha sido notificado."
+        
+        elif error_type == "ValueError":
+            return "📊 Los valores proporcionados no son correctos. Verifica la información e intenta nuevamente."
+        
+        else:
+            return "❌ Ocurrió un error inesperado. Por favor intenta nuevamente o contacta soporte si el problema persiste."
+    
+    def get_error_stats(self) -> dict:
+        """
+        Obtiene estadísticas de errores del sistema.
+        
+        Returns:
+            Diccionario con estadísticas de errores
+        """
+        return {
+            'function_stats': error_handler.get_stats(),
+            'circuit_breaker_stats': error_handler.get_circuit_breaker_status()
+        }
         
         
         
