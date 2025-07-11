@@ -393,10 +393,15 @@ class AgendaTool(BaseTool):
             # Generar respuesta optimizada para el usuario
             import datetime as dt
             try:
+                logger.error(f"🚨 DEBUG FECHA: start_datetime RECIBIDO = '{start_datetime}'")
                 parsed_date = dt.datetime.fromisoformat(start_datetime.replace('Z', '+00:00'))
+                logger.error(f"🚨 DEBUG FECHA: parsed_date PARSEADO = {parsed_date} | año={parsed_date.year}")
                 formatted_date = parsed_date.strftime("%d de %B de %Y a las %H:%M")
+                logger.error(f"🚨 DEBUG FECHA: formatted_date ANTES de traducciones = '{formatted_date}'")
                 formatted_date = formatted_date.replace("January", "enero").replace("February", "febrero").replace("March", "marzo").replace("April", "abril").replace("May", "mayo").replace("June", "junio").replace("July", "julio").replace("August", "agosto").replace("September", "septiembre").replace("October", "octubre").replace("November", "noviembre").replace("December", "diciembre")
-            except:
+                logger.error(f"🚨 DEBUG FECHA: formatted_date FINAL = '{formatted_date}'")
+            except Exception as e:
+                logger.error(f"🚨 DEBUG FECHA: ERROR parseando fecha = {str(e)}")
                 formatted_date = start_datetime
 
             # 🆕 CONSTRUCCIÓN DE RESPUESTA CONDICIONAL

@@ -147,9 +147,9 @@ def google_calendar_tool(query: str, state: Annotated[dict, InjectedState]) -> s
     
     🔍 BÚSQUEDA Y CONSULTA:
     - list_events|days=7: Lista eventos de los próximos N días
-    - search_events|title=Reunión|date=2023-06-15: Busca eventos por título y/o fecha
+    - search_events|title=Reunión|date=2025-06-15: Busca eventos por título y/o fecha
     - get_event|event_id=abc123: Obtiene detalles de un evento específico
-    - check_availability|start=2023-06-15T16:00:00|end=2023-06-15T17:00:00: Verifica disponibilidad
+    - check_availability|start=2025-06-15T16:00:00|end=2025-06-15T17:00:00: Verifica disponibilidad
     
     🎯 BÚSQUEDA DE HORARIOS LIBRES:
     - find_available_slots: Encuentra próximos 3 horarios disponibles (configuración estándar: 60 min, horario laboral)
@@ -158,7 +158,7 @@ def google_calendar_tool(query: str, state: Annotated[dict, InjectedState]) -> s
     - find_available_slots|specific_date=2025-07-09|duration=1: Busca en fecha específica (YYYY-MM-DD)
     
     ✨ GESTIÓN DE EVENTOS:
-    - create_event|title=Reunión Cliente|start=2023-06-15T15:00:00|end=2023-06-15T16:00:00|description=Reunión|attendees=email@domain.com|meet=true
+    - create_event|title=Reunión Cliente|start=2025-06-15T15:00:00|end=2025-06-15T16:00:00|description=Reunión|attendees=email@domain.com|meet=true
     - update_event|event_id=abc123|title=Nuevo Título|description=Nueva descripción
     - delete_event|event_id=abc123: Elimina evento
     
@@ -193,7 +193,7 @@ def google_calendar_tool(query: str, state: Annotated[dict, InjectedState]) -> s
         
     Ejemplos:
         - "find_available_slots" → Muestra próximos 3 horarios disponibles
-        - "create_event|title=Reunión|start=2023-06-15T15:00:00|end=2023-06-15T16:00:00|attendees=usuario@email.com|meet=true"
+        - "create_event|title=Reunión|start=2025-06-15T15:00:00|end=2025-06-15T16:00:00|attendees=usuario@email.com|meet=true"
         - "find_available_slots|day=viernes|duration=2" → Busca slots de 2 horas el viernes
     """
     try:
