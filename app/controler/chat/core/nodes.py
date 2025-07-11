@@ -135,14 +135,14 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
             
             
         # Log para debug de imágenes y prompt
-        for msg in messages:
-            if hasattr(msg, 'content') and '![Imagen](' in str(msg.content):
-                logging.info(f"🖼️ IMAGEN DETECTADA EN MENSAJE: {msg.content}")
+        #for msg in messages:
+        #    if hasattr(msg, 'content') and '![Imagen](' in str(msg.content):
+        #        logging.info(f"🖼️ IMAGEN DETECTADA EN MENSAJE: {msg.content}")
         
         # Log del prompt específico del proyecto cuando hay imágenes
-        if any('![Imagen](' in str(msg.content) for msg in messages if hasattr(msg, 'content')):
-            logging.info(f"📝 PROMPT ESPECÍFICO DEL PROYECTO:\n{project.prompt}")
-            logging.info(f"📝 PROMPT COMPLETO FINAL:\n{prompt_general_skeleton}")
+        #if any('![Imagen](' in str(msg.content) for msg in messages if hasattr(msg, 'content')):
+        #    logging.info(f"📝 PROMPT ESPECÍFICO DEL PROYECTO:\n{project.prompt}")
+        #    logging.info(f"📝 PROMPT COMPLETO FINAL:\n{prompt_general_skeleton}")
                 
         messages.insert(0, SystemMessage(content=prompt_general_skeleton))
 

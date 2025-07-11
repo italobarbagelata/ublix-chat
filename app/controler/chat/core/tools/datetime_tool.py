@@ -77,9 +77,8 @@ def current_datetime_tool(query: str) -> str:
                 # Si el día es hoy pero dice "próximo", tomar el de la siguiente semana
                 elif dias_hasta == 0 and ("próximo" in query_lower or "proximo" in query_lower):
                     dias_hasta = 7
-                # Si el día ya pasó esta semana, tomar el de la próxima semana
-                elif i < ahora.weekday():
-                    dias_hasta += 7
+                # ELIMINADA la lógica incorrecta que agregaba 7 días adicionales
+                # La fórmula (i - ahora.weekday() + 7) % 7 ya calcula correctamente el próximo día
 
                 fecha_futura = ahora + timedelta(days=dias_hasta)
                 fecha_formato_iso = fecha_futura.strftime('%Y-%m-%d')
