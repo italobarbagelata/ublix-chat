@@ -146,7 +146,7 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
                 
         messages.insert(0, SystemMessage(content=prompt_general_skeleton))
 
-        logging.info(f"🔧 TOOLS DISPONIBLES: {[tool.name for tool in tools]}")
+        logging.info(f"🔧 TOOLS DISPONIBLES: {[getattr(tool, 'name', getattr(tool, '__name__', str(tool))) for tool in tools]}")
         response = model_with_tools.invoke(messages)
         decorate_message(response, state["exec_init"], state["conversation_id"])
 

@@ -63,7 +63,7 @@ def create_streaming_agent(user_id, name, number_phone_agent, source):
         
         # Obtiene las herramientas disponibles para el agente
         tools = agent_tools(project_id, user_id, name, number_phone_agent, project)
-        logging.info(f"Herramientas disponibles para el agente: {[tool.name for tool in tools]}")
+        logging.info(f"Herramientas disponibles para el agente: {[getattr(tool, 'name', getattr(tool, '__name__', str(tool))) for tool in tools]}")
         
         # Vincula las herramientas al modelo
         model_with_tools = model.bind_tools(tools)
