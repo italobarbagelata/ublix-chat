@@ -37,6 +37,11 @@ class InputValidator:
         r'^\+?[\d\s\-\(\)]{7,20}$'
     )
     
+    # Patrón para IDs de WhatsApp (formato: número@s.whatsapp.net)
+    WHATSAPP_ID_PATTERN = re.compile(
+        r'^\d+@s\.whatsapp\.net$'
+    )
+    
     UUID_PATTERN = re.compile(
         r'^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$',
         re.IGNORECASE
@@ -94,7 +99,13 @@ class InputValidator:
     @classmethod
     def validate_user_id(cls, user_id: Any) -> ValidationResult:
         """
-        Valida ID de usuario (típicamente número de teléfono).
+        Valida ID de usuario (número de teléfono, WhatsApp ID, UUID o alfanumérico).
+        
+        Formatos soportados:
+        - Números de teléfono: +56949031247, 56949031247
+        - WhatsApp IDs: 56949031247@s.whatsapp.net
+        - UUIDs: f47ac10b-58cc-4372-a567-0e02b2c3d479
+        - Alfanuméricos: user123, test_user
         
         Args:
             user_id: ID del usuario a validar
@@ -116,6 +127,10 @@ class InputValidator:
             # Sanitizar: solo números, + y espacios
             sanitized = re.sub(r'[^\d\+\s]', '', user_id_str)
             return ValidationResult(True, sanitized, "", "")
+        
+        # Si es un ID de WhatsApp (formato: número@s.whatsapp.net)
+        if cls.WHATSAPP_ID_PATTERN.match(user_id_str):
+            return ValidationResult(True, user_id_str, "", "")
         
         # Si es UUID
         if cls.UUID_PATTERN.match(user_id_str):
