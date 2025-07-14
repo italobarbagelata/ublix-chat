@@ -83,8 +83,12 @@ def current_datetime_tool(query: str) -> str:
                 fecha_futura = ahora + timedelta(days=dias_hasta)
                 fecha_formato_iso = fecha_futura.strftime('%Y-%m-%d')
                 
+                # Incluir información completa para evitar confusiones del agente
+                dia_nombre = dias_semana[fecha_futura.weekday()]
+                fecha_legible = f"{fecha_futura.day} de {meses[fecha_futura.month]} de {fecha_futura.year}"
+                
                 logger.info(f"Día '{palabra_dia_encontrada}' resuelto a fecha: {fecha_formato_iso}")
-                return fecha_formato_iso
+                return f"FECHA_EXACTA: {fecha_formato_iso} (que es {dia_nombre} {fecha_legible})"
         
         # ¿Qué día es hoy?
         if any(palabra in query_lower for palabra in ["qué día es hoy", "que día es hoy", "día de hoy", "hoy qué día", "qué día es", "que día es"]):

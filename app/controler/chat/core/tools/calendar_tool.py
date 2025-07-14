@@ -639,9 +639,11 @@ def create_event(service, params, state=None, project_config=None):
             'description': '',
             'start': {
                 'dateTime': default_start.isoformat(),
+                'timeZone': 'America/Santiago'
             },
             'end': {
                 'dateTime': default_end.isoformat(),
+                'timeZone': 'America/Santiago'
             },
             'attendees': []
         }
@@ -670,10 +672,18 @@ def create_event(service, params, state=None, project_config=None):
                 elif key == 'description':
                     event_data['description'] = value
                 elif key == 'start':
-                    event_data['start']['dateTime'] = normalize_to_chile_timezone(value)
+                    normalized_time = normalize_to_chile_timezone(value)
+                    event_data['start'] = {
+                        'dateTime': normalized_time,
+                        'timeZone': 'America/Santiago'
+                    }
                     start_updated = True
                 elif key == 'end':
-                    event_data['end']['dateTime'] = normalize_to_chile_timezone(value)
+                    normalized_time = normalize_to_chile_timezone(value)
+                    event_data['end'] = {
+                        'dateTime': normalized_time,
+                        'timeZone': 'America/Santiago'
+                    }
                     end_updated = True
                 elif key == 'attendees' or key == 'guests' or key == 'emails':
                     # Soporte para múltiples emails separados por coma
@@ -689,7 +699,10 @@ def create_event(service, params, state=None, project_config=None):
         if start_updated and not end_updated:
             start_dt = datetime.fromisoformat(event_data['start']['dateTime'])
             calculated_end_dt = start_dt + timedelta(hours=default_duration)
-            event_data['end']['dateTime'] = calculated_end_dt.isoformat()
+            event_data['end'] = {
+                'dateTime': calculated_end_dt.isoformat(),
+                'timeZone': 'America/Santiago'
+            }
             logger.info(f"FECHA DE FIN RECALCULADA AUTOMÁTICAMENTE: {event_data['end']['dateTime']} (duración: {default_duration}h)")
         
         # Debug final state
@@ -1118,6 +1131,13 @@ def find_next_available_slots(service, params, project_config=None, state=None):
                         
                         # Validar hora válida
                         if 0 <= hour <= 23 and 0 <= minute <= 59:
+                            # CONVERSIÓN INTELIGENTE AM/PM: Si la hora está fuera del horario laboral típico
+                            # y es menor a 12, probablemente el usuario se refiere a PM
+                            original_hour = hour
+                            if 1 <= hour <= 7:  # 1 AM - 7 AM en contexto laboral probablemente es PM
+                                hour += 12
+                                logger.info(f"Conversión inteligente AM/PM: {original_hour}:00 → {hour}:00 (contexto laboral)")
+                            
                             logger.info(f"Preferencia de tiempo específica detectada en título '{title}': {hour}:{minute:02d}")
                             return True, hour, minute
                     except (ValueError, IndexError):

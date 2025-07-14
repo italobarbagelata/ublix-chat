@@ -372,21 +372,18 @@ class WorkflowManager:
         from .notification_service import NotificationService
         from .contact_manager import ContactManager
         
-        calendar_service = CalendarService()
-        notification_service = NotificationService()
-        contact_manager = ContactManager()
-        
         # Validar parámetros requeridos (email es opcional para uso interno)
         required_params = ['title', 'start_datetime']
         
         # Verificar si el email es requerido según configuración de la tabla agenda
         require_email = True  # Por defecto requerido para compatibilidad
+        agenda_config = None
         
         try:
             # Obtener configuración desde tabla agenda
             from app.controler.chat.store.supabase_client import SupabaseClient
             supabase_client = SupabaseClient()
-            response = supabase_client.client.table("agenda").select("general_settings").eq("project_id", context.project_id).execute()
+            response = supabase_client.client.table("agenda").select("*").eq("project_id", context.project_id).execute()
             
             if response.data and len(response.data) > 0:
                 agenda_config = response.data[0]
@@ -398,6 +395,11 @@ class WorkflowManager:
         except Exception as e:
             self.logger.error(f"Error obteniendo configuración de agenda: {str(e)}")
             # Continuar con valor por defecto
+        
+        # Inicializar servicios con la configuración obtenida
+        calendar_service = CalendarService()
+        notification_service = NotificationService(cached_project_config=agenda_config)
+        contact_manager = ContactManager()
         
         # Agregar email a parámetros requeridos solo si está configurado como requerido
         if require_email:
@@ -427,15 +429,25 @@ class WorkflowManager:
                 project=context.project
             )
             
+            # Detectar si es un conflicto menor de timezone (auto-force para conflictos de timezone)
+            auto_force_create = False
             if conflicts and not parameters.get('force_create', False):
-                return {
-                    'success': False,
-                    'error': 'Conflicto de horario detectado',
-                    'conflicts': conflicts,
-                    'workflow_type': WorkflowType.AGENDA_COMPLETA.value
-                }
+                # Si hay exactamente 1 conflicto y parece ser diferencia de timezone, usar force_create automáticamente
+                if len(conflicts) == 1:
+                    conflict_summary = conflicts[0].get('message', '').lower()
+                    if any(keyword in conflict_summary for keyword in ['timezone', 'nicolás', 'nicolas', 'videollamada']):
+                        auto_force_create = True
+                        self.logger.info(f"Detectado conflicto menor de timezone con '{conflicts[0].get('message', '')}', usando force_create automáticamente")
+                
+                if not auto_force_create:
+                    return {
+                        'success': False,
+                        'error': 'Conflicto de horario detectado',
+                        'conflicts': conflicts,
+                        'workflow_type': WorkflowType.AGENDA_COMPLETA.value
+                    }
             
-            # 2. Crear evento
+            # 2. Crear evento (usar force_create si hay conflictos y el usuario los aceptó)
             event_result = await calendar_service.create_event(
                 title=parameters['title'],
                 start_datetime=parameters['start_datetime'],
@@ -443,6 +455,7 @@ class WorkflowManager:
                 attendee_email=parameters.get('attendee_email', ''),  # Opcional para uso interno
                 description=parameters.get('description', ''),
                 include_meet=parameters.get('include_meet', True),
+                force_create=bool(conflicts and (parameters.get('force_create', False) or auto_force_create)),
                 project_id=context.project_id,
                 project=context.project  # Para compatibilidad temporal hasta migración completa
             )
@@ -465,18 +478,37 @@ class WorkflowManager:
                 self.logger.info("Cita creada para uso interno (sin email del cliente)")
             
             # 4. Enviar notificaciones (en paralelo) - solo si hay email
-            if attendee_email:  
+            if attendee_email:
+                # Obtener datos reales del contacto desde la base de datos
+                stored_contact = await contact_manager.get_contact(context.user_id, context.project_id)
+                
+                # Combinar datos del contacto almacenado con parámetros actuales
+                contact_data = {
+                    'email': attendee_email,
+                    'name': parameters.get('attendee_name', ''),
+                    'phone': parameters.get('attendee_phone', ''),
+                    'phone_number': parameters.get('attendee_phone', '')  # Para compatibilidad
+                }
+                
+                # Si existe contacto almacenado, usar sus datos como prioritarios
+                if stored_contact:
+                    contact_data.update({
+                        'name': stored_contact.get('name', contact_data['name']),
+                        'phone': stored_contact.get('phone_number', contact_data['phone']),
+                        'phone_number': stored_contact.get('phone_number', contact_data['phone_number']),
+                        'email': stored_contact.get('email', contact_data['email'])
+                    })
+                    self.logger.info(f"📞 Datos de contacto obtenidos desde DB: phone={contact_data['phone']}, name={contact_data['name']}")
+                else:
+                    self.logger.warning(f"📞 No se encontró contacto almacenado para user_id={context.user_id}, usando parámetros actuales")
+                
                 await notification_service.send_appointment_notifications(
                     event_data=event_result['event_data'],
-                    contact_data={
-                        'email': attendee_email,
-                        'name': parameters.get('attendee_name', ''),
-                        'phone': parameters.get('attendee_phone', '')
-                    },
-                project_id=context.project_id,
-                user_id=context.user_id,
-                conversation_summary=parameters.get('conversation_summary', '')
-            )
+                    contact_data=contact_data,
+                    project_id=context.project_id,
+                    user_id=context.user_id,
+                    conversation_summary=parameters.get('conversation_summary', '')
+                )
             
             return {
                 'success': True,
@@ -502,8 +534,19 @@ class WorkflowManager:
         from .calendar_service import CalendarService
         from .notification_service import NotificationService
         
+        # Obtener configuración de agenda para el NotificationService
+        agenda_config = None
+        try:
+            from app.controler.chat.store.supabase_client import SupabaseClient
+            supabase_client = SupabaseClient()
+            response = supabase_client.client.table("agenda").select("*").eq("project_id", context.project_id).execute()
+            if response.data and len(response.data) > 0:
+                agenda_config = response.data[0]
+        except Exception as e:
+            self.logger.error(f"Error obteniendo configuración de agenda: {str(e)}")
+        
         calendar_service = CalendarService()
-        notification_service = NotificationService()
+        notification_service = NotificationService(cached_project_config=agenda_config)
         
         event_id = parameters.get('event_id')
         if not event_id:
@@ -553,8 +596,19 @@ class WorkflowManager:
         from .calendar_service import CalendarService
         from .notification_service import NotificationService
         
+        # Obtener configuración de agenda para el NotificationService
+        agenda_config = None
+        try:
+            from app.controler.chat.store.supabase_client import SupabaseClient
+            supabase_client = SupabaseClient()
+            response = supabase_client.client.table("agenda").select("*").eq("project_id", context.project_id).execute()
+            if response.data and len(response.data) > 0:
+                agenda_config = response.data[0]
+        except Exception as e:
+            self.logger.error(f"Error obteniendo configuración de agenda: {str(e)}")
+        
         calendar_service = CalendarService()
-        notification_service = NotificationService()
+        notification_service = NotificationService(cached_project_config=agenda_config)
         
         event_id = parameters.get('event_id')
         if not event_id:

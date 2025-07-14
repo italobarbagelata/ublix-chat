@@ -10,20 +10,104 @@ from langchain_core.messages import (
 )
 
 
+def _clean_orphaned_tool_calls(messages: List[BaseMessage]) -> List[BaseMessage]:
+    """
+    Remove AI messages with tool_calls that don't have corresponding tool responses.
+    This prevents OpenAI 400 errors about orphaned tool_call_ids.
+    """
+    clean_messages = []
+    
+    for i, message in enumerate(messages):
+        if isinstance(message, AIMessage) and hasattr(message, 'tool_calls') and message.tool_calls:
+            # Extract tool call IDs with robust handling of different formats
+            tool_call_ids = set()
+            
+            for tc in message.tool_calls:
+                try:
+                    # Handle different tool_call formats
+                    if hasattr(tc, 'id'):
+                        # LangChain ToolCall object
+                        tool_call_ids.add(tc.id)
+                    elif isinstance(tc, dict):
+                        # Dictionary format
+                        if 'id' in tc:
+                            tool_call_ids.add(tc['id'])
+                    else:
+                        # Convert to string and extract
+                        tc_str = str(tc)
+                        if 'id=' in tc_str:
+                            # Extract ID from string representation
+                            parts = tc_str.split('id=')
+                            if len(parts) > 1:
+                                id_part = parts[1].split(',')[0].split(' ')[0].strip("'\"")
+                                tool_call_ids.add(id_part)
+                except Exception as e:
+                    logging.warning(f"Error extracting tool_call ID: {e}")
+                    continue
+            
+            # Only check for responses if we found valid tool call IDs
+            if tool_call_ids:
+                # Look for tool responses in subsequent messages
+                has_all_responses = True
+                for tool_call_id in tool_call_ids:
+                    # Search for corresponding ToolMessage in remaining messages
+                    found_response = False
+                    for j in range(i + 1, len(messages)):
+                        if (isinstance(messages[j], ToolMessage) and 
+                            hasattr(messages[j], 'tool_call_id') and 
+                            messages[j].tool_call_id == tool_call_id):
+                            found_response = True
+                            break
+                    
+                    if not found_response:
+                        has_all_responses = False
+                        break
+                
+                if has_all_responses:
+                    clean_messages.append(message)
+                else:
+                    # Log the orphaned tool calls for debugging
+                    logging.warning(f" Removing AI message with orphaned tool_calls: {tool_call_ids}")
+                    # Skip this message to prevent OpenAI 400 error
+                    continue
+            else:
+                # No valid tool call IDs found, keep the message
+                clean_messages.append(message)
+        else:
+            # Non-AI message or AI message without tool_calls
+            clean_messages.append(message)
+    
+    return clean_messages
+
+
 def filter_and_prepare_messages_for_agent_node(state):
-    """Filters and prepares the messages for agent answer"""
+    """
+    Filters and prepares the messages for agent answer.
+    Ensures that AI messages with tool_calls have corresponding tool responses.
+    """
     logging.info("filter_and_prepare_messages_for_agent_node")
     messages = state["messages"]
     if messages is None:
         messages = []
         
+    original_count = len(messages)
     messages = [msg for msg in messages if not isinstance(msg, RemoveMessage)]
-    first_ai_index = next((i for i, msg in enumerate(messages) if isinstance(msg, AIMessage)), None)
+    
+    # Clean orphaned tool calls to prevent OpenAI 400 errors
+    clean_messages = _clean_orphaned_tool_calls(messages)
+    
+    # Log message counts for debugging
+    logging.info(f" Message counts: original={original_count}, after_remove={len(messages)}, after_clean={len(clean_messages)}")
+    
+    first_ai_index = next((i for i, msg in enumerate(clean_messages) if isinstance(msg, AIMessage)), None)
     
     if first_ai_index is None:
         first_ai_index = 0
 
-    filtered_messages = [msg for i, msg in enumerate(messages) if i >= first_ai_index or not isinstance(msg, ToolMessage)]
+    filtered_messages = [msg for i, msg in enumerate(clean_messages) if i >= first_ai_index or not isinstance(msg, ToolMessage)]
+    
+    logging.info(f" Final message count for agent: {len(filtered_messages)}")
+    
     return filtered_messages
 
 
@@ -31,6 +115,7 @@ def filter_and_prepare_messages_for_summary_node(state):
     """
     Filters and prepares the messages for summarization, normalizing their content. 
     Messages marked for Removal and Tools are also filtered out, and their content is normalized.
+    Also cleans orphaned tool calls to prevent issues.
     """
     
     logging.info("filter_and_prepare_messages_for_summary_node")
@@ -39,7 +124,11 @@ def filter_and_prepare_messages_for_summary_node(state):
         messages = []
     
     messages = [msg for msg in messages if not isinstance(msg, RemoveMessage)]
-    normalized_messages = [normalize_message(msg) for msg in messages]
+    
+    # Clean orphaned tool calls before processing
+    clean_messages = _clean_orphaned_tool_calls(messages)
+    
+    normalized_messages = [normalize_message(msg) for msg in clean_messages]
     filtered_messages = [msg for msg in normalized_messages if not isinstance(msg, ToolMessage)]
     return filtered_messages
 

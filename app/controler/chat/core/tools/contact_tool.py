@@ -1,4 +1,4 @@
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any
 from langchain.tools import BaseTool
 from app.controler.chat.services.contact_service import ContactService
 from pydantic import Field, PrivateAttr
@@ -291,10 +291,10 @@ def format_contact_info(contact: Optional[Dict[str, Any]]) -> str:
     if not contact:
         return "No hay información de contacto disponible"
     
-    base_info = f"""📋 INFORMACIÓN DE CONTACTO:
-👤 Nombre: {contact.get('name', 'No disponible')}
-📧 Email: {contact.get('email', 'No disponible')}
-📱 Teléfono: {contact.get('phone_number', 'No disponible')}"""
+    base_info = f""" INFORMACIÓN DE CONTACTO:
+ Nombre: {contact.get('name', 'No disponible')}
+ Email: {contact.get('email', 'No disponible')}
+ Teléfono: {contact.get('phone_number', 'No disponible')}"""
 
     # Agregar campos adicionales si existen
     additional_fields = contact.get('additional_fields', {})
@@ -307,7 +307,7 @@ def format_contact_info(contact: Optional[Dict[str, Any]]) -> str:
                 additional_fields = {}
         
         if additional_fields and isinstance(additional_fields, dict):
-            base_info += "\n\n🔍 INFORMACIÓN ADICIONAL:"
+            base_info += "\n\n INFORMACIÓN ADICIONAL:"
             for key, value in additional_fields.items():
                 formatted_key = key.replace('_', ' ').title()
                 base_info += f"\n• {formatted_key}: {value}"
@@ -338,71 +338,80 @@ class SaveContactTool(BaseTool):
             name="save_contact_tool",
             coroutine=self._arun,  # Usar método asíncrono por defecto para mejor rendimiento
             description="""
-            🚀 HERRAMIENTA INTELIGENTE DE GESTIÓN DE CONTACTOS CON CONTROL DE CALIDAD
+             HERRAMIENTA INTELIGENTE DE GESTIÓN DE CONTACTOS CON CONTROL DE CALIDAD
+            
+            🚨 IMPORTANTE PARA EL ASISTENTE:
+            - Si el usuario envía SOLO un número (ej: "312321312", "987654321"), 
+              usar: save_contact_tool(phone_number="312321312")
+            - Si el usuario envía SOLO un email (ej: "juan@gmail.com"),
+              usar: save_contact_tool(email="juan@gmail.com") 
+            - Si el usuario envía SOLO un nombre (ej: "María González"),
+              usar: save_contact_tool(name="María González")
+            - NUNCA llamar save_contact_tool() sin parámetros cuando el usuario proporcionó información
             
             ====================================================================
-            🎯 PROPÓSITO: Sistema controlado de captura y almacenamiento de información 
+             PROPÓSITO: Sistema controlado de captura y almacenamiento de información 
             de contacto. SOLO guarda campos adicionales definidos en contact_field_configs 
             para mantener la data limpia y estructurada.
             ====================================================================
             
-            📋 CAPACIDADES PRINCIPALES:
+             CAPACIDADES PRINCIPALES:
             
-            🔹 CAMPOS BASE (UNIVERSALES):
+             CAMPOS BASE (UNIVERSALES):
             • Nombre completo del usuario
             • Email de contacto  
             • Número de teléfono
             
-            🔹 CAMPOS DINÁMICOS (CONFIGURADOS EN contact_field_configs):
+             CAMPOS DINÁMICOS (CONFIGURADOS EN contact_field_configs):
             • SOLO campos definidos en la tabla contact_field_configs del proyecto
             • Bot de Inversiones: dirección, ciudad, edad, ha_invertido, experiencia_inversión
             • Bot de E-commerce: producto_interés, presupuesto, fecha_compra, método_pago
             • Bot de Servicios: tipo_servicio, urgencia, disponibilidad
             • NO guarda campos que no estén configurados (mantiene data limpia)
             
-            🧠 EXTRACCIÓN INTELIGENTE:
+             EXTRACCIÓN INTELIGENTE:
             • Analiza conversaciones completas para detectar información
             • Usa palabras clave configurables para cada campo
             • Soporta diferentes tipos de datos: string, number, boolean
             • Combina información existente con nueva información sin pérdida
             
             =====================================================================
-            🔧 MODOS DE OPERACIÓN:
+             MODOS DE OPERACIÓN:
             =====================================================================
             
-            📥 1. CAPTURA BÁSICA (SIN PARÁMETROS):
+             1. CAPTURA BÁSICA (SIN PARÁMETROS):
             save_contact_tool()
             → Muestra información existente del usuario
             → Si no existe, explica cómo capturar información
             
-            💾 2. ALMACENAMIENTO SELECTIVO (CAMPOS BASE):
+             2. ALMACENAMIENTO SELECTIVO (CAMPOS BASE):
             save_contact_tool(name="Juan Pérez")
             save_contact_tool(email="juan@email.com")
             save_contact_tool(phone_number="123456789")
             save_contact_tool(name="Juan", email="juan@email.com", phone_number="123456789")
             
-            🎯 3. CAMPOS DINÁMICOS (SOLO CONFIGURADOS):
+             3. CAMPOS DINÁMICOS (SOLO CONFIGURADOS):
             save_contact_tool(additional_fields='{"direccion": "Santiago", "edad": 30, "ha_invertido": true}')
-            # ⚠️ SOLO guarda campos que existan en contact_field_configs del proyecto
+            #  SOLO guarda campos que existan en contact_field_configs del proyecto
             save_contact_tool(name="Juan", additional_fields='{"producto_interes": "Laptop", "presupuesto": 500000}')
             
-            🤖 4. EXTRACCIÓN AUTOMÁTICA CON CONFIGURACIÓN DEL PROYECTO:
+             4. EXTRACCIÓN AUTOMÁTICA CON CONFIGURACIÓN DEL PROYECTO:
             save_contact_tool(
                 conversation_text="Hola, soy María, tengo 25 años y vivo en Valparaíso. He invertido antes en acciones.",
                 auto_extract=true
             )
             
-            🔧 5. EXTRACCIÓN AUTOMÁTICA CON CONFIGURACIÓN MANUAL:
+             5. EXTRACCIÓN AUTOMÁTICA CON CONFIGURACIÓN MANUAL:
             save_contact_tool(
                 conversation_text="Hola, soy María, tengo 25 años y vivo en Valparaíso. He invertido antes en acciones.",
                 field_config='{"edad": {"keywords": ["tengo", "años"], "type": "number"}, "ciudad": {"keywords": ["vivo en"], "type": "string"}, "ha_invertido": {"keywords": ["he invertido", "inversión"], "type": "boolean"}}'
             )
             
             =====================================================================
-            📊 CONFIGURACIONES PREDEFINIDAS POR TIPO DE BOT:
+             CONFIGURACIONES PREDEFINIDAS POR TIPO DE BOT:
             =====================================================================
             
-            💰 BOT DE INVERSIONES:
+             BOT DE INVERSIONES:
             {
                 "direccion": {"keywords": ["vivo en", "mi dirección"], "type": "string"},
                 "ciudad": {"keywords": ["ciudad", "vivo en"], "type": "string"},  
@@ -411,7 +420,7 @@ class SaveContactTool(BaseTool):
                 "experiencia_inversion": {"keywords": ["experiencia", "años invirtiendo"], "type": "string"}
             }
             
-            🛒 BOT DE E-COMMERCE:
+             BOT DE E-COMMERCE:
             {
                 "producto_interes": {"keywords": ["me interesa", "quiero", "busco"], "type": "string"},
                 "presupuesto": {"keywords": ["presupuesto", "puedo pagar"], "type": "number"},
@@ -419,7 +428,7 @@ class SaveContactTool(BaseTool):
                 "metodo_pago": {"keywords": ["pago", "transferencia", "tarjeta"], "type": "string"}
             }
             
-            🔧 BOT DE SERVICIOS:
+             BOT DE SERVICIOS:
             {
                 "tipo_servicio": {"keywords": ["necesito", "servicio", "requiero"], "type": "string"},
                 "urgencia": {"keywords": ["urgente", "pronto", "rápido"], "type": "string"},
@@ -427,25 +436,25 @@ class SaveContactTool(BaseTool):
             }
             
             =====================================================================
-            💡 EJEMPLOS DE USO PRÁCTICOS:
+             EJEMPLOS DE USO PRÁCTICOS:
             =====================================================================
             
-            📝 CASO 1 - Usuario menciona información básica:
+             CASO 1 - Usuario menciona información básica:
             Usuario: "Hola, soy Juan Pérez, mi email es juan@gmail.com"
             → save_contact_tool(name="Juan Pérez", email="juan@gmail.com")
             
-            📝 CASO 2 - Usuario da información específica de inversiones:
+             CASO 2 - Usuario da información específica de inversiones:
             Usuario: "Tengo 35 años, vivo en Santiago y ya he invertido en acciones antes"
             → save_contact_tool(
                 conversation_text="Tengo 35 años, vivo en Santiago y ya he invertido en acciones antes",
                 field_config='{"edad": {"keywords": ["tengo", "años"], "type": "number"}, "ciudad": {"keywords": ["vivo en"], "type": "string"}, "ha_invertido": {"keywords": ["he invertido", "acciones"], "type": "boolean"}}'
             )
             
-            📝 CASO 3 - Actualización de información específica:
+             CASO 3 - Actualización de información específica:
             → save_contact_tool(additional_fields='{"presupuesto": 1000000, "urgencia": "alta"}')
             
             =====================================================================
-            🔄 INTEGRACIÓN AUTOMÁTICA:
+             INTEGRACIÓN AUTOMÁTICA:
             =====================================================================
             • Se integra con google_calendar_tool para emails automáticos
             • Proporciona datos a send_email para personalización
@@ -453,7 +462,7 @@ class SaveContactTool(BaseTool):
             • Usado por otras herramientas para obtener datos del usuario
             
             =====================================================================
-            ⚡ FUNCIONALIDADES AVANZADAS:
+             FUNCIONALIDADES AVANZADAS:
             =====================================================================
             • Validación automática de formatos (email, teléfono)
             • Combinación inteligente de información nueva con existente
@@ -497,17 +506,79 @@ class SaveContactTool(BaseTool):
         except json.JSONDecodeError:
             return {}
 
+    def _extract_recent_user_message(self) -> Optional[str]:
+        """
+        Simula la extracción del mensaje más reciente del usuario.
+        En una implementación real, esto vendría del contexto de la conversación.
+        """
+        # Por ahora, retornar None para que use conversation_text si está disponible
+        # En el futuro, esto se puede conectar al contexto real de la conversación
+        return None
+    
+    def _extract_basic_contact_info(self, message: str) -> Dict[str, Optional[str]]:
+        """
+        Extrae información básica de contacto usando patrones simples.
+        Especialmente útil para números de teléfono enviados como texto plano.
+        """
+        contact_info = {
+            "name": None,
+            "email": None,  
+            "phone_number": None
+        }
+        
+        import re
+        
+        # Patrón para email
+        email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+        email_match = re.search(email_pattern, message)
+        if email_match:
+            contact_info["email"] = email_match.group(0)
+        
+        # Patrón para números de teléfono - más flexible para números como "342423423"
+        phone_patterns = [
+            r'\b\d{9,12}\b',  # 9-12 dígitos consecutivos (como 342423423)
+            r'\+?\d{1,3}[-.\s]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}',  # Formatos estándar
+            r'\b\d{3}[-.\s]?\d{3}[-.\s]?\d{3,4}\b'  # Formato chileno típico
+        ]
+        
+        for pattern in phone_patterns:
+            phone_match = re.search(pattern, message)
+            if phone_match:
+                phone = phone_match.group(0)
+                # Validar que sea un número válido (no solo números secuenciales cortos)
+                if len(re.sub(r'[^\d]', '', phone)) >= 8:  # Al menos 8 dígitos
+                    contact_info["phone_number"] = phone
+                    break
+        
+        # Patrón básico para nombres (palabras con mayúscula inicial)
+        # Solo detectar si hay palabras como "soy", "me llamo", etc.
+        name_patterns = [
+            r'(?:soy|me llamo|mi nombre es)\s+([A-Z][a-záéíóúñ]+(?:\s+[A-Z][a-záéíóúñ]+)*)',
+            r'([A-Z][a-záéíóúñ]+\s+[A-Z][a-záéíóúñ]+)'  # Dos palabras con mayúscula
+        ]
+        
+        for pattern in name_patterns:
+            name_match = re.search(pattern, message, re.IGNORECASE)
+            if name_match:
+                potential_name = name_match.group(1) if len(name_match.groups()) > 0 else name_match.group(0)
+                # Validar que no sea un número o algo irrelevante
+                if not re.match(r'^\d+$', potential_name.replace(' ', '')):
+                    contact_info["name"] = potential_name.strip()
+                    break
+        
+        return contact_info
+
     def _get_update_message(self, existing: dict, updated: dict) -> str:
         """Genera un mensaje describiendo los cambios realizados."""
         changes = []
         
         # Cambios en campos base
         if updated.get('name') and updated['name'] != existing.get('name'):
-            changes.append(f"👤 Nombre: {existing.get('name', 'No disponible')} → {updated['name']}")
+            changes.append(f" Nombre: {existing.get('name', 'No disponible')} → {updated['name']}")
         if updated.get('email') and updated['email'] != existing.get('email'):
-            changes.append(f"📧 Email: {existing.get('email', 'No disponible')} → {updated['email']}")
+            changes.append(f" Email: {existing.get('email', 'No disponible')} → {updated['email']}")
         if updated.get('phone_number') and updated['phone_number'] != existing.get('phone_number'):
-            changes.append(f"📱 Teléfono: {existing.get('phone_number', 'No disponible')} → {updated['phone_number']}")
+            changes.append(f" Teléfono: {existing.get('phone_number', 'No disponible')} → {updated['phone_number']}")
         
         # Cambios en campos adicionales
         existing_additional = existing.get('additional_fields', {})
@@ -533,14 +604,14 @@ class SaveContactTool(BaseTool):
         for key, value in updated_additional.items():
             if key not in existing_additional:
                 formatted_key = key.replace('_', ' ').title()
-                changes.append(f"🔹 {formatted_key}: Nuevo → {value}")
+                changes.append(f" {formatted_key}: Nuevo → {value}")
             elif existing_additional[key] != value:
                 formatted_key = key.replace('_', ' ').title()
-                changes.append(f"🔹 {formatted_key}: {existing_additional[key]} → {value}")
+                changes.append(f" {formatted_key}: {existing_additional[key]} → {value}")
         
         if changes:
-            return f"✅ INFORMACIÓN ACTUALIZADA:\n" + "\n".join(changes)
-        return "ℹ️ No se realizaron cambios en la información."
+            return f" INFORMACIÓN ACTUALIZADA:\n" + "\n".join(changes)
+        return " No se realizaron cambios en la información."
 
     def _run(
         self, 
@@ -570,7 +641,7 @@ class SaveContactTool(BaseTool):
                 return self._run_sync_helper(name, email, phone_number, additional_fields, conversation_text, field_config, auto_extract)
                 
         except Exception as e:
-            return f"❌ Error al procesar contacto: {str(e)}"
+            return f" Error al procesar contacto: {str(e)}"
 
     def _run_sync_helper(
         self, 
@@ -592,19 +663,19 @@ class SaveContactTool(BaseTool):
                     self.project_id, self.user_id, conversation_text
                 ))
                 if result:
-                    return f"""✅ INFORMACIÓN CAPTURADA AUTOMÁTICAMENTE:
+                    return f""" INFORMACIÓN CAPTURADA AUTOMÁTICAMENTE:
 {self._format_contact_info(result)}
 
-🎯 Campos detectados usando configuración del proyecto."""
+ Campos detectados usando configuración del proyecto."""
                 else:
                     # Si no se extrajo nada, mostrar información existente
                     existing = asyncio.run(self._get_existing_contact())
                     if existing:
-                        return f"""ℹ️ No se detectaron campos nuevos para extraer.
+                        return f""" No se detectaron campos nuevos para extraer.
 
 {self._format_contact_info(existing)}"""
                     else:
-                        return "ℹ️ No se detectó información para capturar automáticamente."
+                        return " No se detectó información para capturar automáticamente."
             
             # Modo 1B: Extracción con configuración manual
             if conversation_text and field_config:
@@ -614,44 +685,83 @@ class SaveContactTool(BaseTool):
                         self.project_id, self.user_id, conversation_text, config
                     ))
                     if result:
-                        return f"""🤖 EXTRACCIÓN AUTOMÁTICA COMPLETADA (CONFIG MANUAL):
+                        return f""" EXTRACCIÓN AUTOMÁTICA COMPLETADA (CONFIG MANUAL):
 {self._format_contact_info(result)}
 
-✨ Se analizó la conversación y se extrajeron {len(config)} campos automáticamente."""
+ Se analizó la conversación y se extrajeron {len(config)} campos automáticamente."""
                     else:
-                        return "🔍 No se pudo extraer información adicional de la conversación con la configuración proporcionada."
+                        return " No se pudo extraer información adicional de la conversación con la configuración proporcionada."
             
             # Parsear campos adicionales si se proporcionaron
             additional_fields_dict = None
             if additional_fields:
                 additional_fields_dict = self._parse_additional_fields(additional_fields)
             
-            # Modo 2: Si no se proporcionó información, mostrar información existente
+            # Modo 2: Si no se proporcionó información directa, intentar extracción automática
             if not any([name, email, phone_number, additional_fields_dict]):
+                # CRÍTICO: Intentar extracción automática del último mensaje del usuario
+                # Esto es especialmente importante para números de teléfono enviados como texto simple
+                try:
+                    # Obtener el mensaje más reciente de la conversación (usuario enviado al tool)
+                    # Simular conversation_text con un mensaje típico que contenga la información
+                    recent_message = conversation_text or self._extract_recent_user_message()
+                    
+                    if recent_message:
+                        # Intentar extracción automática con la configuración del proyecto
+                        extraction_result = asyncio.run(auto_extract_fields_async(
+                            self.project_id, self.user_id, recent_message
+                        ))
+                        
+                        if extraction_result:
+                            return f"""✅ INFORMACIÓN DETECTADA AUTOMÁTICAMENTE:
+{self._format_contact_info(extraction_result)}
+
+📋 Se extrajo automáticamente de su mensaje: "{recent_message[:50]}..." """
+                        
+                        # Si la extracción automática no funcionó, intentar patrones básicos
+                        basic_extraction = self._extract_basic_contact_info(recent_message)
+                        if any(basic_extraction.values()):
+                            extraction_result = asyncio.run(save_contact_async(
+                                self.project_id, 
+                                self.user_id,
+                                name=basic_extraction.get('name'),
+                                email=basic_extraction.get('email'), 
+                                phone_number=basic_extraction.get('phone_number')
+                            ))
+                            if extraction_result:
+                                return f"""✅ NÚMERO DE TELÉFONO GUARDADO:
+{self._format_contact_info(extraction_result)}
+
+📱 Se detectó automáticamente: {basic_extraction.get('phone_number')}"""
+                except Exception as e:
+                    # Si la extracción automática falla, continuar con el flujo normal
+                    pass
+                
+                # Flujo original: mostrar información existente o instrucciones
                 contact = asyncio.run(self._get_existing_contact())
                 if contact:
                     return self._format_contact_info(contact)
                 else:
                     examples = get_field_config_examples()
-                    return f"""📝 NO HAY INFORMACIÓN DE CONTACTO GUARDADA AÚN
+                    return f""" NO HAY INFORMACIÓN DE CONTACTO GUARDADA AÚN
                     
-🔧 FORMAS DE GUARDAR INFORMACIÓN:
+ FORMAS DE GUARDAR INFORMACIÓN:
 
-📋 1. CAMPOS BÁSICOS:
+ 1. CAMPOS BÁSICOS:
 • save_contact_tool(name="Juan Pérez")
 • save_contact_tool(email="juan@email.com") 
 • save_contact_tool(phone_number="123456789")
 
-🎯 2. CAMPOS DINÁMICOS:
+ 2. CAMPOS DINÁMICOS:
 • save_contact_tool(additional_fields='{{"direccion": "Santiago", "edad": 30}}')
 
-🤖 3. EXTRACCIÓN AUTOMÁTICA:
+ 3. EXTRACCIÓN AUTOMÁTICA:
 • save_contact_tool(
     conversation_text="texto de la conversación",
     field_config='{{"edad": {{"keywords": ["tengo", "años"], "type": "number"}}}}'
 )
 
-💡 CONFIGURACIONES PREDEFINIDAS:
+ CONFIGURACIONES PREDEFINIDAS:
 • Bot de Inversiones: {list(examples['bot_inversiones'].keys())}
 • Bot de E-commerce: {list(examples['bot_ecommerce'].keys())}
 • Bot de Servicios: {list(examples['bot_servicios'].keys())}
@@ -660,7 +770,10 @@ IMPORTANTE: Si el usuario ha mencionado información de contacto en la conversac
 extrae esa información y úsala para guardar los datos."""
 
             # Modo 3: Guardar o actualizar contacto
-            existing_contact = asyncio.run(self._get_existing_contact())
+            try:
+                existing_contact = asyncio.run(self._get_existing_contact())
+            except Exception as e:
+                existing_contact = None
             
             contact = asyncio.run(save_contact_async(
                 self.project_id, 
@@ -677,20 +790,20 @@ extrae esa información y úsala para guardar los datos."""
                     return self._get_update_message(existing_contact, contact)
                 else:
                     # Es un nuevo contacto
-                    return f"""🎉 NUEVO CONTACTO CREADO EXITOSAMENTE:
+                    return f""" NUEVO CONTACTO CREADO EXITOSAMENTE:
 {self._format_contact_info(contact)}
 
-🔄 Esta información se usará automáticamente para:
-• 📧 Enviar emails personalizados
-• 📅 Crear eventos de calendario con el email como asistente
-• 🔌 Ejecutar APIs que requieran datos de contacto
-• 🎯 Personalizar respuestas con información del usuario
-• 💼 Seguimiento de leads y conversiones"""
+ Esta información se usará automáticamente para:
+•  Enviar emails personalizados
+•  Crear eventos de calendario con el email como asistente
+•  Ejecutar APIs que requieran datos de contacto
+•  Personalizar respuestas con información del usuario
+•  Seguimiento de leads y conversiones"""
             else:
-                return "❌ No se pudo guardar el contacto. Verifica que la información esté en formato válido."
+                return " No se pudo guardar el contacto. Verifica que la información esté en formato válido."
                 
         except Exception as e:
-            return f"❌ Error al procesar contacto: {str(e)}"
+            return f" Error al procesar contacto: {str(e)}"
 
     async def _arun(
         self, 
@@ -710,10 +823,10 @@ extrae esa información y úsala para guardar los datos."""
                     self.project_id, self.user_id, conversation_text
                 )
                 if result:
-                    return f"""🤖 EXTRACCIÓN AUTOMÁTICA COMPLETADA (CONFIG PROYECTO):
+                    return f""" EXTRACCIÓN AUTOMÁTICA COMPLETADA (CONFIG PROYECTO):
 {self._format_contact_info(result)}"""
                 else:
-                    return "🔍 No se encontró información para extraer con la configuración del proyecto."
+                    return " No se encontró información para extraer con la configuración del proyecto."
             
             # Modo extracción automática con configuración manual
             if conversation_text and field_config:
@@ -723,25 +836,53 @@ extrae esa información y úsala para guardar los datos."""
                         self.project_id, self.user_id, conversation_text, config
                     )
                     if result:
-                        return f"""🤖 EXTRACCIÓN AUTOMÁTICA COMPLETADA (CONFIG MANUAL):
+                        return f""" EXTRACCIÓN AUTOMÁTICA COMPLETADA (CONFIG MANUAL):
 {self._format_contact_info(result)}"""
                     else:
-                        return "🔍 No se encontró información para extraer."
+                        return " No se encontró información para extraer."
 
             # Parsear campos adicionales
             additional_fields_dict = None
             if additional_fields:
                 additional_fields_dict = self._parse_additional_fields(additional_fields)
 
-            # Verificar información existente
-            existing_contact = await self._get_existing_contact()
-            
-            # Si no hay datos nuevos y existe información, mostrarla
-            if existing_contact and not any([name, email, phone_number, additional_fields_dict]):
-                return self._format_contact_info(existing_contact)
+            # Si no hay datos nuevos, intentar extracción automática o mostrar información existente
+            if not any([name, email, phone_number, additional_fields_dict]):
+                # CRÍTICO: Intentar extracción automática del texto de conversación
+                if conversation_text:
+                    basic_extraction = self._extract_basic_contact_info(conversation_text)
+                    if any(basic_extraction.values()):
+                        extraction_result = await save_contact_async(
+                            self.project_id, 
+                            self.user_id,
+                            name=basic_extraction.get('name'),
+                            email=basic_extraction.get('email'), 
+                            phone_number=basic_extraction.get('phone_number')
+                        )
+                        if extraction_result:
+                            return f"""✅ INFORMACIÓN DETECTADA Y GUARDADA:
+{self._format_contact_info(extraction_result)}
+
+📱 Detectado de: "{conversation_text[:50]}..." """
+                
+                # Verificar información existente
+                existing_contact = await self._get_existing_contact()
+                if existing_contact:
+                    return self._format_contact_info(existing_contact)
+                else:
+                    return """❌ No se proporcionó información para guardar.
+                    
+⚠️ IMPORTANTE: Si el usuario envió un número de teléfono, email o nombre, 
+use los parámetros correspondientes del tool (phone_number, email, name)."""
 
             # Guardar o actualizar información
             if any([name, email, phone_number, additional_fields_dict]):
+                # Obtener contacto existente para determinar si es creación o actualización
+                try:
+                    existing_contact = await self._get_existing_contact()
+                except Exception as e:
+                    existing_contact = None
+                
                 result = await save_contact_async(
                     project_id=self.project_id,
                     user_id=self.user_id,
@@ -755,13 +896,13 @@ extrae esa información y úsala para guardar los datos."""
                     if existing_contact:
                         return self._get_update_message(existing_contact, result)
                     else:
-                        return f"""🎉 CONTACTO GUARDADO EXITOSAMENTE:
+                        return f""" CONTACTO GUARDADO EXITOSAMENTE:
 {self._format_contact_info(result)}"""
                 else:
-                    return "❌ No se pudo guardar la información de contacto."
+                    return " No se pudo guardar la información de contacto."
             
-            return "ℹ️ No se proporcionó información para actualizar."
+            return " No se proporcionó información para actualizar."
                 
         except Exception as e:
             logging.error(f"Error al procesar contacto: {str(e)}")
-            return f"❌ Error al procesar contacto: {str(e)}" 
+            return f" Error al procesar contacto: {str(e)}" 

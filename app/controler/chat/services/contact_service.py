@@ -298,7 +298,12 @@ class ContactService:
         Args:
             additional_fields: Campos adicionales como JSON (ej: {"direccion": "Santiago", "edad": 30})
         """
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"🔄 Intentando guardar contacto - user_id={user_id}, project_id={project_id}, name={name}, phone={phone_number}, email={email}, additional_fields={additional_fields}")
+        
         if not any([name, phone_number, email, additional_fields]):
+            logger.warning(f"⚠️ No hay datos suficientes para guardar contacto - user_id={user_id}")
             return None
 
         try:
@@ -332,7 +337,15 @@ class ContactService:
                 
                 response = self.client.client.table("contacts").update(update_data).eq("id", contact["id"]).execute()
                 if response.data and len(response.data) > 0:
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.info(f"✅ Contacto actualizado exitosamente para user_id={user_id}: {response.data[0]}")
                     return response.data[0]
+                else:
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.warning(f"⚠️ Actualización de contacto no retornó datos para user_id={user_id}, response: {response}")
+                    return None
             else:
                 # Crear nuevo contacto
                 new_contact = {
@@ -352,9 +365,21 @@ class ContactService:
                 
                 response = self.client.client.table("contacts").insert(new_contact).execute()
                 if response.data and len(response.data) > 0:
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.info(f"✅ Nuevo contacto creado exitosamente para user_id={user_id}: {response.data[0]}")
                     return response.data[0]
+                else:
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.warning(f"⚠️ Creación de contacto no retornó datos para user_id={user_id}, response: {response}")
+                    return None
 
         except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"❌ Error guardando/actualizando contacto para user_id={user_id}, project_id={project_id}: {str(e)}")
+            logger.error(f"❌ Datos que se intentaban guardar: name={name}, phone={phone_number}, email={email}, additional_fields={additional_fields}")
             print(f"Error saving/updating contact: {str(e)}")
             return None
 

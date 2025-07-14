@@ -199,6 +199,7 @@ class CalendarService:
                          attendee_email: str = "",
                          description: str = "",
                          include_meet: bool = True,
+                         force_create: bool = False,
                          project_id: str = "unknown",
                          project: Any = None) -> Dict[str, Any]:
         """
@@ -236,6 +237,9 @@ class CalendarService:
             if include_meet:
                 query_parts.append("meet=true")
             
+            if force_create:
+                query_parts.append("force_create=true")
+            
             calendar_query = "|".join(query_parts)
             
             # Preparar estado con configuración de agenda en lugar de proyecto
@@ -260,7 +264,13 @@ class CalendarService:
             # Parsear resultado
             if isinstance(result, str):
                 if "exitosamente" in result or "successfully" in result:
-                    event_data = self._parse_event_creation_result(result)
+                    event_data = self._parse_event_creation_result(result, {
+                        'title': title,
+                        'start_datetime': start_datetime,
+                        'end_datetime': end_datetime,
+                        'description': description,
+                        'attendee_email': attendee_email
+                    })
                     return {
                         'success': True,
                         'event_id': event_data.get('event_id'),
@@ -517,9 +527,19 @@ class CalendarService:
         
         return conflicts
     
-    def _parse_event_creation_result(self, result_text: str) -> Dict[str, Any]:
+    def _parse_event_creation_result(self, result_text: str, original_params: Dict[str, Any] = None) -> Dict[str, Any]:
         """Parsea resultado de creación de evento."""
         event_data = {}
+        
+        # Incluir parámetros originales si están disponibles
+        if original_params:
+            event_data.update({
+                'title': original_params.get('title', ''),
+                'start_time': original_params.get('start_datetime', ''),
+                'end_time': original_params.get('end_datetime', ''),
+                'description': original_params.get('description', ''),
+                'attendee_email': original_params.get('attendee_email', '')
+            })
         
         # Extraer URL del evento
         if "http" in result_text:

@@ -65,7 +65,7 @@ async def get_user_accumulated_context(user_id: str, project_id: str) -> list:
         from app.controler.chat import get_and_clear_accumulated_context
         return await get_and_clear_accumulated_context(user_id, project_id)
     except Exception as e:
-        logging.error(f"❌ Error obteniendo contexto acumulado: {str(e)}")
+        logging.error(f"Error getting accumulated context: {str(e)}")
         return []
 
 def build_message_with_context(original_message: str, accumulated_context: list) -> str:
@@ -139,7 +139,11 @@ class Graph():
         logging.info(f"* Setting edges for project {self.state.project_id} and user {self.state.user_id}")
         workflow = self.workflow
         workflow.add_edge(START, "agent")
-        workflow.add_conditional_edges("agent", invoke_tools_summary)
+        # FIXED: Add explicit mapping for conditional edges to prevent infinite loops
+        workflow.add_conditional_edges("agent", invoke_tools_summary, {
+            "tools": "tools",
+            "summarize_conversation": "summarize_conversation"
+        })
         workflow.add_edge("tools", "agent")
         workflow.add_edge("summarize_conversation", END)
         
@@ -196,7 +200,7 @@ class Graph():
     async def execute(self, message, debug=False):
         unique_id = self.unique_id
         start_time = time.time()
-        logging.info(unique_id + " Execution init!")
+        logging.info(f"{unique_id} Graph execution started for project {self.state.project_id}, user {self.state.user_id}")
         loop = asyncio.get_event_loop()
 
         # Obtener el proyecto en paralelo mientras preparamos el mensaje
@@ -217,7 +221,7 @@ class Graph():
         # Esperar por el proyecto
         project = await project_future
 
-        logging.info(unique_id + " Invoking graph!")
+        logging.info(f"{unique_id} Invoking LangGraph with initial message: '{message[:100]}...'" if len(message) > 100 else f"{unique_id} Invoking LangGraph with message: '{message}'")
 
         # Ejecutar el graph (esto no se puede paralelizar fácilmente)
         final_state = await self.graph.ainvoke(
@@ -236,7 +240,7 @@ class Graph():
             {"configurable": {"thread_id": user_id}}
         )
 
-        logging.info(unique_id + " Execution finished")
+        logging.info(f"{unique_id} Graph execution completed successfully")
 
         # Procesar el estado de memoria
         final_memory_state = self.graph.checkpointer.storage.get(user_id)
@@ -249,12 +253,21 @@ class Graph():
         if not isinstance(nested_dict, OrderedDict):
             nested_dict = OrderedDict(nested_dict)
 
-        # 🧠 SISTEMA DE MEMORIA INTELIGENTE
-        # Usar IntelligentMemoryManager para priorizar mensajes importantes
-        MAX_KEYS = 10  # Aumentado para preservar más contexto importante
+        # 🧠 SISTEMA DE MEMORIA INTELIGENTE AVANZADO
+        # Usar el nuevo sistema adaptativo que calcula automáticamente el tamaño óptimo
+        state_dict = IntelligentMemoryManager.optimize_memory_state(state_dict)
         
-        # Optimizar usando el sistema de memoria inteligente
-        state_dict = IntelligentMemoryManager.optimize_memory_state(state_dict, MAX_KEYS)
+        # Generar analíticas de memoria para monitoreo
+        memory_analytics = IntelligentMemoryManager.get_memory_analytics(state_dict)
+        logging.debug(f"Memory analytics: {memory_analytics}")
+        
+        # Obtener sugerencias de optimización
+        optimization_suggestions = IntelligentMemoryManager.suggest_memory_optimization(state_dict)
+        if optimization_suggestions:
+            logging.debug(f"Memory optimization suggestions: {len(optimization_suggestions)} items")
+        
+        # Crear backup de elementos críticos
+        backup_hash = IntelligentMemoryManager.create_memory_backup(state_dict)
         self.state.state = state_dict
 
         logging.info(unique_id + " saving state")
@@ -278,7 +291,7 @@ class Graph():
         # Calcular tiempo de procesamiento
         processing_time = time.time() - start_time
 
-        logging.info(unique_id + " Execution finished")
+        logging.info(f"{unique_id} Graph execution completed successfully")
         logging.info(unique_id + " Response: " + ai_response.content)
         logging.info(unique_id + f" Processing time: {processing_time:.2f}s")
 
@@ -389,9 +402,13 @@ class Graph():
             if not isinstance(nested_dict, OrderedDict):
                 nested_dict = OrderedDict(nested_dict)
                 
-            # 🧠 SISTEMA DE MEMORIA INTELIGENTE para streaming
-            MAX_KEYS = 10
-            state_dict = IntelligentMemoryManager.optimize_memory_state(state_dict, MAX_KEYS)
+            # 🧠 SISTEMA DE MEMORIA INTELIGENTE AVANZADO para streaming
+            state_dict = IntelligentMemoryManager.optimize_memory_state(state_dict)
+            
+            # Log analíticas en modo debug para streaming
+            if logging.getLogger().isEnabledFor(logging.DEBUG):
+                memory_analytics = IntelligentMemoryManager.get_memory_analytics(state_dict)
+                logging.debug(f"Streaming memory analytics: {memory_analytics}")
             self.state.state = state_dict
             
             # Guardar estado y generar resumen en segundo plano
@@ -406,7 +423,7 @@ class Graph():
             )
             
         except CircuitBreakerOpenError as e:
-            logging.error(f"🚫 Circuit breaker abierto en streaming: {str(e)}")
+            logging.error(f"Circuit breaker open during streaming: {str(e)}")
             yield {
                 "type": "error",
                 "error": "Servicio temporalmente no disponible. Intenta en unos minutos.",
@@ -415,7 +432,7 @@ class Graph():
                 "retry_after": 60
             }
         except Exception as e:
-            logging.error(f"❌ Error en streaming: {str(e)}", exc_info=True)
+            logging.error(f"Error in streaming execution: {str(e)}", exc_info=True)
             
             # Clasificar tipo de error para mejor manejo
             error_type = type(e).__name__
@@ -465,10 +482,10 @@ class Graph():
             return "⚙️ Ocurrió un error interno. El equipo técnico ha sido notificado."
         
         elif error_type == "ValueError":
-            return "📊 Los valores proporcionados no son correctos. Verifica la información e intenta nuevamente."
+            return "Los valores proporcionados no son correctos. Verifica la información e intenta nuevamente."
         
         else:
-            return "❌ Ocurrió un error inesperado. Por favor intenta nuevamente o contacta soporte si el problema persiste."
+            return "Ocurrió un error inesperado. Por favor intenta nuevamente o contacta soporte si el problema persiste."
     
     def get_error_stats(self) -> dict:
         """

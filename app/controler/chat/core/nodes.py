@@ -53,7 +53,8 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
             
             IMPORTANTE: Usa esta información para NO repetir preguntas que ya fueron respondidas.
             """
-            logging.info(f"summary: {summary}")
+            logging.info(f"{unique_id} Using conversation summary: {len(summary)} characters")
+            logging.debug(f"{unique_id} Summary content: {summary[:100]}..." if len(summary) > 100 else f"{unique_id} Summary content: {summary}")
         
         prompt_general_skeleton = prompt_general_skeleton.replace("{name}", project_name)
         prompt_general_skeleton = prompt_general_skeleton.replace("{personality}", personality_prompt)
@@ -146,9 +147,19 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
                 
         messages.insert(0, SystemMessage(content=prompt_general_skeleton))
 
-        logging.info(f"🔧 TOOLS DISPONIBLES: {[getattr(tool, 'name', getattr(tool, '__name__', str(tool))) for tool in tools]}")
+        tool_names = [getattr(tool, 'name', getattr(tool, '__name__', str(tool))) for tool in tools]
+        logging.info(f"{unique_id} Agent executing with {len(tools)} tools available: {tool_names}")
+        logging.debug(f"{unique_id} Invoking LLM with {len(messages)} messages")
         response = model_with_tools.invoke(messages)
         decorate_message(response, state["exec_init"], state["conversation_id"])
+        
+        # Log important information about the response
+        has_tool_calls = hasattr(response, 'tool_calls') and response.tool_calls
+        if has_tool_calls:
+            tool_call_names = [tc.get('name', 'unknown') if isinstance(tc, dict) else getattr(tc, 'name', 'unknown') for tc in response.tool_calls]
+            logging.info(f"{unique_id} Agent generated response with {len(response.tool_calls)} tool calls: {tool_call_names}")
+        else:
+            logging.info(f"{unique_id} Agent generated text response only (no tool calls)")
 
         return {"messages": [response]}
 
@@ -212,17 +223,25 @@ def get_date_range() -> list:
     return date_range_str
 
 def resume_conversation(state: CustomState):
-    logging.info(state["unique_id"] + " Node 2: The resume conversation has been initialized...")
+    unique_id = state.get("unique_id", "unknown")
+    logging.info(f"{unique_id} Summarizing conversation and cleaning up messages...")
 
     with concurrent.futures.ThreadPoolExecutor() as executor:
         executor.submit(Persist().persist_conversation, state)
 
-    delete_messages = [RemoveMessage(id=m.id) for m in state["messages"][:-20]]
-    logging.info(f"Delete Messages:\n {delete_messages}")
+    messages = state.get("messages", [])
+    if len(messages) > 20:
+        delete_messages = [RemoveMessage(id=m.id) for m in messages[:-20]]
+        logging.info(f"{unique_id} Removing {len(delete_messages)} old messages, keeping last 20")
+    else:
+        delete_messages = []
+        logging.info(f"{unique_id} No messages to remove, total: {len(messages)}")
 
     return {"messages": delete_messages}
 
 async def tools_node(project_id, user_id, name, number_phone_agent, unique_id, project):
-    logging.info(unique_id + " Initiating tools node...")
+    logging.info(f"{unique_id} Initiating tools node for project {project_id}")
     tools = await agent_tools(project_id, user_id, name, number_phone_agent, unique_id, project)
+    tool_names = [getattr(tool, 'name', getattr(tool, '__name__', str(tool))) for tool in tools]
+    logging.info(f"{unique_id} Tools node configured with {len(tools)} tools: {tool_names}")
     return ToolNode(tools)

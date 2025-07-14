@@ -14,7 +14,8 @@ from app.controler.chat.core.tools.contact_tool import SaveContactTool
 from app.controler.chat.core.tools.email_tool import EmailTool
 from app.controler.chat.core.tools.image_processor_tool import ImageProcessorTool
 from app.controler.chat.core.tools.calendar_tool import google_calendar_tool, test_calendar_connectivity
-from app.controler.chat.core.tools.agenda_tool import AgendaTool
+from app.controler.chat.core.tools.agenda_tool_refactored import AgendaToolRefactored
+from app.controler.chat.core.tools.mcp_tool_factory import create_mcp_tools_for_project
 
 
 import logging
@@ -115,11 +116,24 @@ async def agent_tools(project_id: str, user_id: str, name: str, number_phone_age
         logging.info("Herramienta habilitada: email")
     
     if "agenda_tool" in project.enabled_tools:
-        always_available_tools.append(AgendaTool(project_id, project, user_id))
-        logging.info("Herramienta habilitada: agenda_tool")
+        # Usar la versión refactorizada con servicios especializados
+        always_available_tools.append(AgendaToolRefactored(project_id, project, user_id))
+        logging.info("Herramienta habilitada: agenda_tool_refactored")
 
     
     tools.extend(always_available_tools)
+    
+    # Agregar herramientas MCP si están habilitadas
+    mcp_tools_enabled = [tool for tool in project.enabled_tools if tool.startswith("mcp_")]
+    if mcp_tools_enabled:
+        try:
+            # Crear herramientas MCP de forma asíncrona
+            mcp_tools = await create_mcp_tools_for_project(project_id, mcp_tools_enabled)
+            tools.extend(mcp_tools)
+            logging.info(f"Herramientas MCP habilitadas: {[tool.name for tool in mcp_tools]}")
+        except Exception as e:
+            logging.error(f"Error cargando herramientas MCP: {str(e)}")
+            # Continuar sin herramientas MCP si hay error
 
     logging.info(f"Se inicializaron las tools: {[getattr(tool, 'name', str(tool)) for tool in tools]}")
     logging.info(f"Total de tools creadas: {len(tools)}")

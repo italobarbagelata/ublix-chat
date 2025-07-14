@@ -29,7 +29,7 @@ from app.controler.chat.core.tools.contact_tool import SaveContactTool
 from app.controler.chat.core.tools.email_tool import EmailTool
 from app.controler.chat.core.tools.image_processor_tool import ImageProcessorTool
 from app.controler.chat.core.tools.calendar_tool import google_calendar_tool, test_calendar_connectivity
-from app.controler.chat.core.tools.agenda_tool import AgendaTool
+from app.controler.chat.core.tools.agenda_tool_refactored import AgendaToolRefactored
 
 
 class LangChainToolsLoader:
@@ -165,7 +165,7 @@ class LangChainToolsLoader:
             self.logger.info("Herramienta habilitada: email")
         
         if "agenda_tool" in enabled_tools:
-            tool = AgendaTool(project_id, project, user_id)
+            tool = AgendaToolRefactored(project_id, project, user_id)
             await self._register_tool(tool, create_tool_metadata(tool))
             self.logger.info("Herramienta habilitada: agenda_tool")
         

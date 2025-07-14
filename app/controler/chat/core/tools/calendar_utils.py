@@ -8,11 +8,24 @@ en calendar_tool.py y otras herramientas de calendario.
 import logging
 from datetime import datetime
 from zoneinfo import ZoneInfo
+from .timezone_config import get_sistema_timezone, get_sistema_timezone_offset
 
 logger = logging.getLogger(__name__)
 
-# 🌎 Zona horaria de Chile
-CHILE_TZ = ZoneInfo('America/Santiago')
+# 🌎 Zona horaria de Chile - USANDO TIMEZONE FIJO DEL SISTEMA
+from datetime import timezone, timedelta
+def get_chile_tz_fixed():
+    """Obtiene timezone fijo de Chile basado en la configuración global del sistema."""
+    offset_hours = get_sistema_timezone_offset()
+    return timezone(timedelta(hours=offset_hours))
+
+# 🌎 Zona horaria de Chile - DINÁMICO basado en configuración global
+def get_chile_tz():
+    """Obtiene timezone de Chile actualizado basado en configuración global."""
+    return get_chile_tz_fixed()
+
+# Para compatibilidad, pero ahora es dinámico
+CHILE_TZ = get_chile_tz_fixed()  # Se actualizará al cambiar timezone_config.py
 
 # 📅 MAPEOS CENTRALIZADOS - Eliminan duplicación de código
 DIAS_ES = ['lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo']
@@ -54,14 +67,40 @@ def normalize_to_chile_timezone(datetime_str: str) -> str:
         dt = datetime.fromisoformat(datetime_str.replace('Z', '+00:00'))
 
         if dt.tzinfo:
-            # Si ya tiene zona horaria, la convertimos a la de Chile
-            dt_chile = dt.astimezone(CHILE_TZ)
+            # USAR TIMEZONE GLOBAL DEL SISTEMA
+            # Forzar consistencia usando la constante global configurada
+            offset_hours = dt.utcoffset().total_seconds() / 3600
+            sistema_offset = get_sistema_timezone_offset()
+            
+            # Si es un timezone chileno (-3 o -4 horas), normalizar al timezone del sistema
+            if offset_hours in [-3, -4]:
+                if offset_hours == sistema_offset:
+                    logger.info(f"Timezone ya coincide con sistema ({offset_hours:+.0f}h), manteniendo original")
+                    result = dt.isoformat()
+                else:
+                    logger.info(f"Timezone chileno detectado ({offset_hours:+.0f}h), normalizando a timezone del sistema ({sistema_offset:+.0f}h)")
+                    # CORRECCIÓN: Mantener la misma hora local, solo cambiar el offset
+                    # En lugar de convertir a UTC y cambiar horas, solo cambiar el timezone
+                    dt_naive = dt.replace(tzinfo=None)  # Remover timezone pero mantener hora local
+                    sistema_tz_str = get_sistema_timezone()
+                    result = dt_naive.isoformat() + sistema_tz_str
+                    logger.info(f"Normalizado a timezone del sistema manteniendo hora local: {result}")
+            else:
+                # Convertir cualquier otro timezone al timezone del sistema
+                dt_utc = dt.astimezone(ZoneInfo('UTC'))
+                from datetime import timedelta
+                sistema_offset = get_sistema_timezone_offset()
+                dt_sistema = dt_utc.replace(tzinfo=None) + timedelta(hours=sistema_offset)
+                sistema_tz_str = get_sistema_timezone()
+                result = dt_sistema.isoformat() + sistema_tz_str
+                logger.info(f"Timezone no chileno, convertido a timezone del sistema: {result}")
         else:
-            # Si es 'naive' (sin zona horaria), la localizamos a Chile
-            # Con zoneinfo, esto es seguro y maneja DST correctamente.
-            dt_chile = dt.replace(tzinfo=CHILE_TZ)
+            # Si es 'naive' (sin zona horaria), aplicar timezone del sistema
+            from datetime import timedelta
+            sistema_tz_str = get_sistema_timezone()
+            result = dt.isoformat() + sistema_tz_str
+            logger.info(f"Fecha naive, aplicando timezone del sistema: {result}")
 
-        result = dt_chile.isoformat()
         logger.info(f"Normalized result: {result}")
         
         return result

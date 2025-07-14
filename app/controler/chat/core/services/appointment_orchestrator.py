@@ -28,9 +28,14 @@ class AppointmentOrchestrator:
         self.webhook_service = WebhookService(cached_project_config, project_id)
         self.schedule_validator = ScheduleValidator(cached_project_config)
     
-    def validate_appointment_data(self, appointment_data: Dict[str, Any]) -> Tuple[bool, str]:
+    def validate_appointment_data(self, appointment_data: Dict[str, Any], require_email: bool = True) -> Tuple[bool, str]:
         """Valida que todos los datos necesarios estén presentes"""
-        required_fields = ['title', 'start_datetime', 'end_datetime', 'attendee_email']
+        required_fields = ['title', 'start_datetime', 'end_datetime']
+        
+        # Agregar email como requerido solo si se especifica
+        if require_email:
+            required_fields.append('attendee_email')
+        
         missing_fields = []
         
         for field in required_fields:
