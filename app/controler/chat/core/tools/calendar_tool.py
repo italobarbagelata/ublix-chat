@@ -13,12 +13,14 @@ from .calendar_utils import (
     CHILE_TZ, DIAS_MAP, format_date_spanish, create_slot_dict,
     normalize_to_chile_timezone, get_day_name_spanish, parse_day_name_to_weekday
 )
+from app.controler.chat.core.security.thread_safe_cache import conflict_safe_check, conflict_cache
+from app.controler.chat.core.security.error_handler import safe_execute, raise_calendar_error, ErrorCategory, ErrorSeverity
 
 logger = logging.getLogger(__name__)
 
 def get_project_calendar_config(project_id: str, agenda_data: dict = None) -> dict:
     """
-    🚀 FUNCIÓN CENTRAL para obtener configuración de calendario del proyecto desde tabla agenda en Supabase.
+    FUNCIÓN CENTRAL para obtener configuración de calendario del proyecto desde tabla agenda en Supabase.
     
     OPTIMIZADA para evitar consultas duplicadas usando cache desde agenda_tool.
     
@@ -34,13 +36,13 @@ def get_project_calendar_config(project_id: str, agenda_data: dict = None) -> di
             logger.warning("No project_id proporcionado, usando configuración por defecto")
             return get_default_calendar_config()
         
-        # ✅ PRIORIZAR CACHE - evitar consulta duplicada
+        # PRIORIZAR CACHE - evitar consulta duplicada
         if agenda_data:
-            logger.info("📅 ✅ Usando agenda_data desde cache (sin consulta duplicada)")
+            logger.info("Usando agenda_data desde cache (sin consulta duplicada)")
             response_data = [agenda_data]  # Simular formato de respuesta
         else:
-            # ⚠️ FALLBACK - consulta directa solo si no hay cache
-            logger.warning("📅 ⚠️ No hay cache disponible, realizando consulta directa")
+            # FALLBACK - consulta directa solo si no hay cache
+            logger.warning("No hay cache disponible, realizando consulta directa")
             from app.controler.chat.store.supabase_client import SupabaseClient
             supabase_client = SupabaseClient()
             response = supabase_client.client.table("agenda").select("*").eq("project_id", project_id).execute()
@@ -87,7 +89,7 @@ def get_project_calendar_config(project_id: str, agenda_data: dict = None) -> di
                             except (ValueError, IndexError):
                                 logger.warning(f"Formato de hora inválido en {day_name}: {start_time}-{end_time}")
                 
-                logger.info(f"📅 Configuración granular procesada:")
+                logger.info(f"Configuración granular procesada:")
                 logger.info(f"   - Días laborales: {working_days}")
                 logger.info(f"   - Hora más temprana: {earliest_hour}:00")
                 logger.info(f"   - Hora más tardía: {latest_hour}:00")
@@ -103,7 +105,7 @@ def get_project_calendar_config(project_id: str, agenda_data: dict = None) -> di
                 "timezone": general_settings.get("timezone", config["timezone"])
             })
             
-            logger.info(f"✅ Configuración de calendario obtenida desde tabla agenda para proyecto {project_id}: {config}")
+            logger.info(f"Configuración de calendario obtenida desde tabla agenda para proyecto {project_id}: {config}")
             return config
         else:
             logger.warning(f"No se encontró configuración de agenda para proyecto {project_id}, usando configuración por defecto")
@@ -133,51 +135,51 @@ def get_default_calendar_config() -> dict:
 def google_calendar_tool(query: str, state: Annotated[dict, InjectedState]) -> str:
     """Herramienta integral para gestión de calendario Google. Maneja todas las operaciones de calendario de forma autónoma.
     
-    🎯 PROPÓSITO: Gestión completa de eventos en Google Calendar con configuración automática para zona horaria de Chile.
+    PROPÓSITO: Gestión completa de eventos en Google Calendar con configuración automática para zona horaria de Chile.
     
-    📋 CASOS DE USO PRINCIPALES:
+    CASOS DE USO PRINCIPALES:
     - Buscar horarios disponibles para reuniones
     - Crear eventos con invitados y Google Meet automático
     - Consultar, actualizar y eliminar eventos existentes
     - Verificar disponibilidad en rangos de tiempo específicos
     
-    🔧 FORMATO DE CONSULTA: [ACCIÓN]|[PARÁMETROS]
+    FORMATO DE CONSULTA: [ACCIÓN]|[PARÁMETROS]
     
-    📌 ACCIONES DISPONIBLES:
+    ACCIONES DISPONIBLES:
     
-    🔍 BÚSQUEDA Y CONSULTA:
+    BÚSQUEDA Y CONSULTA:
     - list_events|days=7: Lista eventos de los próximos N días
     - search_events|title=Reunión|date=2025-06-15: Busca eventos por título y/o fecha
     - get_event|event_id=abc123: Obtiene detalles de un evento específico
     - check_availability|start=2025-06-15T16:00:00|end=2025-06-15T17:00:00: Verifica disponibilidad
     
-    🎯 BÚSQUEDA DE HORARIOS LIBRES:
+    BÚSQUEDA DE HORARIOS LIBRES:
     - find_available_slots: Encuentra próximos 3 horarios disponibles (configuración estándar: 60 min, horario laboral)
     - find_available_slots|duration=1.5|start_hour=10|end_hour=16: Búsqueda personalizada
     - find_available_slots|day=miércoles|duration=1: Busca en día específico de la semana
     - find_available_slots|specific_date=2025-07-09|duration=1: Busca en fecha específica (YYYY-MM-DD)
     
-    ✨ GESTIÓN DE EVENTOS:
+    GESTIÓN DE EVENTOS:
     - create_event|title=Reunión Cliente|start=2025-06-15T15:00:00|end=2025-06-15T16:00:00|description=Reunión|attendees=email@domain.com|meet=true
     - update_event|event_id=abc123|title=Nuevo Título|description=Nueva descripción
     - delete_event|event_id=abc123: Elimina evento
     
-    ⚙️ CONFIGURACIÓN AUTOMÁTICA:
+    CONFIGURACIÓN AUTOMÁTICA:
     - Zona horaria: Chile (America/Santiago) - conversión automática
     - Google Meet: Se agrega automáticamente cuando meet=true
     - Duración estándar: 60 minutos para nuevos eventos
     - Horario laboral: 09:00-18:00 para búsqueda de slots
     
-    📧 INTEGRACIÓN CON CONTACTOS:
+    INTEGRACIÓN CON CONTACTOS:
     - Requiere email del usuario para crear eventos con attendees
     - Se integra automáticamente con save_contact_tool para obtener emails
     - Los emails se validan antes de crear eventos
     
-    🎌 CONSIDERACIONES ESPECIALES:
+    CONSIDERACIONES ESPECIALES:
     - Verifica conflictos automáticamente antes de crear eventos
     - Maneja errores de integración de forma elegante
     
-    💡 FLUJO RECOMENDADO PARA AGENDAR:
+    FLUJO RECOMENDADO PARA AGENDAR:
     1. Ejecutar find_available_slots para mostrar opciones al usuario
     2. Usuario selecciona o propone horario alternativo
     3. Verificar disponibilidad si es horario propuesto por usuario
@@ -205,12 +207,12 @@ def google_calendar_tool(query: str, state: Annotated[dict, InjectedState]) -> s
         # Get project ID and configuration
         project_id = project.id if hasattr(project, 'id') else getattr(project, 'project_id', None)
         
-        # 🚀 OBTENER CONFIGURACIÓN DEL PROYECTO UNA SOLA VEZ (optimizado con cache)
+        # OBTENER CONFIGURACIÓN DEL PROYECTO UNA SOLA VEZ (optimizado con cache)
         agenda_config = state.get('agenda_config')
         cached_agenda_data = agenda_config.get('cached_agenda_data') if agenda_config else None
         
         project_config = get_project_calendar_config(project_id, cached_agenda_data)
-        logger.info(f"🚀 Usando configuración del proyecto para calendario: {project_config}")
+        logger.info(f"Usando configuración del proyecto para calendario: {project_config}")
         
         # Parse the query
         parts = query.split('|')
@@ -219,15 +221,19 @@ def google_calendar_tool(query: str, state: Annotated[dict, InjectedState]) -> s
         
         action = parts[0].strip().lower()
         
-        # Get credentials from stored integration
-        credentials = get_google_credentials(project_id)
-        if not credentials:
-            return "No Google Calendar integration found for this project. Please set up the integration first."
+        # Get credentials from stored integration with proper error handling
+        try:
+            credentials = get_google_credentials(project_id)
+            if not credentials:
+                return "No se encontró integración de Google Calendar para este proyecto.\n\nSolución: Configura la integración de Google Calendar en la configuración del proyecto."
+            
+            # Build the Calendar API service
+            service = build('calendar', 'v3', credentials=credentials)
+        except Exception as setup_error:
+            logger.error(f"Error setting up Google Calendar service: {str(setup_error)}")
+            return f"Error configurando Google Calendar: {str(setup_error)}\n\nSolución: Verifica las credenciales de Google Calendar en la configuración del proyecto."
         
-        # Build the Calendar API service
-        service = build('calendar', 'v3', credentials=credentials)
-        
-        # Execute the requested action - 🚀 TODAS LAS FUNCIONES USAN project_config
+        # Execute the requested action - TODAS LAS FUNCIONES USAN project_config
         if action == 'list_events':
             return list_events(service, parts[1:] if len(parts) > 1 else [], project_config)
         elif action == 'search_events':
@@ -252,7 +258,15 @@ def google_calendar_tool(query: str, state: Annotated[dict, InjectedState]) -> s
             
     except Exception as e:
         logger.error(f"Error in Google Calendar tool: {str(e)}")
-        return f"Error interacting with Google Calendar: {str(e)}"
+        # NO FALLO SILENCIOSO: Clasificar y proporcionar error detallado
+        if "authentication" in str(e).lower() or "credentials" in str(e).lower():
+            return f"Error de autenticación con Google Calendar: {str(e)}\n\nSolución: Verifica la configuración de credenciales de Google Calendar para este proyecto."
+        elif "network" in str(e).lower() or "connection" in str(e).lower():
+            return f"Error de conexión con Google Calendar: {str(e)}\n\nSolución: Verifica tu conexión a internet e intenta nuevamente."
+        elif "quota" in str(e).lower() or "limit" in str(e).lower():
+            return f"Límite de API alcanzado: {str(e)}\n\nSolución: Espera unos minutos antes de volver a intentar."
+        else:
+            return f"Error inesperado en Google Calendar: {str(e)}\n\nSi el problema persiste, contacta al soporte técnico con este código de error."
 
 def get_google_credentials(project_id):
     """
@@ -293,7 +307,14 @@ def get_google_credentials(project_id):
         return credentials
     except Exception as e:
         logger.error(f"Error getting Google Calendar credentials: {str(e)}")
-        return None
+        # NO FALLO SILENCIOSO: Propagar error con información útil
+        raise_calendar_error(
+            f"No se pudieron obtener las credenciales de Google Calendar: {str(e)}",
+            ErrorCategory.AUTHENTICATION,
+            ErrorSeverity.HIGH,
+            "CREDENTIALS_ERROR",
+            project_id=project_id
+        )
 
 def list_events(service, params, project_config=None):
     """List upcoming events from the user's calendar"""
@@ -414,28 +435,30 @@ def search_events(service, params, project_config=None):
     except HttpError as error:
         return f"Error searching events: {error}"
 
-def check_time_conflicts(service, start_time, end_time):
+@conflict_safe_check
+def check_time_conflicts(service, start_time, end_time, project_id='unknown'):
     """
-    Verifica si hay eventos existentes que se solapan con el horario especificado
-    MEJORADO: Incluye validación de conexión y debugging detallado
+    Verifica si hay eventos existentes que se solapan con el horario especificado.
+    MEJORADO: Thread-safe con cache y validación robusta.
     
     Args:
         service: Google Calendar API service
         start_time: Hora de inicio del nuevo evento (formato ISO)
         end_time: Hora de fin del nuevo evento (formato ISO)
+        project_id: ID del proyecto para cache granular
     
     Returns:
         Lista de eventos que se solapan con el horario especificado
     """
     try:
-        # ✅ VALIDAR QUE EL SERVICE ESTÉ FUNCIONANDO
+        # VALIDAR QUE EL SERVICE ESTÉ FUNCIONANDO
         if not service:
-            logger.error("❌ Google Calendar service no disponible")
+            logger.error("Google Calendar service no disponible")
             raise Exception("Google Calendar service no disponible")
         
-        # ✅ VALIDAR FORMATO DE FECHAS
+        # VALIDAR FORMATO DE FECHAS
         if not start_time or not end_time:
-            logger.error(f"❌ Fechas inválidas: start='{start_time}', end='{end_time}'")
+            logger.error(f"Fechas inválidas: start='{start_time}', end='{end_time}'")
             raise Exception("Fechas de inicio y fin son requeridas")
         
         # Normalizar fechas a zona horaria de Chile para comparaciones consistentes
@@ -446,9 +469,9 @@ def check_time_conflicts(service, start_time, end_time):
         new_start = datetime.fromisoformat(start_time_normalized)
         new_end = datetime.fromisoformat(end_time_normalized)
         
-        # ✅ VALIDAR QUE LA FECHA DE INICIO SEA ANTERIOR A LA DE FIN
+        # VALIDAR QUE LA FECHA DE INICIO SEA ANTERIOR A LA DE FIN
         if new_start >= new_end:
-            logger.error(f"❌ Fecha de inicio debe ser anterior a fecha de fin: {new_start} >= {new_end}")
+            logger.error(f"Fecha de inicio debe ser anterior a fecha de fin: {new_start} >= {new_end}")
             raise Exception("Fecha de inicio debe ser anterior a fecha de fin")
         
         # Buscar eventos en un rango más amplio (día completo) para verificar solapamientos
@@ -459,19 +482,19 @@ def check_time_conflicts(service, start_time, end_time):
         day_start_iso = day_start.isoformat()
         day_end_iso = day_end.isoformat()
         
-        # ✅ VALIDAR FORMATO PARA GOOGLE CALENDAR API
+        # VALIDAR FORMATO PARA GOOGLE CALENDAR API
         # Google Calendar API requiere fechas con zona horaria o UTC (con Z)
         # Pero NUNCA ambos: -03:00Z es inválido
         if day_start_iso.endswith('Z') and ('+' in day_start_iso[:-1] or '-' in day_start_iso[-10:-1]):
-            logger.error(f"❌ Formato de fecha inválido para Google API: {day_start_iso}")
+            logger.error(f"Formato de fecha inválido para Google API: {day_start_iso}")
             raise Exception("Formato de fecha inválido para Google Calendar API")
         
-        logger.debug(f"🔍 VERIFICANDO CONFLICTOS:")
-        logger.debug(f"   📅 Horario solicitado: {start_time} to {end_time}")
-        logger.debug(f"   🌎 Normalizado a Chile: {start_time_normalized} to {end_time_normalized}")
-        logger.debug(f"   🔍 Buscando en rango: {day_start_iso} to {day_end_iso}")
+        logger.debug(f"VERIFICANDO CONFLICTOS:")
+        logger.debug(f"   Horario solicitado: {start_time} to {end_time}")
+        logger.debug(f"   Normalizado a Chile: {start_time_normalized} to {end_time_normalized}")
+        logger.debug(f"   Buscando en rango: {day_start_iso} to {day_end_iso}")
         
-                # ✅ INTENTAR CONEXIÓN CON GOOGLE CALENDAR API
+                # INTENTAR CONEXIÓN CON GOOGLE CALENDAR API
         try:
                 events_result = service.events().list(
                 calendarId='primary',
@@ -481,53 +504,87 @@ def check_time_conflicts(service, start_time, end_time):
                 orderBy='startTime'
             ).execute()
         except HttpError as api_error:
-            logger.error(f"❌ Error de API de Google Calendar: {api_error}")
-            # ✅ NO DEVOLVER LISTA VACÍA - PROPAGAR EL ERROR
+            logger.error(f"Error de API de Google Calendar: {api_error}")
+            # NO DEVOLVER LISTA VACÍA - PROPAGAR EL ERROR
             raise Exception(f"Error consultando Google Calendar: {api_error}")
         except Exception as conn_error:
-            logger.error(f"❌ Error de conexión con Google Calendar: {conn_error}")
+            logger.error(f"Error de conexión con Google Calendar: {conn_error}")
             raise Exception(f"Error de conexión con Google Calendar: {conn_error}")
         
         events = events_result.get('items', [])
-        logger.debug(f"📊 EVENTOS ENCONTRADOS EN EL DÍA: {len(events)}")
+        logger.debug(f"EVENTOS ENCONTRADOS EN EL DÍA: {len(events)}")
         
-        # ✅ LOG DETALLADO DE EVENTOS ENCONTRADOS (para debugging)
+        # LOG DETALLADO DE EVENTOS ENCONTRADOS (para debugging)
         if events:
-            logger.debug("📋 EVENTOS EN EL CALENDARIO:")
+            logger.debug("EVENTOS EN EL CALENDARIO:")
             for i, event in enumerate(events):
                 event_title = event.get('summary', 'Sin título')
                 event_start = event['start'].get('dateTime', 'start' in event and event['start'].get('date'))
                 event_end = event['end'].get('dateTime', 'end' in event and event['end'].get('date'))
                 logger.debug(f"   {i+1}. '{event_title}': {event_start} - {event_end}")
         else:
-            logger.debug("✅ NO HAY EVENTOS EN EL CALENDARIO PARA ESTE DÍA")
+            logger.debug("NO HAY EVENTOS EN EL CALENDARIO PARA ESTE DÍA")
         
         conflicts = []
         for event in events:
             event_start_str = event['start'].get('dateTime', event['start'].get('date'))
             event_end_str = event['end'].get('dateTime', event['end'].get('date'))
             
-            # ✅ SKIP EVENTOS DE DÍA COMPLETO CORRECTAMENTE
+            # SKIP EVENTOS DE DÍA COMPLETO CORRECTAMENTE
             if 'T' not in event_start_str:  # Es fecha completa (all-day event)
-                logger.info(f"   ⏭️  Saltando evento de día completo: {event.get('summary', 'Sin título')}")
+                logger.info(f"   Saltando evento de día completo: {event.get('summary', 'Sin título')}")
                 continue
             
             # Convertir a datetime para comparar
             try:
                 event_start = datetime.fromisoformat(event_start_str.replace('Z', '+00:00'))
                 event_end = datetime.fromisoformat(event_end_str.replace('Z', '+00:00'))
+                
+                # CRUCIAL: Normalizar todas las fechas al mismo timezone para comparación justa
+                # Si los eventos del calendario están en timezone diferente al solicitado,
+                # convertir todo a UTC para comparación precisa
+                from zoneinfo import ZoneInfo
+                
+                if event_start.tzinfo != new_start.tzinfo:
+                    logger.info(f"   Diferentes timezones detectados - Evento: {event_start.tzinfo}, Nuevo: {new_start.tzinfo}")
+                    logger.info(f"   Convirtiendo a UTC para comparación precisa")
+                    
+                    # Convertir todo a UTC para comparación
+                    utc = ZoneInfo('UTC')
+                    event_start_utc = event_start.astimezone(utc)
+                    event_end_utc = event_end.astimezone(utc)
+                    new_start_utc = new_start.astimezone(utc)
+                    new_end_utc = new_end.astimezone(utc)
+                    
+                    # Usar fechas UTC para comparación
+                    event_start, event_end = event_start_utc, event_end_utc
+                    new_start_for_comparison, new_end_for_comparison = new_start_utc, new_end_utc
+                    
+                    logger.info(f"   UTC - Evento: {event_start} - {event_end}")
+                    logger.info(f"   UTC - Nuevo:  {new_start_for_comparison} - {new_end_for_comparison}")
+                else:
+                    new_start_for_comparison, new_end_for_comparison = new_start, new_end
+                    
             except Exception as date_error:
-                logger.error(f"❌ Error parseando fechas del evento '{event.get('summary')}': {date_error}")
+                logger.error(f"Error parseando fechas del evento '{event.get('summary')}': {date_error}")
                 continue
             
-            # ✅ VERIFICAR SOLAPAMIENTO CON LÓGICA CLARA
+            # VERIFICAR SOLAPAMIENTO CON LÓGICA CLARA usando fechas normalizadas
             # Solapamiento ocurre si: (nuevo_inicio < evento_fin) AND (nuevo_fin > evento_inicio)
-            has_overlap = (new_start < event_end and new_end > event_start)
+            # PERO permitir eventos que solo se tocan en los extremos (sin buffer de tiempo)
+            has_overlap = (new_start_for_comparison < event_end and new_end_for_comparison > event_start)
             
-            logger.debug(f"   🔍 Verificando '{event.get('summary', 'Sin título')}':")
-            logger.debug(f"      📅 Evento: {event_start} - {event_end}")
-            logger.debug(f"      📅 Nuevo:  {new_start} - {new_end}")
-            logger.debug(f"      ⚡ ¿Conflicto? {has_overlap}")
+            # NUEVO: Si solo se tocan en los extremos, NO considerarlo conflicto
+            touches_at_boundary = (new_start_for_comparison == event_end or new_end_for_comparison == event_start)
+            
+            if touches_at_boundary:
+                logger.info(f"   Eventos se tocan en extremos pero NO hay conflicto real")
+                has_overlap = False
+            
+            logger.debug(f"   Verificando '{event.get('summary', 'Sin título')}':")
+            logger.debug(f"      Evento: {event_start} - {event_end}")
+            logger.debug(f"      Nuevo:  {new_start} - {new_end}")
+            logger.debug(f"      ¿Conflicto? {has_overlap}")
             
             if has_overlap:
                 conflicts.append({
@@ -536,30 +593,38 @@ def check_time_conflicts(service, start_time, end_time):
                     'end': event_end_str,
                     'id': event.get('id')
                 })
-                logger.warning(f"❌ CONFLICTO DETECTADO: {event.get('summary')} desde {event_start_str} hasta {event_end_str}")
+                logger.warning(f"CONFLICTO DETECTADO: {event.get('summary')} desde {event_start_str} hasta {event_end_str}")
         
-        logger.info(f"📊 RESUMEN DE VERIFICACIÓN:")
-        logger.info(f"   📅 Horario solicitado: {start_time} - {end_time}")
-        logger.info(f"   📋 Eventos en el día: {len(events)}")
-        logger.info(f"   ❌ Conflictos encontrados: {len(conflicts)}")
+        logger.info(f"RESUMEN DE VERIFICACIÓN:")
+        logger.info(f"   Horario solicitado: {start_time} - {end_time}")
+        logger.info(f"   Eventos en el día: {len(events)}")
+        logger.info(f"   Conflictos encontrados: {len(conflicts)}")
         
         if conflicts:
             conflict_titles = [c['summary'] for c in conflicts]
-            logger.warning(f"⚠️  HORARIO NO DISPONIBLE - Conflictos con: {', '.join(conflict_titles)}")
+            logger.warning(f"HORARIO NO DISPONIBLE - Conflictos con: {', '.join(conflict_titles)}")
         else:
-            logger.info(f"✅ HORARIO DISPONIBLE - Sin conflictos")
+            logger.info(f"HORARIO DISPONIBLE - Sin conflictos")
         
         return conflicts
         
     except Exception as e:
-        logger.error(f"❌ ERROR CRÍTICO en check_time_conflicts: {str(e)}")
-        # ✅ NO DEVOLVER LISTA VACÍA - PROPAGAR EL ERROR PARA MANEJO CORRECTO
-        raise Exception(f"Error verificando disponibilidad en calendario: {str(e)}")
+        logger.error(f"ERROR CRÍTICO en check_time_conflicts: {str(e)}")
+        # NO FALLO SILENCIOSO: Propagar error estructurado
+        raise_calendar_error(
+            f"Error verificando disponibilidad en calendario: {str(e)}",
+            ErrorCategory.CALENDAR_API,
+            ErrorSeverity.HIGH,
+            "CONFLICT_CHECK_FAILED",
+            start_time=start_time,
+            end_time=end_time,
+            project_id=project_id
+        )
 
 def create_event(service, params, state=None, project_config=None):
     """Create a new event on the calendar with conflict checking and attendee support"""
     try:
-        # 🚀 USAR CONFIGURACIÓN DEL PROYECTO
+        # USAR CONFIGURACIÓN DEL PROYECTO
         if not project_config:
             project_config = get_default_calendar_config()
         
@@ -583,7 +648,11 @@ def create_event(service, params, state=None, project_config=None):
         
         attendee_emails = []
         force_create = False  # Para forzar creación a pesar de conflictos
-        add_meet = project_config.get("auto_include_meet", True)  # 🚀 Usar config del proyecto
+        add_meet = project_config.get("auto_include_meet", True)  # Usar config del proyecto
+        
+        # Variables para detectar si se actualizó la fecha de inicio sin fecha de fin
+        start_updated = False
+        end_updated = False
         
         # Debug: Log all parameters received
         logger.info(f"Received parameters: {params}")
@@ -602,8 +671,10 @@ def create_event(service, params, state=None, project_config=None):
                     event_data['description'] = value
                 elif key == 'start':
                     event_data['start']['dateTime'] = normalize_to_chile_timezone(value)
+                    start_updated = True
                 elif key == 'end':
                     event_data['end']['dateTime'] = normalize_to_chile_timezone(value)
+                    end_updated = True
                 elif key == 'attendees' or key == 'guests' or key == 'emails':
                     # Soporte para múltiples emails separados por coma
                     attendee_emails = [email.strip() for email in value.split(',')]
@@ -614,15 +685,22 @@ def create_event(service, params, state=None, project_config=None):
                     add_meet = value.lower() in ['true', '1', 'yes', 'sí', 'si']
                     logger.info(f"add_meet parameter found: {key} = {value} -> {add_meet}")
         
+        # CRÍTICO: Si se actualizó la fecha de inicio pero no la de fin, recalcular automáticamente
+        if start_updated and not end_updated:
+            start_dt = datetime.fromisoformat(event_data['start']['dateTime'])
+            calculated_end_dt = start_dt + timedelta(hours=default_duration)
+            event_data['end']['dateTime'] = calculated_end_dt.isoformat()
+            logger.info(f"FECHA DE FIN RECALCULADA AUTOMÁTICAMENTE: {event_data['end']['dateTime']} (duración: {default_duration}h)")
+        
         # Debug final state
         logger.info(f"Final force_create value: {force_create}")
         logger.info(f"Final add_meet value: {add_meet}")
 
-        # 🚫 VALIDACIÓN: No permitir crear eventos en el pasado
+        # VALIDACIÓN: No permitir crear eventos en el pasado
         start_dt = datetime.fromisoformat(event_data['start']['dateTime'])
         now_chile = datetime.now(CHILE_TZ)
         if start_dt < now_chile:
-            return f"❌ No se puede crear un evento en el pasado. La fecha de inicio ({start_dt.strftime('%Y-%m-%d %H:%M')}) ya pasó. Por favor elige una fecha y hora futura."
+            return f"No se puede crear un evento en el pasado. La fecha de inicio ({start_dt.strftime('%Y-%m-%d %H:%M')}) ya pasó. Por favor elige una fecha y hora futura."
         
         # Agregar Google Meet si se solicita
         if add_meet:
@@ -670,7 +748,7 @@ def create_event(service, params, state=None, project_config=None):
         if conflicts and not force_create:
             conflict_list = "\n".join([f"- {conflict['summary']} ({conflict['start']} - {conflict['end']})" for conflict in conflicts])
             logger.info("BLOCKING event creation due to conflicts")
-            return f"⚠️ CONFLICTO DETECTADO: Ya tienes eventos en este horario:\n{conflict_list}\n\n¿Deseas crear el evento de todas formas? Usa 'force_create=true' para crear el evento a pesar de los conflictos."
+            return f"CONFLICTO DETECTADO: Ya tienes eventos en este horario:\n{conflict_list}\n\n¿Deseas crear el evento de todas formas? Usa 'force_create=true' para crear el evento a pesar de los conflictos."
         
         if conflicts and force_create:
             logger.info("FORCING event creation despite conflicts")
@@ -689,28 +767,38 @@ def create_event(service, params, state=None, project_config=None):
             
         event = service.events().insert(**insert_params).execute()
         
+        # SEGURIDAD: Invalidar cache después de crear evento
+        try:
+            project_id = project_config.get('project_id', 'unknown') if project_config else 'unknown'
+            event_start_time = event_data['start']['dateTime']
+            event_end_time = event_data['end']['dateTime']
+            conflict_cache.invalidate_time_range(project_id, event_start_time, event_end_time)
+            logger.debug(f"Cache invalidated for time range: {event_start_time} - {event_end_time}")
+        except Exception as cache_error:
+            logger.warning(f"Error invalidating cache after event creation: {cache_error}")
+        
         # Preparar respuesta con información adicional
-        response = f"✅ Evento creado exitosamente: {event.get('htmlLink')}\n"
-        response += f"📅 Título: {event_data['summary']}\n"
-        response += f"🕐 Inicio: {event_data['start']['dateTime']}\n"
-        response += f"🕑 Fin: {event_data['end']['dateTime']}\n"
+        response = f"Evento creado exitosamente: {event.get('htmlLink')}\n"
+        response += f"Título: {event_data['summary']}\n"
+        response += f"Inicio: {event_data['start']['dateTime']}\n"
+        response += f"Fin: {event_data['end']['dateTime']}\n"
         
         if attendee_emails:
-            response += f"👥 Invitados: {', '.join(attendee_emails)}\n"
-            response += f"📧 Se han enviado invitaciones por correo automáticamente a todos los invitados.\n"
-            response += f"🔔 Los invitados recibirán recordatorios por email 24 horas antes del evento.\n"
+            response += f"Invitados: {', '.join(attendee_emails)}\n"
+            response += f"Se han enviado invitaciones por correo automáticamente a todos los invitados.\n"
+            response += f"Los invitados recibirán recordatorios por email 24 horas antes del evento.\n"
         
         # Información sobre Google Meet
         if add_meet and 'conferenceData' in event:
             meet_link = event['conferenceData'].get('entryPoints', [{}])[0].get('uri', 'No disponible')
-            response += f"📹 Google Meet: {meet_link}\n"
-            response += f"🔗 El enlace de Google Meet se incluye automáticamente en las invitaciones.\n"
+            response += f"Google Meet: {meet_link}\n"
+            response += f"El enlace de Google Meet se incluye automáticamente en las invitaciones.\n"
         elif add_meet:
-            response += f"📹 Google Meet solicitado (el enlace se generará momentáneamente)\n"
+            response += f"Google Meet solicitado (el enlace se generará momentáneamente)\n"
         
         # Si había conflictos pero se forzó la creación
         if conflicts and force_create:
-            response += f"⚠️ Nota: Se creó el evento a pesar de tener {len(conflicts)} conflicto(s) de horario\n"
+            response += f"Nota: Se creó el evento a pesar de tener {len(conflicts)} conflicto(s) de horario\n"
         
         return response
         
@@ -812,8 +900,25 @@ def delete_event(service, params, project_config=None):
         if not event_id:
             return "Error: event_id parameter is required. Use search_events|title=Event Title or list_events to find the event ID first."
         
+        # Get event details before deletion for cache invalidation
+        try:
+            event_details = service.events().get(calendarId='primary', eventId=event_id).execute()
+            event_start = event_details.get('start', {}).get('dateTime')
+            event_end = event_details.get('end', {}).get('dateTime')
+        except:
+            event_start = event_end = None
+        
         # Delete the event
         service.events().delete(calendarId='primary', eventId=event_id).execute()
+        
+        # SEGURIDAD: Invalidar cache después de eliminar evento
+        if event_start and event_end:
+            try:
+                project_id = project_config.get('project_id', 'unknown') if project_config else 'unknown'
+                conflict_cache.invalidate_time_range(project_id, event_start, event_end)
+                logger.debug(f"Cache invalidated after deletion for time range: {event_start} - {event_end}")
+            except Exception as cache_error:
+                logger.warning(f"Error invalidating cache after event deletion: {cache_error}")
         
         return f"Event with ID {event_id} has been successfully deleted."
         
@@ -856,10 +961,10 @@ def check_availability(service, params, project_config=None):
         conflicts = check_time_conflicts(service, start_time, end_time)
         
         if not conflicts:
-            return f"✅ DISPONIBLE: El horario del {start_time} al {end_time} está libre."
+            return f"DISPONIBLE: El horario del {start_time} al {end_time} está libre."
         else:
             conflict_list = "\n".join([f"- {conflict['summary']} ({conflict['start']} - {conflict['end']})" for conflict in conflicts])
-            return f"❌ NO DISPONIBLE: Hay {len(conflicts)} evento(s) en conflicto:\n{conflict_list}"
+            return f"NO DISPONIBLE: Hay {len(conflicts)} evento(s) en conflicto:\n{conflict_list}"
         
     except HttpError as error:
         return f"Error checking availability: {error}"
@@ -869,7 +974,7 @@ def check_availability(service, params, project_config=None):
 def find_next_available_slots(service, params, project_config=None, state=None):
     """Find the next available time slots for meetings with granular schedule support"""
     try:
-        # ✅ PASO 0: VALIDAR CONSISTENCIA DE FECHAS EN LOS PARÁMETROS
+        # PASO 0: VALIDAR CONSISTENCIA DE FECHAS EN LOS PARÁMETROS
         for param in params:
             if '=' in param:
                 key, value = param.split('=', 1)
@@ -880,31 +985,35 @@ def find_next_available_slots(service, params, project_config=None, state=None):
                 if key in ['day', 'title'] and value:
                     es_consistente, mensaje_validacion, fecha_corregida = validate_date_consistency(value)
                     if not es_consistente:
-                        logger.warning(f"❌ Inconsistencia de fecha detectada en {key}: {mensaje_validacion}")
+                        logger.warning(f"Inconsistencia de fecha detectada en {key}: {mensaje_validacion}")
                         return mensaje_validacion
 
-        # ✅ VALIDAR CONECTIVIDAD CON GOOGLE CALENDAR AL INICIO
+        # VALIDAR CONECTIVIDAD CON GOOGLE CALENDAR AL INICIO
         try:
             # Test de conectividad: intentar listar calendarios
             calendars_result = service.calendarList().list(maxResults=1).execute()
-            logger.info(f"✅ CONEXIÓN CON GOOGLE CALENDAR VERIFICADA: {len(calendars_result.get('items', []))} calendario(s) accesible(s)")
+            logger.info(f"CONEXIÓN CON GOOGLE CALENDAR VERIFICADA: {len(calendars_result.get('items', []))} calendario(s) accesible(s)")
         except Exception as conn_test_error:
-            logger.error(f"❌ FALLO DE CONECTIVIDAD con Google Calendar: {conn_test_error}")
-            return f"❌ **Error de conexión con Google Calendar**: No se puede acceder al calendario. Verifica que la integración esté configurada correctamente.\n\nDetalle del error: {str(conn_test_error)}"
+            logger.error(f"FALLO DE CONECTIVIDAD con Google Calendar: {conn_test_error}")
+            return f"**Error de conexión con Google Calendar**: No se puede acceder al calendario. Verifica que la integración esté configurada correctamente.\n\nDetalle del error: {str(conn_test_error)}"
         
-        # 🚀 USAR CONFIGURACIÓN DEL PROYECTO
+        # USAR CONFIGURACIÓN DEL PROYECTO
         if not project_config:
             project_config = get_default_calendar_config()
         
         duration_hours = project_config.get("default_duration", 1.0)
-        preferred_start_hour = project_config.get("start_hour", 9)
-        preferred_end_hour = project_config.get("end_hour", 18)
+        default_start_hour = project_config.get("start_hour", 9)
+        default_end_hour = project_config.get("end_hour", 18)
         working_days = project_config.get("working_days", ["monday", "tuesday", "wednesday", "thursday", "friday"])
         
-        # 🚀 OBTENER max_slots_to_show desde configuración del proyecto
+        # Estas variables indican si el usuario especificó preferencias explícitamente
+        user_specified_start_hour = None
+        user_specified_end_hour = None
+        
+        # OBTENER max_slots_to_show desde configuración del proyecto
         max_slots_to_show = 5  # Valor por defecto
         
-        # 🚀 OBTENER CONFIGURACIÓN GRANULAR DESDE STATE (evitar consulta duplicada)
+        # OBTENER CONFIGURACIÓN GRANULAR DESDE STATE (evitar consulta duplicada)
         granular_schedule = None
         
         # Primero intentar obtener configuración desde el state (pasada por agenda_tool)
@@ -919,8 +1028,8 @@ def find_next_available_slots(service, params, project_config=None, state=None):
             granular_schedule = agenda_config.get('granular_schedule', {})
             config_max_slots = agenda_config.get('max_slots_to_show', 5)
             max_slots_to_show = config_max_slots
-            logger.info(f"📅 ✅ Configuración granular obtenida desde agenda_tool (sin consulta duplicada): {len(granular_schedule)} días configurados")
-            logger.info(f"📊 ✅ max_slots_to_show desde cache: {max_slots_to_show}")
+            logger.info(f"Configuración granular obtenida desde agenda_tool (sin consulta duplicada): {len(granular_schedule)} días configurados")
+            logger.info(f"max_slots_to_show desde cache: {max_slots_to_show}")
         else:
             # Fallback: obtener configuración granular directamente (solo si no viene del state)
             project_id = project_config.get('project_id') if isinstance(project_config, dict) else None
@@ -941,8 +1050,8 @@ def find_next_available_slots(service, params, project_config=None, state=None):
                         config_max_slots = busqueda_settings.get("max_slots_to_show", 5)
                         max_slots_to_show = config_max_slots
                         
-                        logger.warning(f"📅 ⚠️ Configuración granular cargada directamente (consulta adicional): {len(granular_schedule)} días configurados")
-                        logger.warning(f"📊 ⚠️ max_slots_to_show desde consulta directa: {max_slots_to_show}")
+                        logger.warning(f"Configuración granular cargada directamente (consulta adicional): {len(granular_schedule)} días configurados")
+                        logger.warning(f"max_slots_to_show desde consulta directa: {max_slots_to_show}")
                     else:
                         logger.warning(f"No se encontró configuración de agenda para project_id: {project_id}")
                 except Exception as e:
@@ -952,8 +1061,11 @@ def find_next_available_slots(service, params, project_config=None, state=None):
         
         # Parse parameters (pueden sobrescribir la configuración del proyecto)
         specific_day = None  # Para buscar en un día específico
-        specific_date = None  # 🆕 Para buscar en una fecha específica (YYYY-MM-DD)
-        week_offset = 0  # 🆕 Para comenzar búsqueda desde semana específica
+        specific_date = None  # Para buscar en una fecha específica (YYYY-MM-DD)
+        week_offset = 0  # Para comenzar búsqueda desde semana específica
+        
+        # Variable para almacenar el título que puede contener preferencias de tiempo
+        query_title = ""
         
         for param in params:
             if '=' in param:
@@ -964,36 +1076,86 @@ def find_next_available_slots(service, params, project_config=None, state=None):
                 if key == 'duration':
                     duration_hours = float(value)
                 elif key == 'start_hour':
-                    preferred_start_hour = int(value)
+                    user_specified_start_hour = int(value)
                 elif key == 'end_hour':
-                    preferred_end_hour = int(value)
+                    user_specified_end_hour = int(value)
                 elif key == 'day' or key == 'weekday':
                     specific_day = value.lower()
-                elif key == 'specific_date':  # 🆕 NUEVO: Soporte para fechas específicas
+                elif key == 'specific_date':  # NUEVO: Soporte para fechas específicas
                     specific_date = value
-                    logger.info(f"🗓️ Fecha específica solicitada: {specific_date}")
+                    logger.info(f"Fecha específica solicitada: {specific_date}")
+                elif key == 'title':  # NUEVO: Capturar título para análisis de preferencias de tiempo
+                    query_title = value
                 elif key == 'limit':
                     max_slots_to_show = int(value)
-                elif key == 'week_offset':  # 🆕 Nuevo parámetro
+                elif key == 'week_offset':  # Nuevo parámetro
                     week_offset = int(value)
-                    logger.info(f"🗓️ Week offset configurado: {week_offset} semanas adelante")
+                    logger.info(f"Week offset configurado: {week_offset} semanas adelante")
+        
+        # NUEVO: Analizar el título para detectar preferencias de tiempo específicas
+        def detect_time_preference_from_title(title):
+            """Detecta si el título contiene una preferencia de tiempo específica como 'a las 14:00'"""
+            if not title:
+                return False, None, None
+            
+            import re
+            title_lower = title.lower()
+            
+            # Patrones para detectar tiempo específico
+            time_patterns = [
+                r'a las (\d{1,2}):?(\d{0,2})',  # "a las 14:00" o "a las 14"
+                r'(\d{1,2}):(\d{2})\s*h',       # "14:00h"
+                r'(\d{1,2})\s*horas?',          # "14 horas"
+                r'las (\d{1,2}):?(\d{0,2})',    # "las 14:00"
+            ]
+            
+            for pattern in time_patterns:
+                match = re.search(pattern, title_lower)
+                if match:
+                    try:
+                        hour = int(match.group(1))
+                        minute = int(match.group(2)) if match.group(2) else 0
+                        
+                        # Validar hora válida
+                        if 0 <= hour <= 23 and 0 <= minute <= 59:
+                            logger.info(f"Preferencia de tiempo específica detectada en título '{title}': {hour}:{minute:02d}")
+                            return True, hour, minute
+                    except (ValueError, IndexError):
+                        continue
+            
+            return False, None, None
+        
+        # Detectar preferencias de tiempo desde el título
+        has_title_time_preference, preferred_specific_hour, preferred_specific_minute = detect_time_preference_from_title(query_title)
+        
+        # Determinar si el usuario especificó preferencias de horario explícitamente
+        has_user_time_preference = (user_specified_start_hour is not None or 
+                                   user_specified_end_hour is not None or
+                                   has_title_time_preference)
+        
+        # Usar valores especificados por el usuario o valores por defecto
+        preferred_start_hour = user_specified_start_hour if user_specified_start_hour is not None else default_start_hour
+        preferred_end_hour = user_specified_end_hour if user_specified_end_hour is not None else default_end_hour
         
         # Obtener la fecha y hora actual en Chile
         now_chile = datetime.now(CHILE_TZ)
         
-        logger.info(f"🔍 INICIANDO BÚSQUEDA DE HORARIOS DISPONIBLES:")
-        logger.info(f"   📅 Fecha actual: {now_chile.strftime('%Y-%m-%d %H:%M')} (Chile)")
-        logger.info(f"   ⏱️  Duración: {duration_hours} horas")
-        logger.info(f"   🕘 Horario laboral: {preferred_start_hour}:00 - {preferred_end_hour}:00")
-        logger.info(f"   📊 Máximo slots a mostrar: {max_slots_to_show}")
-        logger.info(f"   👤 Día específico solicitado: {specific_day or 'No especificado'}")
+        logger.info(f"INICIANDO BÚSQUEDA DE HORARIOS DISPONIBLES:")
+        logger.info(f"   Fecha actual: {now_chile.strftime('%Y-%m-%d %H:%M')} (Chile)")
+        logger.info(f"   Duración: {duration_hours} horas")
+        logger.info(f"   Horario laboral: {preferred_start_hour}:00 - {preferred_end_hour}:00")
+        logger.info(f"   Máximo slots a mostrar: {max_slots_to_show}")
+        logger.info(f"   Día específico solicitado: {specific_day or 'No especificado'}")
+        logger.info(f"   Usuario especificó preferencia horaria: {has_user_time_preference}")
+        if has_title_time_preference:
+            logger.info(f"   TIEMPO ESPECÍFICO SOLICITADO: {preferred_specific_hour}:{preferred_specific_minute:02d}")
         
         # Función helper para obtener franjas horarias de un día específico
         def get_time_slots_for_day(day_name, granular_schedule):
             """Obtiene las franjas horarias disponibles para un día específico"""
             if not granular_schedule:
                 # Fallback: usar horario general
-                return [(preferred_start_hour, preferred_end_hour)]
+                return [(default_start_hour, default_end_hour)]
             
             day_config = granular_schedule.get(day_name, {})
             if not day_config.get("enabled", False):
@@ -1001,7 +1163,7 @@ def find_next_available_slots(service, params, project_config=None, state=None):
             
             time_slots = day_config.get("time_slots", [])
             if not time_slots:
-                return [(preferred_start_hour, preferred_end_hour)]  # Fallback
+                return [(default_start_hour, default_end_hour)]  # Fallback
             
             # Convertir franjas horarias a tuplas de enteros
             converted_slots = []
@@ -1016,39 +1178,29 @@ def find_next_available_slots(service, params, project_config=None, state=None):
                     logger.warning(f"Formato de hora inválido en {day_name}: {slot}")
                     continue
             
-            return converted_slots if converted_slots else [(preferred_start_hour, preferred_end_hour)]
+            return converted_slots if converted_slots else [(default_start_hour, default_end_hour)]
         
-        # ✅ FUNCIÓN HELPER MEJORADA PARA VERIFICAR DISPONIBILIDAD
-        def check_slot_availability_safe(slot_start, slot_end):
-            """Verifica disponibilidad de un slot con manejo de errores mejorado y caché"""
+        # FUNCIÓN HELPER MEJORADA PARA VERIFICAR DISPONIBILIDAD
+        @conflict_safe_check
+        def check_slot_availability_safe(slot_start, slot_end, project_id=project_config.get('project_id', 'unknown')):
+            """Verifica disponibilidad de un slot con thread-safety y cache seguro"""
             try:
-                # 🆕 OPTIMIZACIÓN: Verificar si el slot está en el pasado
+                # Verificar si el slot está en el pasado
                 if slot_start <= now_chile:
-                    logger.debug(f"         ⏰ {slot_start.strftime('%H:%M')} - Slot en el pasado, saltando")
+                    logger.debug(f"          {slot_start.strftime('%H:%M')} - Slot en el pasado, saltando")
                     return False, []
                 
-                # 🆕 OPTIMIZACIÓN: Caché simple para evitar verificaciones duplicadas
-                slot_key = f"{slot_start.isoformat()}_{slot_end.isoformat()}"
-                if not hasattr(check_slot_availability_safe, '_cache'):
-                    check_slot_availability_safe._cache = {}
-                
-                if slot_key in check_slot_availability_safe._cache:
-                    cached_result = check_slot_availability_safe._cache[slot_key]
-                    logger.debug(f"         📋 {slot_start.strftime('%H:%M')} - Usando resultado en caché: {'Disponible' if cached_result[0] else 'No disponible'}")
-                    return cached_result
-                
-                # Verificar conflictos reales
+                # Verificar conflictos reales usando la función thread-safe
                 conflicts = check_time_conflicts(service, slot_start.isoformat(), slot_end.isoformat())
                 result = (len(conflicts) == 0, conflicts)
                 
-                # Guardar en caché
-                check_slot_availability_safe._cache[slot_key] = result
+                logger.debug(f"         {'' if result[0] else ''} {slot_start.strftime('%H:%M')} - {'Disponible' if result[0] else 'No disponible'}")
                 
                 return result
                 
             except Exception as check_error:
-                logger.error(f"❌ Error verificando disponibilidad para {slot_start}: {check_error}")
-                # ✅ RETORNAR FALSE (no disponible) si hay error de verificación
+                logger.error(f"Error verificando disponibilidad para {slot_start}: {check_error}")
+                # RETORNAR FALSE (no disponible) si hay error de verificación
                 return False, [{'error': str(check_error)}]
         
         # Lista para almacenar las fechas disponibles
@@ -1060,7 +1212,7 @@ def find_next_available_slots(service, params, project_config=None, state=None):
         
         # Usar mapeo centralizado desde utilidades
         
-        # 🆕 NUEVA LÓGICA: Si se especifica una fecha específica, buscar solo en esa fecha
+        # NUEVA LÓGICA: Si se especifica una fecha específica, buscar solo en esa fecha
         if specific_date:
             try:
                 # Parsear la fecha específica - soportar múltiples formatos
@@ -1074,15 +1226,15 @@ def find_next_available_slots(service, params, project_config=None, state=None):
                 day_names = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
                 target_day_name = day_names[target_weekday]
                 
-                logger.info(f"🔍 BÚSQUEDA ESPECÍFICA DE FECHA:")
-                logger.info(f"   📅 Fecha objetivo: {target_weekday} (0=Lunes, 6=Domingo)")
-                logger.info(f"   📅 Fecha actual: {get_day_name_spanish(now_chile.weekday())} {now_chile.strftime('%Y-%m-%d %H:%M')} (weekday={now_chile.weekday()})")
-                logger.info(f"   ⏱️  Duración: {duration_hours} horas")
-                logger.info(f"   🕘 Horario preferido: {preferred_start_hour}:00 - {preferred_end_hour}:00")
+                logger.info(f"BÚSQUEDA ESPECÍFICA DE FECHA:")
+                logger.info(f"   Fecha objetivo: {target_weekday} (0=Lunes, 6=Domingo)")
+                logger.info(f"   Fecha actual: {get_day_name_spanish(now_chile.weekday())} {now_chile.strftime('%Y-%m-%d %H:%M')} (weekday={now_chile.weekday()})")
+                logger.info(f"   Duración: {duration_hours} horas")
+                logger.info(f"   Horario preferido: {preferred_start_hour}:00 - {preferred_end_hour}:00")
                 
                 # Verificar si la fecha está en el pasado
                 if target_date < now_chile.date():
-                    return f"❌ La fecha {specific_date} ya pasó. Por favor elige una fecha futura."
+                    return f"La fecha {specific_date} ya pasó. Por favor elige una fecha futura."
                 
                 # Verificar si es día laboral
                 if target_day_name not in working_days:
@@ -1092,7 +1244,7 @@ def find_next_available_slots(service, params, project_config=None, state=None):
                     }
                     target_day_esp = working_days_esp[target_day_name]
                     dias_disponibles = [working_days_esp[day] for day in working_days]
-                    return f"❌ Lo siento, no tengo horarios disponibles los {target_day_esp}s. Mis días laborales son: {', '.join(dias_disponibles)}. ¿Te gustaría ver opciones para alguno de estos días?"
+                    return f"Lo siento, no tengo horarios disponibles los {target_day_esp}s. Mis días laborales son: {', '.join(dias_disponibles)}. ¿Te gustaría ver opciones para alguno de estos días?"
                 
                 # Obtener franjas horarias para este día
                 time_slots = get_time_slots_for_day(target_day_name, granular_schedule)
@@ -1102,18 +1254,34 @@ def find_next_available_slots(service, params, project_config=None, state=None):
                 
                 # Buscar slots en la fecha específica
                 for start_hour, end_hour in time_slots:
-                    # 🆕 INTERSECCIÓN: Respetar el horario preferido por el usuario (ej. tarde)
+                    # INTERSECCIÓN: Respetar el horario preferido por el usuario (ej. tarde)
                     effective_start_hour = max(start_hour, preferred_start_hour)
                     effective_end_hour = min(end_hour, preferred_end_hour)
                     
-                    logger.debug(f"      🕒 Verificando franja {start_hour}:00-{end_hour}:00, ajustada a preferencia: {effective_start_hour}:00-{effective_end_hour}:00")
+                    logger.debug(f"      Verificando franja {start_hour}:00-{end_hour}:00, ajustada a preferencia: {effective_start_hour}:00-{effective_end_hour}:00")
 
-                    # Iterar sobre la franja ajustada
-                    for hour in range(effective_start_hour, effective_end_hour - int(duration_hours) + 1):
+                    # NUEVO: Si hay tiempo específico solicitado, priorizar ese horario
+                    hours_to_check = []
+                    if has_title_time_preference and preferred_specific_hour is not None:
+                        # Verificar primero el horario específico si está en la franja
+                        if effective_start_hour <= preferred_specific_hour <= effective_end_hour:
+                            hours_to_check.append(preferred_specific_hour)
+                            logger.info(f"      PRIORIZANDO horario específico solicitado: {preferred_specific_hour}:00")
+                        
+                        # Luego agregar horas adyacentes para ofrecer alternativas
+                        for hour in range(effective_start_hour, effective_end_hour - int(duration_hours) + 1):
+                            if hour != preferred_specific_hour:
+                                hours_to_check.append(hour)
+                    else:
+                        # Comportamiento normal: iterar secuencialmente
+                        hours_to_check = list(range(effective_start_hour, effective_end_hour - int(duration_hours) + 1))
+
+                    # Iterar sobre las horas en el orden de prioridad determinado
+                    for hour in hours_to_check:
                         # Si es hoy, no buscar horarios que ya pasaron
                         is_today = target_date == now_chile.date()
                         if is_today and hour <= now_chile.hour:
-                            logger.debug(f"         ⏰ {hour}:00 - Ya pasó (hora actual: {now_chile.hour}:00)")
+                            logger.debug(f"          {hour}:00 - Ya pasó (hora actual: {now_chile.hour}:00)")
                             continue
                         
                         # Crear datetime para el slot
@@ -1123,48 +1291,64 @@ def find_next_available_slots(service, params, project_config=None, state=None):
                         
                         # Verificar que el slot termine dentro de la franja horaria
                         if slot_end.hour > effective_end_hour or (slot_end.hour == effective_end_hour and slot_end.minute > 0):
-                            logger.debug(f"         ❌ {hour}:00 - Slot excede franja horaria (termina a las {slot_end.strftime('%H:%M')})")
+                            logger.debug(f"         {hour}:00 - Slot excede franja horaria (termina a las {slot_end.strftime('%H:%M')})")
                             continue
                         
-                        logger.debug(f"         🔍 Verificando disponibilidad para {hour}:00...")
+                        logger.debug(f"         Verificando disponibilidad para {hour}:00...")
                         is_available, conflicts_or_error = check_slot_availability_safe(slot_start, slot_end)
+                        
+                        # NUEVO: Mensaje especial para tiempo específico solicitado
+                        is_requested_time = (has_title_time_preference and 
+                                           preferred_specific_hour is not None and 
+                                           hour == preferred_specific_hour)
                         
                         if is_available:
                             slot_dict = create_slot_dict(slot_start, slot_end, duration_hours)
                             available_slots.append(slot_dict)
                             slots_found += 1
-                            logger.info(f"         ✅ {hour}:00 DISPONIBLE - Slot #{slots_found}")
                             
-                            # Si encontramos max_slots_to_show slots, paramos
-                            if len(available_slots) >= max_slots_to_show:
+                            if is_requested_time:
+                                logger.info(f"         {hour}:00 DISPONIBLE - ✅ HORARIO ESPECÍFICO SOLICITADO - Slot #{slots_found}")
+                            else:
+                                logger.info(f"         {hour}:00 DISPONIBLE - Slot #{slots_found}")
+                            
+                            # Si hay preferencia horaria específica del usuario, verificar TODO el rango
+                            # Si no hay preferencia del usuario, respetar el límite max_slots_to_show
+                            if not has_user_time_preference and len(available_slots) >= max_slots_to_show:
+                                logger.info(f"Se alcanzó el límite de {max_slots_to_show} slots (sin preferencia horaria)")
                                 break
                         else:
                             # Log detallado de por qué no está disponible
+                            if is_requested_time:
+                                logger.warning(f"         {hour}:00 - ❌ HORARIO ESPECÍFICO SOLICITADO NO DISPONIBLE")
+                            
                             if conflicts_or_error and isinstance(conflicts_or_error, list) and len(conflicts_or_error) > 0:
                                 if 'error' in conflicts_or_error[0]:
-                                    logger.error(f"         ❌ {hour}:00 - Error verificando: {conflicts_or_error[0]['error']}")
+                                    logger.error(f"         {hour}:00 - Error verificando: {conflicts_or_error[0]['error']}")
                                 else:
                                     conflict_titles = [c.get('summary', 'Evento sin título') for c in conflicts_or_error]
-                                    logger.debug(f"         📅 {hour}:00 - No disponible, conflictos: {', '.join(conflict_titles)}")
+                                    logger.debug(f"         {hour}:00 - No disponible, conflictos: {', '.join(conflict_titles)}")
                     
                     # Si ya encontramos suficientes slots, salir del loop de franjas
-                    if len(available_slots) >= max_slots_to_show:
+                    # Pero solo si NO hay preferencia horaria específica del usuario
+                    if not has_user_time_preference and len(available_slots) >= max_slots_to_show:
+                        logger.info(f"Se alcanzó el límite de {max_slots_to_show} slots, finalizando búsqueda")
                         break
                 
                 if not available_slots:
-                    return f"❌ No hay horarios disponibles para el {specific_date}. ¿Te gustaría ver opciones para otro día?"
+                    return f"No hay horarios disponibles para el {specific_date}. ¿Te gustaría ver opciones para otro día?"
                     
             except ValueError:
-                return f"❌ Formato de fecha inválido: {specific_date}. Usa el formato YYYY-MM-DD (ejemplo: 2025-07-09)"
+                return f"Formato de fecha inválido: {specific_date}. Usa el formato YYYY-MM-DD (ejemplo: 2025-07-09)"
             except Exception as e:
                 logger.error(f"Error procesando fecha específica {specific_date}: {str(e)}")
-                return f"❌ Error procesando la fecha {specific_date}: {str(e)}"
+                return f"Error procesando la fecha {specific_date}: {str(e)}"
         
         # Si se especifica un día, buscar solo en ese día
         elif specific_day:
             target_weekday = parse_day_name_to_weekday(specific_day)
             if target_weekday == -1:
-                return f"❌ Día no reconocido: {specific_day}. Usa: lunes, martes, miércoles, jueves, viernes, sábado, domingo"
+                return f"Día no reconocido: {specific_day}. Usa: lunes, martes, miércoles, jueves, viernes, sábado, domingo"
             
             day_names = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
             target_day_name = day_names[target_weekday]
@@ -1175,12 +1359,12 @@ def find_next_available_slots(service, params, project_config=None, state=None):
                     "thursday": "jueves", "friday": "viernes", "saturday": "sábado", "sunday": "domingo"
                 }
                 dias_disponibles = [working_days_esp[day] for day in working_days]
-                return f"❌ Lo siento, no tengo horarios disponibles los {specific_day}s. Mis días laborales son: {', '.join(dias_disponibles)}. ¿Te gustaría ver opciones para alguno de estos días?"
+                return f"Lo siento, no tengo horarios disponibles los {specific_day}s. Mis días laborales son: {', '.join(dias_disponibles)}. ¿Te gustaría ver opciones para alguno de estos días?"
 
             first_week_skipped = False
             first_week_date = None
             
-            logger.info(f"🔍 BÚSQUEDA ESPECÍFICA DE DÍA: {target_day_name}")
+            logger.info(f"BÚSQUEDA ESPECÍFICA DE DÍA: {target_day_name}")
 
             for week_offset_day in range(4):
                 days_ahead = target_weekday - now_chile.weekday() + (week_offset_day * 7)
@@ -1194,11 +1378,11 @@ def find_next_available_slots(service, params, project_config=None, state=None):
                 time_slots_for_day = get_time_slots_for_day(target_day_name, granular_schedule)
 
                 for start_h, end_h in time_slots_for_day:
-                    # 🆕 INTERSECCIÓN: Respetar el horario preferido por el usuario (ej. tarde)
+                    # INTERSECCIÓN: Respetar el horario preferido por el usuario (ej. tarde)
                     effective_start_hour = max(start_h, preferred_start_hour)
                     effective_end_hour = min(end_h, preferred_end_hour)
 
-                    logger.debug(f"      🕒 Verificando franja {start_h}:00-{end_h}:00, ajustada a preferencia: {effective_start_hour}:00-{effective_end_hour}:00")
+                    logger.debug(f"      Verificando franja {start_h}:00-{end_h}:00, ajustada a preferencia: {effective_start_hour}:00-{effective_end_hour}:00")
                     
                     for hour in range(effective_start_hour, effective_end_hour - int(duration_hours) + 1):
                         slot_start = datetime.combine(current_date, datetime.min.time().replace(hour=hour))
@@ -1223,7 +1407,7 @@ def find_next_available_slots(service, params, project_config=None, state=None):
                         first_week_date = current_date
             
             if not available_slots:
-                logger.info(f"🔄 {specific_day} no disponible, buscando siguiente día hábil...")
+                logger.info(f"{specific_day} no disponible, buscando siguiente día hábil...")
                 
                 for day_offset in range(1, 14):
                     current_date = now_chile.date() + timedelta(days=day_offset)
@@ -1236,11 +1420,11 @@ def find_next_available_slots(service, params, project_config=None, state=None):
                     
                     day_slots = []
                     for start_hour, end_hour in time_slots:
-                        # 🆕 INTERSECCIÓN: Respetar el horario preferido por el usuario (ej. tarde)
+                        # INTERSECCIÓN: Respetar el horario preferido por el usuario (ej. tarde)
                         effective_start_hour = max(start_hour, preferred_start_hour)
                         effective_end_hour = min(end_hour, preferred_end_hour)
 
-                        logger.debug(f"      🕒 Verificando franja {start_hour}:00-{end_hour}:00, ajustada a preferencia: {effective_start_hour}:00-{effective_end_hour}:00")
+                        logger.debug(f"      Verificando franja {start_hour}:00-{end_hour}:00, ajustada a preferencia: {effective_start_hour}:00-{effective_end_hour}:00")
 
                         for hour in range(effective_start_hour, effective_end_hour - int(duration_hours) + 1):
                             slot_start = datetime.combine(current_date, datetime.min.time().replace(hour=hour))
@@ -1262,12 +1446,12 @@ def find_next_available_slots(service, params, project_config=None, state=None):
                         break
                 
                 if not available_slots:
-                    return f"❌ No hay horarios disponibles en los próximos 14 días hábiles después de verificar el calendario real."
+                    return f"No hay horarios disponibles en los próximos 14 días hábiles después de verificar el calendario real."
         else:
             start_day_offset = week_offset * 7
             end_day_offset = start_day_offset + 14
             
-            logger.info(f"🔍 Buscando desde día {start_day_offset} hasta día {end_day_offset} (week_offset: {week_offset})...")
+            logger.info(f"Buscando desde día {start_day_offset} hasta día {end_day_offset} (week_offset: {week_offset})...")
             days_checked = 0
             slots_found = 0
             
@@ -1279,23 +1463,23 @@ def find_next_available_slots(service, params, project_config=None, state=None):
                 
                 # 1. Verificar si es día laboral
                 if current_day_name not in working_days:
-                    logger.info(f"   ⏭️  Saltando {current_date} ({current_day_name}) - No es día laboral")
+                    logger.info(f"    Saltando {current_date} ({current_day_name}) - No es día laboral")
                     continue
                 
                 # Si pasa las validaciones, contamos como día verificado
                 days_checked += 1
-                logger.debug(f"   📅 Verificando día {days_checked}: {current_date} ({current_day_name})")
+                logger.debug(f"   Verificando día {days_checked}: {current_date} ({current_day_name})")
                 
                 # Obtener franjas horarias
                 time_slots = get_time_slots_for_day(current_day_name, granular_schedule)
                 
                 day_found_slot = False
                 for start_hour, end_hour in time_slots:
-                    # 🆕 INTERSECCIÓN: Respetar el horario preferido por el usuario (ej. tarde)
+                    # INTERSECCIÓN: Respetar el horario preferido por el usuario (ej. tarde)
                     effective_start_hour = max(start_hour, preferred_start_hour)
                     effective_end_hour = min(end_hour, preferred_end_hour)
                     
-                    logger.debug(f"      🕒 Verificando franja {start_hour}:00-{end_hour}:00, ajustada a preferencia: {effective_start_hour}:00-{effective_end_hour}:00")
+                    logger.debug(f"      Verificando franja {start_hour}:00-{end_hour}:00, ajustada a preferencia: {effective_start_hour}:00-{effective_end_hour}:00")
                     
                     for hour in range(effective_start_hour, effective_end_hour - int(duration_hours) + 1):
                         # Saltar horarios pasados
@@ -1313,7 +1497,7 @@ def find_next_available_slots(service, params, project_config=None, state=None):
                             available_slots.append(create_slot_dict(slot_start, slot_end, duration_hours))
                             day_found_slot = True
                             slots_found += 1
-                            logger.info(f"         ✅ {hour}:00 DISPONIBLE - Slot #{slots_found} encontrado")
+                            logger.info(f"         {hour}:00 DISPONIBLE - Slot #{slots_found} encontrado")
                             if len(available_slots) >= max_slots_to_show:
                                 break
                         else:
@@ -1324,25 +1508,39 @@ def find_next_available_slots(service, params, project_config=None, state=None):
                         break
                 
                 if len(available_slots) >= max_slots_to_show:
-                    logger.info(f"✅ Se alcanzó el límite de {max_slots_to_show} slots, finalizando búsqueda")
+                    logger.info(f"Se alcanzó el límite de {max_slots_to_show} slots, finalizando búsqueda")
                     break
                 
                 if days_checked >= 10:
-                    logger.warning(f"⚠️ Límite de seguridad alcanzado: {days_checked} días verificados, finalizando búsqueda")
+                    logger.warning(f"Límite de seguridad alcanzado: {days_checked} días verificados, finalizando búsqueda")
                     break
         
-        logger.info(f"📊 RESUMEN FINAL DE BÚSQUEDA:")
-        logger.info(f"   📅 Días verificados: {days_checked if not (specific_day or specific_date) else 'N/A (fecha específica)'}")
-        logger.info(f"   ✅ Slots encontrados: {len(available_slots)}")
-        logger.info(f"   🎯 Límite solicitado: {max_slots_to_show}")
+        logger.info(f"RESUMEN FINAL DE BÚSQUEDA:")
+        logger.info(f"   Días verificados: {days_checked if not (specific_day or specific_date) else 'N/A (fecha específica)'}")
+        logger.info(f"   Slots encontrados: {len(available_slots)}")
+        logger.info(f"   Límite solicitado: {max_slots_to_show}")
         
         if not available_slots:
             if specific_date:
-                return f"❌ No se encontraron horarios disponibles para el {specific_date} después de verificar el calendario real."
+                if has_title_time_preference and preferred_specific_hour is not None:
+                    return f"No hay horarios disponibles para el {specific_date} a las {preferred_specific_hour}:{preferred_specific_minute:02d} horas. Sin embargo, te puedo mostrar otros horarios disponibles para ese día si gustas."
+                else:
+                    return f"No se encontraron horarios disponibles para el {specific_date} después de verificar el calendario real."
             elif specific_day:
-                return f"❌ No se encontraron horarios disponibles para {specific_day} en las próximas 4 semanas después de verificar el calendario real."
+                if has_title_time_preference and preferred_specific_hour is not None:
+                    return f"No hay horarios disponibles para {specific_day} a las {preferred_specific_hour}:{preferred_specific_minute:02d} horas en las próximas 4 semanas. Te puedo mostrar otros horarios disponibles para {specific_day} si gustas."
+                else:
+                    return f"No se encontraron horarios disponibles para {specific_day} en las próximas 4 semanas después de verificar el calendario real."
             else:
-                return "❌ No se encontraron horarios disponibles en los próximos 14 días hábiles después de verificar el calendario real."
+                return "No se encontraron horarios disponibles en los próximos 14 días hábiles después de verificar el calendario real."
+        
+        # NUEVO: Verificar si se encontró el horario específico solicitado
+        requested_time_found = False
+        if has_title_time_preference and preferred_specific_hour is not None:
+            for slot in available_slots:
+                if slot['start'].hour == preferred_specific_hour:
+                    requested_time_found = True
+                    break
         
         # Formatear respuesta
         if specific_date:
@@ -1355,9 +1553,17 @@ def find_next_available_slots(service, params, project_config=None, state=None):
                 dia_esp = dias_semana[target_date_obj.weekday()]
                 mes_esp = meses[target_date_obj.month - 1]
                 fecha_legible = f"{dia_esp} {target_date_obj.day} de {mes_esp}"
-                response = f"📅 **Horarios disponibles para {fecha_legible} (verificados en calendario real):**\n\n"
+                
+                # NUEVO: Mensaje específico cuando se solicitó un horario particular
+                if has_title_time_preference and preferred_specific_hour is not None:
+                    if requested_time_found:
+                        response = f"✅ **Horario solicitado disponible para {fecha_legible}:**\n\n"
+                    else:
+                        response = f"No hay horarios disponibles para el {fecha_legible} a las {preferred_specific_hour}:{preferred_specific_minute:02d} horas. Sin embargo, los horarios disponibles son:\n\n"
+                else:
+                    response = f"**Horarios disponibles para {fecha_legible} (verificados en calendario real):**\n\n"
             except:
-                response = f"📅 **Horarios disponibles para {specific_date} (verificados en calendario real):**\n\n"
+                response = f"**Horarios disponibles para {specific_date} (verificados en calendario real):**\n\n"
         elif specific_day:
             # Si se saltó la primera semana, explicar por qué
             if first_week_skipped and first_week_date:
@@ -1373,18 +1579,18 @@ def find_next_available_slots(service, params, project_config=None, state=None):
                 for eng, esp in meses.items():
                     fecha_bloqueada = fecha_bloqueada.replace(eng, esp)
                 
-                response = f"⚠️ El {fecha_bloqueada} no está disponible por compromisos previos (verificado en calendario real).\n\n"
-                response += f"📅 **Horarios disponibles para el próximo {specific_day}:**\n\n"
+                response = f"El {fecha_bloqueada} no está disponible por compromisos previos (verificado en calendario real).\n\n"
+                response += f"**Horarios disponibles para el próximo {specific_day}:**\n\n"
             else:
                 # Verificar si encontramos el día solicitado originalmente o el siguiente día hábil
                 original_day = params[0].split('=')[1] if len(params) > 0 and '=' in params[0] and 'day=' in params[0] else None
                 if original_day and original_day != specific_day:
-                    response = f"🔄 El {original_day} no está disponible (verificado en calendario real). Te muestro el siguiente día hábil:\n\n"
-                    response += f"📅 **Horarios disponibles para {specific_day}:**\n\n"
+                    response = f"El {original_day} no está disponible (verificado en calendario real). Te muestro el siguiente día hábil:\n\n"
+                    response += f"**Horarios disponibles para {specific_day}:**\n\n"
                 else:
-                    response = f"📅 **Horarios disponibles para {specific_day} (verificados en calendario real):**\n\n"
+                    response = f"**Horarios disponibles para {specific_day} (verificados en calendario real):**\n\n"
         else:
-            response = "📅 **Próximas fechas disponibles para reunión (verificadas en calendario real de Google):**\n\n"
+            response = "**Próximas fechas disponibles para reunión (verificadas en calendario real de Google):**\n\n"
         
         dias_semana = {
             'Monday': 'lunes', 'Tuesday': 'martes', 'Wednesday': 'miércoles', 
@@ -1402,28 +1608,28 @@ def find_next_available_slots(service, params, project_config=None, state=None):
             numero = index + 1  # Asegurar que el número sea correcto
             
             # Debug: log the slot start datetime
-            logger.debug(f"🔍 DEBUG SLOT {index}: slot['start'] = {slot['start']}")
-            logger.debug(f"🔍 DEBUG SLOT {index}: slot['start'].weekday() = {slot['start'].weekday()}")
-            logger.debug(f"🔍 DEBUG SLOT {index}: slot['start'].month = {slot['start'].month}")
-            logger.debug(f"🔍 DEBUG SLOT {index}: slot['start'].day = {slot['start'].day}")
+            logger.debug(f"DEBUG SLOT {index}: slot['start'] = {slot['start']}")
+            logger.debug(f"DEBUG SLOT {index}: slot['start'].weekday() = {slot['start'].weekday()}")
+            logger.debug(f"DEBUG SLOT {index}: slot['start'].month = {slot['start'].month}")
+            logger.debug(f"DEBUG SLOT {index}: slot['start'].day = {slot['start'].day}")
             
             # Usar date_str que ya está en español o formatear correctamente
             if 'date_str' in slot:
                 fecha_esp = slot['date_str']
-                logger.debug(f"🔍 DEBUG SLOT {index}: usando date_str = {fecha_esp}")
+                logger.debug(f"DEBUG SLOT {index}: usando date_str = {fecha_esp}")
             else:
                 # Usar utilidades centralizadas para formateo de fechas
                 fecha_esp = format_date_spanish(slot['start'], include_year=True)
-                logger.debug(f"🔍 DEBUG SLOT {index}: calculado fecha_esp = {fecha_esp}")
+                logger.debug(f"DEBUG SLOT {index}: calculado fecha_esp = {fecha_esp}")
             
             # Debug: log the final values
-            logger.debug(f"🔍 DEBUG SLOT {index}: numero={numero} - fecha_esp: {fecha_esp}")
-            logger.debug(f"🔍 DEBUG SLOT {index}: year: {slot['start'].year}")
-            logger.debug(f"🔍 DEBUG SLOT {index}: time: {slot['start'].strftime('%H:%M')}")
+            logger.debug(f"DEBUG SLOT {index}: numero={numero} - fecha_esp: {fecha_esp}")
+            logger.debug(f"DEBUG SLOT {index}: year: {slot['start'].year}")
+            logger.debug(f"DEBUG SLOT {index}: time: {slot['start'].strftime('%H:%M')}")
             
             response += f"{numero}. {fecha_esp.title()} a las {slot['start'].strftime('%H:%M')} horas\n"
         
-        response += f"\n✅ **Horarios verificados contra tu calendario real de Google**\n"
+        response += f"\n**Horarios verificados contra tu calendario real de Google**\n"
         
         if specific_date:
             response += f"¿Alguno de estos horarios te acomoda? Solo dime el número o propón otra fecha."
@@ -1435,8 +1641,8 @@ def find_next_available_slots(service, params, project_config=None, state=None):
         return response
         
     except Exception as e:
-        logger.error(f"❌ ERROR CRÍTICO en find_next_available_slots: {str(e)}")
-        return f"❌ Error buscando horarios disponibles: {str(e)}\n\nPor favor verifica que la integración con Google Calendar esté configurada correctamente." 
+        logger.error(f"ERROR CRÍTICO en find_next_available_slots: {str(e)}")
+        return f"Error buscando horarios disponibles: {str(e)}\n\nPor favor verifica que la integración con Google Calendar esté configurada correctamente." 
 
 def test_google_calendar_connection(service):
     """
@@ -1449,15 +1655,15 @@ def test_google_calendar_connection(service):
         dict: Resultado del test con detalles de conectividad
     """
     try:
-        logger.info("🔍 INICIANDO TEST DE CONECTIVIDAD CON GOOGLE CALENDAR...")
+        logger.info("INICIANDO TEST DE CONECTIVIDAD CON GOOGLE CALENDAR...")
         
         # Test 1: Listar calendarios disponibles
         try:
             calendars_result = service.calendarList().list().execute()
             calendars = calendars_result.get('items', [])
-            logger.info(f"✅ Test 1 PASADO: {len(calendars)} calendario(s) accesible(s)")
+            logger.info(f"Test 1 PASADO: {len(calendars)} calendario(s) accesible(s)")
         except Exception as test1_error:
-            logger.error(f"❌ Test 1 FALLIDO: Error listando calendarios - {test1_error}")
+            logger.error(f"Test 1 FALLIDO: Error listando calendarios - {test1_error}")
             return {
                 'success': False,
                 'error': f"No se pueden listar calendarios: {test1_error}",
@@ -1483,9 +1689,9 @@ def test_google_calendar_connection(service):
             ).execute()
             
             events = events_result.get('items', [])
-            logger.info(f"✅ Test 2 PASADO: {len(events)} evento(s) encontrado(s) para hoy/mañana")
+            logger.info(f"Test 2 PASADO: {len(events)} evento(s) encontrado(s) para hoy/mañana")
         except Exception as test2_error:
-            logger.error(f"❌ Test 2 FALLIDO: Error listando eventos - {test2_error}")
+            logger.error(f"Test 2 FALLIDO: Error listando eventos - {test2_error}")
             return {
                 'success': False,
                 'error': f"No se pueden listar eventos: {test2_error}",
@@ -1511,14 +1717,14 @@ def test_google_calendar_connection(service):
             # Crear evento de prueba
             created_event = service.events().insert(calendarId='primary', body=test_event).execute()
             test_event_id = created_event.get('id')
-            logger.info(f"✅ Test 3a PASADO: Evento de prueba creado con ID {test_event_id}")
+            logger.info(f"Test 3a PASADO: Evento de prueba creado con ID {test_event_id}")
             
             # Eliminar evento de prueba inmediatamente
             service.events().delete(calendarId='primary', eventId=test_event_id).execute()
-            logger.info(f"✅ Test 3b PASADO: Evento de prueba eliminado correctamente")
+            logger.info(f"Test 3b PASADO: Evento de prueba eliminado correctamente")
             
         except Exception as test3_error:
-            logger.error(f"❌ Test 3 FALLIDO: Error creando/eliminando evento de prueba - {test3_error}")
+            logger.error(f"Test 3 FALLIDO: Error creando/eliminando evento de prueba - {test3_error}")
             return {
                 'success': False,
                 'error': f"No se pueden crear/eliminar eventos: {test3_error}",
@@ -1529,7 +1735,7 @@ def test_google_calendar_connection(service):
                 }
             }
         
-        logger.info("🎉 TODOS LOS TESTS DE CONECTIVIDAD PASARON")
+        logger.info("TODOS LOS TESTS DE CONECTIVIDAD PASARON")
         return {
             'success': True,
             'message': "Conectividad con Google Calendar verificada exitosamente",
@@ -1543,7 +1749,7 @@ def test_google_calendar_connection(service):
         }
         
     except Exception as e:
-        logger.error(f"❌ ERROR CRÍTICO en test de conectividad: {str(e)}")
+        logger.error(f"ERROR CRÍTICO en test de conectividad: {str(e)}")
         return {
             'success': False,
             'error': f"Error crítico: {str(e)}",
@@ -1558,7 +1764,7 @@ def test_google_calendar_connection(service):
 def test_calendar_connectivity(query: str, state: Annotated[dict, InjectedState]) -> str:
     """Herramienta de diagnóstico para probar la conectividad real con Google Calendar.
     
-    🎯 PROPÓSITO: Verificar que la integración con Google Calendar esté funcionando correctamente.
+    PROPÓSITO: Verificar que la integración con Google Calendar esté funcionando correctamente.
     
     Esta herramienta ejecuta una serie de tests para validar:
     1. Conexión con la API de Google Calendar
@@ -1566,7 +1772,7 @@ def test_calendar_connectivity(query: str, state: Annotated[dict, InjectedState]
     3. Permisos de escritura (crear y eliminar eventos de prueba)
     4. Formato correcto de fechas y zona horaria
     
-    📋 CASOS DE USO:
+    CASOS DE USO:
     - Diagnosticar problemas de conectividad antes de agendar
     - Verificar que las credenciales estén funcionando
     - Confirmar que los permisos estén correctamente configurados
@@ -1587,34 +1793,34 @@ def test_calendar_connectivity(query: str, state: Annotated[dict, InjectedState]
         # Extract project info
         project = state.get("project")
         if not project:
-            return "❌ Error: No se encontró información del proyecto en el estado"
+            return "Error: No se encontró información del proyecto en el estado"
         
         # Get project ID
         project_id = project.id if hasattr(project, 'id') else getattr(project, 'project_id', None)
         if not project_id:
-            return "❌ Error: No se pudo obtener el ID del proyecto"
+            return "Error: No se pudo obtener el ID del proyecto"
         
-        logger.info(f"🔍 INICIANDO TEST DE CONECTIVIDAD para proyecto {project_id}")
+        logger.info(f"INICIANDO TEST DE CONECTIVIDAD para proyecto {project_id}")
         
         # Get credentials
         credentials = get_google_credentials(project_id)
         if not credentials:
-            return f"""❌ **Error de configuración**: No se encontró integración con Google Calendar para este proyecto.
+            return f"""**Error de configuración**: No se encontró integración con Google Calendar para este proyecto.
 
-🔧 **Para solucionarlo:**
+**Para solucionarlo:**
 1. Ve a la configuración del proyecto
 2. Configura la integración con Google Calendar
 3. Autoriza los permisos necesarios
 4. Prueba nuevamente
 
-💡 **Proyecto ID**: {project_id}"""
+**Proyecto ID**: {project_id}"""
         
         # Build the Calendar API service
         try:
             service = build('calendar', 'v3', credentials=credentials)
-            logger.info("✅ Servicio de Google Calendar creado exitosamente")
+            logger.info("Servicio de Google Calendar creado exitosamente")
         except Exception as service_error:
-            return f"❌ Error creando servicio de Google Calendar: {str(service_error)}"
+            return f"Error creando servicio de Google Calendar: {str(service_error)}"
         
         # Ejecutar tests de conectividad
         test_result = test_google_calendar_connection(service)
@@ -1623,47 +1829,47 @@ def test_calendar_connectivity(query: str, state: Annotated[dict, InjectedState]
             calendar_count = test_result.get('calendar_count', 0)
             events_count = test_result.get('events_today_tomorrow', 0)
             
-            return f"""✅ **CONECTIVIDAD CON GOOGLE CALENDAR VERIFICADA**
+            return f"""**CONECTIVIDAD CON GOOGLE CALENDAR VERIFICADA**
 
-🎉 **Todos los tests pasaron exitosamente:**
-• ✅ Conexión con API establecida
-• ✅ Permisos de lectura confirmados
-• ✅ Permisos de escritura confirmados
-• ✅ Zona horaria configurada correctamente
+**Todos los tests pasaron exitosamente:**
+• Conexión con API establecida
+• Permisos de lectura confirmados
+• Permisos de escritura confirmados
+• Zona horaria configurada correctamente
 
-📊 **Información del calendario:**
-• 📅 Calendarios accesibles: {calendar_count}
-• 📋 Eventos hoy/mañana: {events_count}
-• 🌎 Zona horaria: Chile (America/Santiago)
+**Información del calendario:**
+• Calendarios accesibles: {calendar_count}
+• Eventos hoy/mañana: {events_count}
+• Zona horaria: Chile (America/Santiago)
 
-🚀 **¡El sistema está listo para agendar reuniones!**"""
+**¡El sistema está listo para agendar reuniones!**"""
         else:
             test_details = test_result.get('test_details', {})
             error_msg = test_result.get('error', 'Error desconocido')
             
             status_tests = []
-            status_tests.append(f"• {'✅' if test_details.get('calendars_test', False) else '❌'} Test de calendarios")
-            status_tests.append(f"• {'✅' if test_details.get('events_test', False) else '❌'} Test de eventos")  
-            status_tests.append(f"• {'✅' if test_details.get('create_test', False) else '❌'} Test de creación/eliminación")
+            status_tests.append(f"• {'' if test_details.get('calendars_test', False) else ''} Test de calendarios")
+            status_tests.append(f"• {'' if test_details.get('events_test', False) else ''} Test de eventos")  
+            status_tests.append(f"• {'' if test_details.get('create_test', False) else ''} Test de creación/eliminación")
             
-            return f"""❌ **PROBLEMA DE CONECTIVIDAD DETECTADO**
+            return f"""**PROBLEMA DE CONECTIVIDAD DETECTADO**
 
-🔍 **Resultado de los tests:**
+**Resultado de los tests:**
 {chr(10).join(status_tests)}
 
-❌ **Error específico:** {error_msg}
+**Error específico:** {error_msg}
 
-🔧 **Posibles soluciones:**
+**Posibles soluciones:**
 1. Verificar que la integración con Google Calendar esté activa
 2. Revisar que los permisos no hayan expirado
 3. Reautorizar la conexión con Google Calendar
 4. Contactar al administrador del sistema
 
-💡 **Proyecto ID**: {project_id}"""
+**Proyecto ID**: {project_id}"""
             
     except Exception as e:
-        logger.error(f"❌ Error en test_calendar_connectivity: {str(e)}")
-        return f"❌ Error ejecutando test de conectividad: {str(e)}"
+        logger.error(f"Error en test_calendar_connectivity: {str(e)}")
+        return f"Error ejecutando test de conectividad: {str(e)}"
 
 def validate_date_consistency(text: str) -> tuple:
     """
@@ -1682,7 +1888,7 @@ def validate_date_consistency(text: str) -> tuple:
             return True, "", None
             
         text_lower = text.lower()
-        logger.info(f"🔍 VALIDANDO CONSISTENCIA DE FECHA en calendar_tool: '{text}'")
+        logger.info(f"VALIDANDO CONSISTENCIA DE FECHA en calendar_tool: '{text}'")
         
         # Mapeo de días en español
         dias_map = {
@@ -1711,8 +1917,8 @@ def validate_date_consistency(text: str) -> tuple:
         fecha_match = re.search(fecha_pattern, text_lower)
         
         if dia_mencionado and fecha_match:
-            logger.info(f"   📅 Día detectado: {dia_mencionado} (weekday {dia_weekday})")
-            logger.info(f"   📅 Fecha detectada: {fecha_match.group(0)}")
+            logger.info(f"   Día detectado: {dia_mencionado} (weekday {dia_weekday})")
+            logger.info(f"   Fecha detectada: {fecha_match.group(0)}")
             
             # Extraer componentes de la fecha
             dia_numero = int(fecha_match.group(1))
@@ -1721,7 +1927,7 @@ def validate_date_consistency(text: str) -> tuple:
             
             # Validar que el mes sea válido
             if mes_nombre not in meses_map:
-                return False, f"❌ Mes no reconocido: {mes_nombre}", None
+                return False, f"Mes no reconocido: {mes_nombre}", None
             
             mes_numero = meses_map[mes_nombre]
             
@@ -1730,17 +1936,17 @@ def validate_date_consistency(text: str) -> tuple:
                 fecha_especifica = datetime(año, mes_numero, dia_numero)
                 fecha_weekday = fecha_especifica.weekday()
                 
-                logger.info(f"   📊 COMPARACIÓN:")
-                logger.info(f"      🗣️  Usuario dijo: {dia_mencionado} (weekday {dia_weekday})")
+                logger.info(f"   COMPARACIÓN:")
+                logger.info(f"      Usuario dijo: {dia_mencionado} (weekday {dia_weekday})")
                 # Usar mapeo correcto para mostrar el día real en el log
                 dias_weekday_to_name = ['lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo']
                 dia_real_log = dias_weekday_to_name[fecha_weekday]
-                logger.info(f"      📅 Fecha real: {fecha_especifica.strftime('%Y-%m-%d')} es {dia_real_log} (weekday {fecha_weekday})")
+                logger.info(f"      Fecha real: {fecha_especifica.strftime('%Y-%m-%d')} es {dia_real_log} (weekday {fecha_weekday})")
                 
                 # Verificar consistencia
                 if dia_weekday == fecha_weekday:
-                    logger.info(f"   ✅ CONSISTENCIA VÁLIDA: {dia_mencionado} {dia_numero} de {mes_nombre} de {año}")
-                    return True, f"✅ Fecha válida", fecha_especifica.strftime('%Y-%m-%d')
+                    logger.info(f"   CONSISTENCIA VÁLIDA: {dia_mencionado} {dia_numero} de {mes_nombre} de {año}")
+                    return True, f"Fecha válida", fecha_especifica.strftime('%Y-%m-%d')
                 else:
                     # Inconsistencia detectada - usar mapeo correcto de weekday a nombre
                     dias_weekday_to_name = ['lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo']
@@ -1751,31 +1957,31 @@ def validate_date_consistency(text: str) -> tuple:
                     
                     fecha_legible = f"{dia_numero} de {meses_esp[mes_numero]} de {año}"
                     
-                    logger.warning(f"   ❌ INCONSISTENCIA DETECTADA:")
-                    logger.warning(f"      🗣️  Usuario dijo: '{dia_mencionado} {fecha_legible}'")
-                    logger.warning(f"      📅 Pero el {fecha_legible} es {dia_real}, no {dia_mencionado}")
+                    logger.warning(f"   INCONSISTENCIA DETECTADA:")
+                    logger.warning(f"      Usuario dijo: '{dia_mencionado} {fecha_legible}'")
+                    logger.warning(f"      Pero el {fecha_legible} es {dia_real}, no {dia_mencionado}")
                     
-                    mensaje_error = f"""❌ **Error en la fecha**: 
+                    mensaje_error = f"""**Error en la fecha**: 
 
-🗣️ **Dijiste:** "{dia_mencionado} {fecha_legible}"
-📅 **Pero:** El {fecha_legible} es **{dia_real}**, no {dia_mencionado}
+**Dijiste:** "{dia_mencionado} {fecha_legible}"
+**Pero:** El {fecha_legible} es **{dia_real}**, no {dia_mencionado}
 
-🤔 **¿Qué querías decir?**
+**¿Qué querías decir?**
 1. **{dia_real} {fecha_legible}** (corregir el día)
 2. **Próximo {dia_mencionado}** (buscar el siguiente {dia_mencionado})
 
-💡 Por favor aclara cuál era tu intención."""
+Por favor aclara cuál era tu intención."""
                     
                     return False, mensaje_error, fecha_especifica.strftime('%Y-%m-%d')
                     
             except ValueError as date_error:
-                logger.error(f"   ❌ Fecha inválida: {dia_numero}/{mes_numero}/{año} - {date_error}")
-                return False, f"❌ La fecha {dia_numero} de {mes_nombre} de {año} no es válida", None
+                logger.error(f"   Fecha inválida: {dia_numero}/{mes_numero}/{año} - {date_error}")
+                return False, f"La fecha {dia_numero} de {mes_nombre} de {año} no es válida", None
         
         # Si no hay conflicto o solo hay una parte (día o fecha), es válido
-        logger.info(f"   ✅ Sin inconsistencias detectadas")
+        logger.info(f"   Sin inconsistencias detectadas")
         return True, "", None
         
     except Exception as e:
-        logger.error(f"❌ Error validando consistencia de fecha: {str(e)}")
+        logger.error(f"Error validando consistencia de fecha: {str(e)}")
         return True, "", None  # En caso de error, permitir continuar
