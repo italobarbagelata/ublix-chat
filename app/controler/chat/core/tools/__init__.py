@@ -14,7 +14,7 @@ from app.controler.chat.core.tools.contact_tool import SaveContactTool
 from app.controler.chat.core.tools.email_tool import EmailTool
 from app.controler.chat.core.tools.image_processor_tool import ImageProcessorTool
 from app.controler.chat.core.tools.calendar_tool import google_calendar_tool, test_calendar_connectivity
-from app.controler.chat.core.tools.agenda_tool_refactored import AgendaToolRefactored
+from app.controler.chat.core.tools.agenda_tool import AgendaTool
 from app.controler.chat.core.tools.mcp_tool_factory import create_mcp_tools_for_project
 
 
@@ -116,9 +116,9 @@ async def agent_tools(project_id: str, user_id: str, name: str, number_phone_age
         logging.info("Herramienta habilitada: email")
     
     if "agenda_tool" in project.enabled_tools:
-        # Usar la versión refactorizada con servicios especializados
-        always_available_tools.append(AgendaToolRefactored(project_id, project, user_id))
-        logging.info("Herramienta habilitada: agenda_tool_refactored")
+        # Usar la herramienta de agenda con servicios especializados
+        always_available_tools.append(AgendaTool(project_id, project, user_id))
+        logging.info("Herramienta habilitada: agenda_tool")
 
     
     tools.extend(always_available_tools)

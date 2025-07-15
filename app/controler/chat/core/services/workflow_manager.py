@@ -5,8 +5,10 @@ Maneja los diferentes flujos de trabajo de forma eficiente y escalable.
 
 import asyncio
 import logging
+import hashlib
+import uuid
 from typing import Dict, Any, Optional, List
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import Enum
 
 from app.controler.chat.core.security.input_validator import InputValidator, ValidationResult
@@ -30,7 +32,8 @@ class WorkflowContext:
         self.project_id = project_id
         self.project = project
         self.timestamp = datetime.utcnow()
-        self.execution_id = f"{project_id}_{user_id}_{int(self.timestamp.timestamp())}"
+        # Usar UUID para garantizar unicidad incluso en ejecuciones simultáneas
+        self.execution_id = f"{project_id}_{user_id}_{int(self.timestamp.timestamp())}_{uuid.uuid4().hex[:8]}"
 
 class WorkflowManager:
     """
@@ -41,6 +44,159 @@ class WorkflowManager:
     def __init__(self):
         self.logger = logging.getLogger(__name__)
         self.active_workflows: Dict[str, WorkflowContext] = {}
+        # Cache de deduplicación para prevenir agendamientos duplicados
+        self.appointment_cache: Dict[str, Dict[str, Any]] = {}
+    
+    def _generate_appointment_hash(self, project_id: str, title: str, start_datetime: str, attendee_email: str = "") -> str:
+        """
+        Genera un hash único para identificar citas potencialmente duplicadas.
+        
+        Args:
+            project_id: ID del proyecto
+            title: Título de la cita
+            start_datetime: Fecha/hora de inicio
+            attendee_email: Email del asistente (opcional)
+            
+        Returns:
+            Hash MD5 de la combinación de parámetros
+        """
+        # Crear una cadena única con los parámetros clave
+        unique_string = f"{project_id}_{title}_{start_datetime}_{attendee_email}".lower().strip()
+        return hashlib.md5(unique_string.encode()).hexdigest()
+    
+    def _cleanup_expired_appointments(self):
+        """Limpia citas expiradas del cache (más de 10 minutos)."""
+        current_time = datetime.utcnow()
+        expired_keys = []
+        
+        for hash_key, cache_entry in self.appointment_cache.items():
+            cache_time = cache_entry.get('cached_at', current_time)
+            if current_time - cache_time > timedelta(minutes=10):
+                expired_keys.append(hash_key)
+        
+        for key in expired_keys:
+            self.appointment_cache.pop(key, None)
+        
+        if expired_keys:
+            self.logger.info(f"Limpiadas {len(expired_keys)} citas expiradas del cache de deduplicación")
+    
+    def _is_duplicate_appointment(self, project_id: str, title: str, start_datetime: str, attendee_email: str = "") -> Optional[Dict[str, Any]]:
+        """
+        Verifica si una cita es duplicada basándose en el cache.
+        
+        Returns:
+            Datos de la cita duplicada si existe, None si no es duplicada
+        """
+        # Limpiar cache expirado primero
+        self._cleanup_expired_appointments()
+        
+        appointment_hash = self._generate_appointment_hash(project_id, title, start_datetime, attendee_email)
+        return self.appointment_cache.get(appointment_hash)
+    
+    def _cache_appointment(self, project_id: str, title: str, start_datetime: str, attendee_email: str, event_id: str, execution_id: str):
+        """Cache una cita para deduplicación futura."""
+        appointment_hash = self._generate_appointment_hash(project_id, title, start_datetime, attendee_email)
+        self.appointment_cache[appointment_hash] = {
+            'event_id': event_id,
+            'execution_id': execution_id,
+            'cached_at': datetime.utcnow(),
+            'project_id': project_id,
+            'title': title,
+            'start_datetime': start_datetime,
+            'attendee_email': attendee_email
+        }
+        self.logger.info(f"💾 Cita cacheada para deduplicación: {appointment_hash[:8]}")
+    
+    def _personalize_event_title(self, original_title: str, agenda_config: Optional[Dict[str, Any]], parameters: Dict[str, Any]) -> str:
+        """
+        Personaliza el título del evento usando la configuración title_calendar_email.
+        
+        Args:
+            original_title: Título original proporcionado por el usuario
+            agenda_config: Configuración de agenda desde la base de datos
+            parameters: Parámetros del workflow con datos del contacto
+            
+        Returns:
+            Título personalizado o título original si no hay configuración
+        """
+        if not agenda_config:
+            return original_title
+        
+        # Obtener configuración de título personalizado
+        general_settings = agenda_config.get('general_settings', {})
+        title_template = general_settings.get('title_calendar_email')
+        
+        if not title_template:
+            return original_title
+        
+        # Preparar datos para reemplazar placeholders
+        contact_name = parameters.get('attendee_name', 'Cliente')
+        contact_email = parameters.get('attendee_email', '')
+        contact_phone = parameters.get('attendee_phone', '')
+        
+        # Obtener nombre de la empresa
+        company_info = general_settings.get('company_info', {})
+        company_name = company_info.get('name', '') if isinstance(company_info, dict) else ''
+        
+        # Reemplazar placeholders
+        personalized_title = title_template
+        personalized_title = personalized_title.replace('{contact_name}', contact_name)
+        personalized_title = personalized_title.replace('{contact_email}', contact_email)
+        personalized_title = personalized_title.replace('{contact_phone}', contact_phone)
+        personalized_title = personalized_title.replace('{company_name}', company_name)
+        personalized_title = personalized_title.replace('{original_title}', original_title)
+        
+        self.logger.info(f"📝 Título personalizado: '{original_title}' → '{personalized_title}'")
+        return personalized_title
+    
+    def _should_exclude_date(self, date_obj: datetime, search_config: Dict[str, Any]) -> bool:
+        """
+        Determina si una fecha debe ser excluida basándose en la configuración.
+        
+        Args:
+            date_obj: Fecha a evaluar
+            search_config: Configuración de búsqueda
+            
+        Returns:
+            True si la fecha debe ser excluida, False si es válida
+        """
+        # Verificar si es fin de semana y exclude_weekends está activo
+        if search_config.get('exclude_weekends', True):
+            # weekday() devuelve 0=Monday, 6=Sunday
+            if date_obj.weekday() in [5, 6]:  # Sábado y Domingo
+                self.logger.debug(f"📅 Excluyendo fin de semana: {date_obj.strftime('%Y-%m-%d %A')}")
+                return True
+        
+        # Verificar si es feriado y exclude_holidays está activo
+        if search_config.get('exclude_holidays', True):
+            try:
+                # Usar la herramienta de feriados chilenos existente
+                from app.controler.chat.core.tools.datetime_tool import is_chile_holiday
+                
+                if is_chile_holiday(date_obj.date()):
+                    self.logger.debug(f"📅 Excluyendo día feriado: {date_obj.strftime('%Y-%m-%d')}")
+                    return True
+            except Exception as e:
+                self.logger.warning(f"Error verificando feriados para {date_obj.date()}: {str(e)}")
+        
+        return False
+    
+    def _get_search_date_range(self, start_date: datetime, search_config: Dict[str, Any]) -> datetime:
+        """
+        Calcula la fecha límite de búsqueda basándose en search_weeks_ahead.
+        
+        Args:
+            start_date: Fecha de inicio de búsqueda
+            search_config: Configuración de búsqueda
+            
+        Returns:
+            Fecha límite de búsqueda
+        """
+        weeks_ahead = search_config.get('search_weeks_ahead', 3)
+        end_date = start_date + timedelta(weeks=weeks_ahead)
+        
+        self.logger.info(f"📅 Rango de búsqueda: {start_date.strftime('%Y-%m-%d')} hasta {end_date.strftime('%Y-%m-%d')} ({weeks_ahead} semanas)")
+        return end_date
     
     async def execute_workflow(self, 
                              workflow_type: str,
@@ -99,9 +255,9 @@ class WorkflowManager:
     async def _execute_busqueda_horarios(self, context: WorkflowContext, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """
         Ejecuta workflow de búsqueda de horarios disponibles.
-        IMPORTANTÍSIMO: NO crear nueva instancia de AgendaToolRefactored para evitar recursión infinita.
+        IMPORTANTÍSIMO: NO crear nueva instancia de AgendaTool para evitar recursión infinita.
         """
-        # Usar directamente los servicios especializados sin crear otra instancia de AgendaToolRefactored
+        # Usar directamente los servicios especializados sin crear otra instancia de AgendaTool
         
         # Validar parámetros específicos de búsqueda
         title = parameters.get('title', '')
@@ -149,8 +305,9 @@ class WorkflowManager:
             from app.controler.chat.core.services.calendar_service import CalendarService
             calendar_service = CalendarService()
             
-            # Obtener configuración de max_slots_to_show desde tabla agenda
-            max_slots_limit = await self._get_max_slots_configuration(context.project_id)
+            # Obtener configuración completa de búsqueda desde tabla agenda
+            search_config = await self._get_search_configuration(context.project_id)
+            max_slots_limit = search_config.get('max_slots_to_show')
             
             # Detectar si se requiere búsqueda exhaustiva basada en el título o parámetros
             needs_comprehensive_search = self._should_show_comprehensive_results(title, parameters)
@@ -160,7 +317,7 @@ class WorkflowManager:
             
             self.logger.info(f"Slot limit configuration: max_slots_to_show={max_slots_limit}, comprehensive_search={needs_comprehensive_search}, effective_limit={effective_max_slots}")
             
-            # Buscar horarios disponibles directamente
+            # Buscar horarios disponibles con filtros de configuración
             available_slots = await calendar_service.find_available_slots(
                 project_id=context.project_id,
                 user_id=context.user_id,
@@ -168,7 +325,8 @@ class WorkflowManager:
                 specific_date=target_date,  # Ahora incluirá la fecha extraída del título
                 duration_hours=1,  # duración por defecto
                 max_slots=effective_max_slots,  # Usar límite inteligente
-                project=context.project  # Para compatibilidad temporal hasta migración completa
+                project=context.project,  # Para compatibilidad temporal hasta migración completa
+                search_config=search_config  # Pasar configuración de filtros
             )
             
             if available_slots:
@@ -252,6 +410,47 @@ class WorkflowManager:
         
         return slots
     
+    async def _get_search_configuration(self, project_id: str) -> Dict[str, Any]:
+        """
+        Obtiene todas las configuraciones de BUSQUEDA_HORARIOS desde la tabla agenda.
+        
+        Args:
+            project_id: ID del proyecto
+            
+        Returns:
+            Diccionario con configuraciones de búsqueda o valores por defecto
+        """
+        default_config = {
+            'max_slots_to_show': None,
+            'exclude_holidays': True,
+            'exclude_weekends': True,
+            'search_weeks_ahead': 3
+        }
+        
+        try:
+            from app.controler.chat.store.supabase_client import SupabaseClient
+            supabase_client = SupabaseClient()
+            response = supabase_client.client.table("agenda").select("workflow_settings").eq("project_id", project_id).execute()
+            
+            if response.data and len(response.data) > 0:
+                agenda_config = response.data[0]
+                workflow_settings = agenda_config.get('workflow_settings', {})
+                busqueda_settings = workflow_settings.get('BUSQUEDA_HORARIOS', {})
+                
+                # Combinar configuración con valores por defecto
+                config = default_config.copy()
+                config.update(busqueda_settings)
+                
+                self.logger.info(f"🔍 Configuración BUSQUEDA_HORARIOS obtenida: {config}")
+                return config
+            else:
+                self.logger.warning(f"No se encontró configuración para project_id: {project_id}, usando valores por defecto")
+                return default_config
+                
+        except Exception as e:
+            self.logger.error(f"Error obteniendo configuración de búsqueda: {str(e)}")
+            return default_config
+
     async def _get_max_slots_configuration(self, project_id: str) -> Optional[int]:
         """
         Obtiene la configuración max_slots_to_show desde la tabla agenda.
@@ -420,6 +619,29 @@ class WorkflowManager:
                     "MISSING_REQUIRED_PARAMS"
                 )
         
+        # 🚨 VALIDACIÓN ANTI-DUPLICADOS
+        # Verificar si ya existe una cita idéntica reciente
+        duplicate_check = self._is_duplicate_appointment(
+            project_id=context.project_id,
+            title=parameters['title'],
+            start_datetime=parameters['start_datetime'],
+            attendee_email=parameters.get('attendee_email', '')
+        )
+        
+        if duplicate_check:
+            self.logger.warning(f"🚨 CITA DUPLICADA DETECTADA - Previniendo agendamiento duplicado")
+            self.logger.warning(f"   Original event_id: {duplicate_check['event_id']}")
+            self.logger.warning(f"   Original execution_id: {duplicate_check['execution_id']}")
+            
+            return {
+                'success': True,  # Devolver éxito para no confundir al agente
+                'workflow_type': WorkflowType.AGENDA_COMPLETA.value,
+                'event_id': duplicate_check['event_id'],
+                'execution_id': duplicate_check['execution_id'],
+                'message': 'La cita ya fue agendada anteriormente',
+                'is_duplicate': True
+            }
+        
         try:
             # 1. Verificar disponibilidad
             conflicts = await calendar_service.check_conflicts(
@@ -447,14 +669,34 @@ class WorkflowManager:
                         'workflow_type': WorkflowType.AGENDA_COMPLETA.value
                     }
             
-            # 2. Crear evento (usar force_create si hay conflictos y el usuario los aceptó)
+            # 2. Determinar si incluir Google Meet basado en configuración del proyecto
+            auto_include_meet = True  # Valor por defecto
+            if agenda_config:
+                general_settings = agenda_config.get('general_settings', {})
+                auto_include_meet = general_settings.get('auto_include_meet', True)
+                self.logger.info(f"📅 Configuración auto_include_meet desde tabla agenda: {auto_include_meet}")
+            else:
+                self.logger.warning("📅 No hay configuración de agenda, usando auto_include_meet=True por defecto")
+            
+            # Permitir override explícito por parámetro (para casos especiales)
+            include_meet_final = parameters.get('include_meet', auto_include_meet)
+            self.logger.info(f"📅 include_meet final: {include_meet_final} (config: {auto_include_meet}, override: {parameters.get('include_meet', 'None')})")
+            
+            # 3. Personalizar título del evento usando configuración title_calendar_email
+            personalized_title = self._personalize_event_title(
+                original_title=parameters['title'],
+                agenda_config=agenda_config,
+                parameters=parameters
+            )
+            
+            # 4. Crear evento
             event_result = await calendar_service.create_event(
-                title=parameters['title'],
+                title=personalized_title,
                 start_datetime=parameters['start_datetime'],
                 end_datetime=parameters.get('end_datetime'),
                 attendee_email=parameters.get('attendee_email', ''),  # Opcional para uso interno
                 description=parameters.get('description', ''),
-                include_meet=parameters.get('include_meet', True),
+                include_meet=include_meet_final,
                 force_create=bool(conflicts and (parameters.get('force_create', False) or auto_force_create)),
                 project_id=context.project_id,
                 project=context.project  # Para compatibilidad temporal hasta migración completa
@@ -463,7 +705,7 @@ class WorkflowManager:
             if not event_result['success']:
                 return event_result
             
-            # 3. Actualizar contacto (solo si hay email)
+            # 5. Actualizar contacto (solo si hay email)
             attendee_email = parameters.get('attendee_email', '')
             if attendee_email:  
                 await contact_manager.update_or_create_contact(
@@ -477,7 +719,7 @@ class WorkflowManager:
             else:
                 self.logger.info("Cita creada para uso interno (sin email del cliente)")
             
-            # 4. Enviar notificaciones (en paralelo) - solo si hay email
+            # 6. Enviar notificaciones (en paralelo) - solo si hay email
             if attendee_email:
                 # Obtener datos reales del contacto desde la base de datos
                 stored_contact = await contact_manager.get_contact(context.user_id, context.project_id)
@@ -509,6 +751,16 @@ class WorkflowManager:
                     user_id=context.user_id,
                     conversation_summary=parameters.get('conversation_summary', '')
                 )
+            
+            # 💾 CACHEAR CITA PARA DEDUPLICACIÓN FUTURA (usar título personalizado)
+            self._cache_appointment(
+                project_id=context.project_id,
+                title=personalized_title,
+                start_datetime=parameters['start_datetime'],
+                attendee_email=parameters.get('attendee_email', ''),
+                event_id=event_result['event_id'],
+                execution_id=context.execution_id
+            )
             
             return {
                 'success': True,

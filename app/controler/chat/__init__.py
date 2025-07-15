@@ -271,12 +271,8 @@ async def chat(
 
             response = await graph.execute_with_immediate_response(final_message, background_tasks)
             
-            # Si hubo imagen, agregar su URL a la respuesta
-            if image_url:
-                response['image_url'] = image_url
-                # Asegurarnos de que el content contenga tanto el mensaje como la imagen
-                if 'content' in response:
-                    response['content'] = final_message
+            # NO enviar la imagen de vuelta al usuario
+            # La imagen se usa solo para procesamiento interno
 
             return JSONResponse(status_code=200, content=response)
 

@@ -334,9 +334,9 @@ class FuzzyIntentDetector:
     def get_required_tools(self, intent_match: IntentMatch) -> List[str]:
         """Determina qué herramientas se requieren para la intención detectada."""
         tool_mapping = {
-            IntentCategory.BOOKING: ['agenda_tool_refactored', 'save_contact_tool'],
-            IntentCategory.SCHEDULE_INQUIRY: ['agenda_tool_refactored'],
-            IntentCategory.SCHEDULE_CONFIRM: ['agenda_tool_refactored', 'save_contact_tool'],
+            IntentCategory.BOOKING: ['agenda_tool', 'save_contact_tool'],
+            IntentCategory.SCHEDULE_INQUIRY: ['agenda_tool'],
+            IntentCategory.SCHEDULE_CONFIRM: ['agenda_tool', 'save_contact_tool'],
             IntentCategory.CONTACT_UPDATE: ['save_contact_tool'],
             IntentCategory.GENERAL_INQUIRY: ['current_datetime_tool'],
             IntentCategory.SUPPORT: ['current_datetime_tool'],

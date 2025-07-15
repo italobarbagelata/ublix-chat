@@ -50,7 +50,7 @@ class ServiceInitializer:
             
             # 3. Los servicios individuales se inicializan bajo demanda
             # ContactManager, CalendarService, NotificationService, WorkflowManager
-            # se inicializan cuando se crean instancias de AgendaToolRefactored
+            # se inicializan cuando se crean instancias de AgendaTool
             
             self.initialized = True
             initialization_status['service_initializer'] = 'ready'

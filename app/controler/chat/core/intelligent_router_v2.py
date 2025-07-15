@@ -39,7 +39,7 @@ class IntelligentRouterV2:
         
         # Configuración de herramientas
         self.tool_categories = {
-            'scheduling': ['agenda_tool_refactored', 'calendar', 'current_datetime_tool'],
+            'scheduling': ['agenda_tool', 'calendar', 'current_datetime_tool'],
             'contact': ['save_contact_tool'],
             'communication': ['email_tool'],
             'information': ['current_datetime_tool', 'week_info_tool', 'check_chile_holiday_tool'],
@@ -228,7 +228,7 @@ class IntelligentRouterV2:
         # En el futuro, esto vendría del estado o configuración del proyecto
         # Por ahora, usar lista predeterminada
         default_available = [
-            'agenda_tool_refactored', 'save_contact_tool', 'current_datetime_tool',
+            'agenda_tool', 'save_contact_tool', 'current_datetime_tool',
             'week_info_tool', 'check_chile_holiday_tool', 'test_calendar_connectivity'
         ]
         
@@ -253,7 +253,7 @@ class IntelligentRouterV2:
                 return 'sequential'
         
         # Para herramientas bloqueantes, secuencial
-        blocking_tools = ['save_contact_tool', 'agenda_tool_refactored']
+        blocking_tools = ['save_contact_tool', 'agenda_tool']
         if any(tool in blocking_tools for tool in tools):
             return 'sequential'
         
@@ -335,7 +335,7 @@ class IntelligentRouterV2:
         """Valida que las herramientas sean accesibles."""
         # En el futuro, esto verificaría contra configuración real del proyecto
         valid_tool_names = [
-            'agenda_tool_refactored', 'save_contact_tool', 'current_datetime_tool',
+            'agenda_tool', 'save_contact_tool', 'current_datetime_tool',
             'week_info_tool', 'check_chile_holiday_tool', 'test_calendar_connectivity'
         ]
         

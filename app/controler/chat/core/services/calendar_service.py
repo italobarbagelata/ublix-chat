@@ -37,7 +37,8 @@ class CalendarService:
                                  specific_date: Optional[str] = None,
                                  duration_hours: int = 1,
                                  max_slots: Optional[int] = None,
-                                 project: Any = None) -> List[Dict[str, Any]]:
+                                 project: Any = None,
+                                 search_config: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         """
         Busca slots disponibles en el calendario.
         
@@ -49,6 +50,7 @@ class CalendarService:
             duration_hours: Duración en horas
             max_slots: Máximo número de slots a retornar
             project: Objeto proyecto para configuración
+            search_config: Configuración de filtros (exclude_holidays, exclude_weekends, search_weeks_ahead)
             
         Returns:
             Lista de slots disponibles
@@ -68,6 +70,23 @@ class CalendarService:
             
             if title:
                 query_parts.append(f"title={title}")
+            
+            # Agregar configuraciones de filtro si están disponibles
+            if search_config:
+                exclude_holidays = search_config.get('exclude_holidays', True)
+                exclude_weekends = search_config.get('exclude_weekends', True)
+                search_weeks_ahead = search_config.get('search_weeks_ahead', 3)
+                
+                if exclude_holidays:
+                    query_parts.append("exclude_holidays=true")
+                    
+                if exclude_weekends:
+                    query_parts.append("exclude_weekends=true")
+                    
+                if search_weeks_ahead != 3:  # Solo agregar si es diferente al valor por defecto
+                    query_parts.append(f"search_weeks_ahead={search_weeks_ahead}")
+                
+                self.logger.info(f"🔍 Filtros aplicados: exclude_holidays={exclude_holidays}, exclude_weekends={exclude_weekends}, search_weeks_ahead={search_weeks_ahead}")
             
             # Si hay preferencia de tiempo, usar un límite mayor para buscar en todo el día
             if has_time_preference:

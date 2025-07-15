@@ -628,9 +628,31 @@ def create_event(service, params, state=None, project_config=None):
         if not project_config:
             project_config = get_default_calendar_config()
         
+        # Obtener duración desde workflow_settings si está disponible
+        default_duration = project_config.get("default_duration", 1.0)
+        
+        # Intentar obtener default_duration_minutes desde la configuración del proyecto
+        project = state.get("project") if state else None
+        if project:
+            project_id = project.id if hasattr(project, 'id') else getattr(project, 'project_id', None)
+            if project_id:
+                try:
+                    from app.controler.chat.store.supabase_client import SupabaseClient
+                    supabase_client = SupabaseClient()
+                    response = supabase_client.client.table("agenda").select("workflow_settings").eq("project_id", project_id).execute()
+                    
+                    if response.data and len(response.data) > 0:
+                        workflow_settings = response.data[0].get("workflow_settings", {})
+                        agenda_settings = workflow_settings.get("AGENDA_COMPLETA", {})
+                        duration_minutes = agenda_settings.get("default_duration_minutes", None)
+                        if duration_minutes:
+                            default_duration = duration_minutes / 60.0
+                            logger.info(f"Usando default_duration_minutes para crear evento: {duration_minutes} minutos ({default_duration} horas)")
+                except Exception as e:
+                    logger.warning(f"Error obteniendo default_duration_minutes: {e}")
+        
         # Parse parameters - usar configuración del proyecto
         now_chile = datetime.now(CHILE_TZ)
-        default_duration = project_config.get("default_duration", 1.0)
         default_start = now_chile + timedelta(hours=1)
         default_end = default_start + timedelta(hours=default_duration)
         
@@ -966,6 +988,25 @@ def check_availability(service, params, project_config=None):
             if not project_config:
                 project_config = get_default_calendar_config()
             default_duration = project_config.get("default_duration", 1.0)
+            
+            # Intentar obtener default_duration_minutes desde la configuración del proyecto
+            project_id = project_config.get('project_id', None)
+            if project_id:
+                try:
+                    from app.controler.chat.store.supabase_client import SupabaseClient
+                    supabase_client = SupabaseClient()
+                    response = supabase_client.client.table("agenda").select("workflow_settings").eq("project_id", project_id).execute()
+                    
+                    if response.data and len(response.data) > 0:
+                        workflow_settings = response.data[0].get("workflow_settings", {})
+                        agenda_settings = workflow_settings.get("AGENDA_COMPLETA", {})
+                        duration_minutes = agenda_settings.get("default_duration_minutes", None)
+                        if duration_minutes:
+                            default_duration = duration_minutes / 60.0
+                            logger.info(f"Usando default_duration_minutes para check_availability: {duration_minutes} minutos ({default_duration} horas)")
+                except Exception as e:
+                    logger.warning(f"Error obteniendo default_duration_minutes: {e}")
+            
             start_dt = datetime.fromisoformat(start_time)
             end_dt = start_dt + timedelta(hours=default_duration)
             end_time = end_dt.isoformat()
@@ -1017,6 +1058,38 @@ def find_next_available_slots(service, params, project_config=None, state=None):
         duration_hours = project_config.get("default_duration", 1.0)
         default_start_hour = project_config.get("start_hour", 9)
         default_end_hour = project_config.get("end_hour", 18)
+        
+        # Obtener duración por defecto desde workflow_settings si está disponible
+        default_duration_minutes = None
+        
+        def generate_time_slots(start_hour, end_hour, duration_minutes, target_date, timezone):
+            """
+            Genera slots de tiempo basados en la duración configurada.
+            
+            Args:
+                start_hour: Hora de inicio (ej: 9)
+                end_hour: Hora de fin (ej: 18)
+                duration_minutes: Duración en minutos (30 o 60)
+                target_date: Fecha objetivo
+                timezone: Zona horaria
+                
+            Returns:
+                Lista de tuplas (start_datetime, end_datetime)
+            """
+            slots = []
+            current_time = datetime.combine(target_date, datetime.min.time().replace(hour=start_hour, minute=0))
+            current_time = current_time.replace(tzinfo=timezone)
+            end_time = datetime.combine(target_date, datetime.min.time().replace(hour=end_hour, minute=0))
+            end_time = end_time.replace(tzinfo=timezone)
+            
+            while current_time < end_time:
+                slot_end = current_time + timedelta(minutes=duration_minutes)
+                # Verificar que el slot no exceda el horario laboral
+                if slot_end <= end_time:
+                    slots.append((current_time, slot_end))
+                current_time += timedelta(minutes=duration_minutes)
+            
+            return slots
         working_days = project_config.get("working_days", ["monday", "tuesday", "wednesday", "thursday", "friday"])
         
         # Estas variables indican si el usuario especificó preferencias explícitamente
@@ -1063,6 +1136,12 @@ def find_next_available_slots(service, params, project_config=None, state=None):
                         config_max_slots = busqueda_settings.get("max_slots_to_show", 5)
                         max_slots_to_show = config_max_slots
                         
+                        # Obtener default_duration_minutes desde configuración
+                        default_duration_minutes = agenda_settings.get("default_duration_minutes", None)
+                        if default_duration_minutes:
+                            duration_hours = default_duration_minutes / 60.0
+                            logger.info(f"Usando default_duration_minutes de configuración: {default_duration_minutes} minutos ({duration_hours} horas)")
+                        
                         logger.warning(f"Configuración granular cargada directamente (consulta adicional): {len(granular_schedule)} días configurados")
                         logger.warning(f"max_slots_to_show desde consulta directa: {max_slots_to_show}")
                     else:
@@ -1076,6 +1155,11 @@ def find_next_available_slots(service, params, project_config=None, state=None):
         specific_day = None  # Para buscar en un día específico
         specific_date = None  # Para buscar en una fecha específica (YYYY-MM-DD)
         week_offset = 0  # Para comenzar búsqueda desde semana específica
+        
+        # Variables para filtros de búsqueda
+        exclude_holidays = True  # Por defecto excluir feriados
+        exclude_weekends = True  # Por defecto excluir fines de semana
+        search_weeks_ahead = 3   # Por defecto buscar 3 semanas adelante
         
         # Variable para almacenar el título que puede contener preferencias de tiempo
         query_title = ""
@@ -1104,6 +1188,15 @@ def find_next_available_slots(service, params, project_config=None, state=None):
                 elif key == 'week_offset':  # Nuevo parámetro
                     week_offset = int(value)
                     logger.info(f"Week offset configurado: {week_offset} semanas adelante")
+                elif key == 'exclude_holidays':
+                    exclude_holidays = value.lower() in ['true', '1', 'yes', 'sí', 'si']
+                    logger.info(f"Filtro exclude_holidays: {exclude_holidays}")
+                elif key == 'exclude_weekends':
+                    exclude_weekends = value.lower() in ['true', '1', 'yes', 'sí', 'si']
+                    logger.info(f"Filtro exclude_weekends: {exclude_weekends}")
+                elif key == 'search_weeks_ahead':
+                    search_weeks_ahead = int(value)
+                    logger.info(f"Rango de búsqueda: {search_weeks_ahead} semanas adelante")
         
         # NUEVO: Analizar el título para detectar preferencias de tiempo específicas
         def detect_time_preference_from_title(title):
@@ -1162,7 +1255,8 @@ def find_next_available_slots(service, params, project_config=None, state=None):
         
         logger.info(f"INICIANDO BÚSQUEDA DE HORARIOS DISPONIBLES:")
         logger.info(f"   Fecha actual: {now_chile.strftime('%Y-%m-%d %H:%M')} (Chile)")
-        logger.info(f"   Duración: {duration_hours} horas")
+        duration_minutes_used = int(default_duration_minutes) if default_duration_minutes else 60
+        logger.info(f"   Duración: {duration_minutes_used} minutos ({duration_hours} horas)")
         logger.info(f"   Horario laboral: {preferred_start_hour}:00 - {preferred_end_hour}:00")
         logger.info(f"   Máximo slots a mostrar: {max_slots_to_show}")
         logger.info(f"   Día específico solicitado: {specific_day or 'No especificado'}")
@@ -1249,7 +1343,8 @@ def find_next_available_slots(service, params, project_config=None, state=None):
                 logger.info(f"BÚSQUEDA ESPECÍFICA DE FECHA:")
                 logger.info(f"   Fecha objetivo: {target_weekday} (0=Lunes, 6=Domingo)")
                 logger.info(f"   Fecha actual: {get_day_name_spanish(now_chile.weekday())} {now_chile.strftime('%Y-%m-%d %H:%M')} (weekday={now_chile.weekday()})")
-                logger.info(f"   Duración: {duration_hours} horas")
+                duration_minutes_used = int(default_duration_minutes) if default_duration_minutes else 60
+                logger.info(f"   Duración: {duration_minutes_used} minutos ({duration_hours} horas)")
                 logger.info(f"   Horario preferido: {preferred_start_hour}:00 - {preferred_end_hour}:00")
                 
                 # Verificar si la fecha está en el pasado
@@ -1272,7 +1367,7 @@ def find_next_available_slots(service, params, project_config=None, state=None):
                 # Actualizar contador de días verificados
                 days_checked = 1
                 
-                # Buscar slots en la fecha específica
+                # Buscar slots en la fecha específica usando la duración configurada\n                duration_minutes = int(default_duration_minutes) if default_duration_minutes else 60  # Por defecto 60 minutos
                 for start_hour, end_hour in time_slots:
                     # INTERSECCIÓN: Respetar el horario preferido por el usuario (ej. tarde)
                     effective_start_hour = max(start_hour, preferred_start_hour)
@@ -1280,47 +1375,47 @@ def find_next_available_slots(service, params, project_config=None, state=None):
                     
                     logger.debug(f"      Verificando franja {start_hour}:00-{end_hour}:00, ajustada a preferencia: {effective_start_hour}:00-{effective_end_hour}:00")
 
-                    # NUEVO: Si hay tiempo específico solicitado, priorizar ese horario
-                    hours_to_check = []
-                    if has_title_time_preference and preferred_specific_hour is not None:
-                        # Verificar primero el horario específico si está en la franja
-                        if effective_start_hour <= preferred_specific_hour <= effective_end_hour:
-                            hours_to_check.append(preferred_specific_hour)
-                            logger.info(f"      PRIORIZANDO horario específico solicitado: {preferred_specific_hour}:00")
-                        
-                        # Luego agregar horas adyacentes para ofrecer alternativas
-                        for hour in range(effective_start_hour, effective_end_hour - int(duration_hours) + 1):
-                            if hour != preferred_specific_hour:
-                                hours_to_check.append(hour)
-                    else:
-                        # Comportamiento normal: iterar secuencialmente
-                        hours_to_check = list(range(effective_start_hour, effective_end_hour - int(duration_hours) + 1))
+                    # Obtener duración en minutos de la configuración
+                    duration_minutes = int(default_duration_minutes) if default_duration_minutes else 60
+                    logger.debug(f"      Usando duración de {duration_minutes} minutos para generar slots")
 
-                    # Iterar sobre las horas en el orden de prioridad determinado
-                    for hour in hours_to_check:
+                    # Generar slots basados en la duración configurada
+                    time_slots_list = generate_time_slots(effective_start_hour, effective_end_hour, duration_minutes, target_date, CHILE_TZ)
+                    
+                    # NUEVO: Si hay tiempo específico solicitado, priorizar ese horario
+                    slots_to_check = []
+                    if has_title_time_preference and preferred_specific_hour is not None:
+                        # Buscar slots que coincidan con la hora específica solicitada
+                        for slot_start, slot_end in time_slots_list:
+                            if slot_start.hour == preferred_specific_hour:
+                                slots_to_check.insert(0, (slot_start, slot_end))  # Priorizar al inicio
+                                logger.info(f"      PRIORIZANDO slot específico solicitado: {slot_start.strftime('%H:%M')}-{slot_end.strftime('%H:%M')}")
+                            else:
+                                slots_to_check.append((slot_start, slot_end))
+                    else:
+                        # Comportamiento normal: usar todos los slots generados
+                        slots_to_check = time_slots_list
+
+                    # Iterar sobre los slots en el orden de prioridad determinado
+                    for slot_start, slot_end in slots_to_check:
                         # Si es hoy, no buscar horarios que ya pasaron
                         is_today = target_date == now_chile.date()
-                        if is_today and hour <= now_chile.hour:
-                            logger.debug(f"          {hour}:00 - Ya pasó (hora actual: {now_chile.hour}:00)")
+                        if is_today and slot_start <= now_chile:
+                            logger.debug(f"          {slot_start.strftime('%H:%M')} - Ya pasó (hora actual: {now_chile.strftime('%H:%M')})")
                             continue
-                        
-                        # Crear datetime para el slot
-                        slot_start = datetime.combine(target_date, datetime.min.time().replace(hour=hour))
-                        slot_start = slot_start.replace(tzinfo=CHILE_TZ)
-                        slot_end = slot_start + timedelta(hours=duration_hours)
                         
                         # Verificar que el slot termine dentro de la franja horaria
                         if slot_end.hour > effective_end_hour or (slot_end.hour == effective_end_hour and slot_end.minute > 0):
-                            logger.debug(f"         {hour}:00 - Slot excede franja horaria (termina a las {slot_end.strftime('%H:%M')})")
+                            logger.debug(f"         {slot_start.strftime('%H:%M')} - Slot excede franja horaria (termina a las {slot_end.strftime('%H:%M')})")
                             continue
                         
-                        logger.debug(f"         Verificando disponibilidad para {hour}:00...")
+                        logger.debug(f"         Verificando disponibilidad para {slot_start.strftime('%H:%M')}...")
                         is_available, conflicts_or_error = check_slot_availability_safe(slot_start, slot_end)
                         
                         # NUEVO: Mensaje especial para tiempo específico solicitado
                         is_requested_time = (has_title_time_preference and 
                                            preferred_specific_hour is not None and 
-                                           hour == preferred_specific_hour)
+                                           slot_start.hour == preferred_specific_hour)
                         
                         if is_available:
                             slot_dict = create_slot_dict(slot_start, slot_end, duration_hours)
@@ -1328,9 +1423,9 @@ def find_next_available_slots(service, params, project_config=None, state=None):
                             slots_found += 1
                             
                             if is_requested_time:
-                                logger.info(f"         {hour}:00 DISPONIBLE - ✅ HORARIO ESPECÍFICO SOLICITADO - Slot #{slots_found}")
+                                logger.info(f"         {slot_start.strftime('%H:%M')} DISPONIBLE - ✅ HORARIO ESPECÍFICO SOLICITADO - Slot #{slots_found}")
                             else:
-                                logger.info(f"         {hour}:00 DISPONIBLE - Slot #{slots_found}")
+                                logger.info(f"         {slot_start.strftime('%H:%M')} DISPONIBLE - Slot #{slots_found}")
                             
                             # Si hay preferencia horaria específica del usuario, verificar TODO el rango
                             # Si no hay preferencia del usuario, respetar el límite max_slots_to_show
@@ -1340,14 +1435,14 @@ def find_next_available_slots(service, params, project_config=None, state=None):
                         else:
                             # Log detallado de por qué no está disponible
                             if is_requested_time:
-                                logger.warning(f"         {hour}:00 - ❌ HORARIO ESPECÍFICO SOLICITADO NO DISPONIBLE")
+                                logger.warning(f"         {slot_start.strftime('%H:%M')} - ❌ HORARIO ESPECÍFICO SOLICITADO NO DISPONIBLE")
                             
                             if conflicts_or_error and isinstance(conflicts_or_error, list) and len(conflicts_or_error) > 0:
                                 if 'error' in conflicts_or_error[0]:
-                                    logger.error(f"         {hour}:00 - Error verificando: {conflicts_or_error[0]['error']}")
+                                    logger.error(f"         {slot_start.strftime('%H:%M')} - Error verificando: {conflicts_or_error[0]['error']}")
                                 else:
                                     conflict_titles = [c.get('summary', 'Evento sin título') for c in conflicts_or_error]
-                                    logger.debug(f"         {hour}:00 - No disponible, conflictos: {', '.join(conflict_titles)}")
+                                    logger.debug(f"         {slot_start.strftime('%H:%M')} - No disponible, conflictos: {', '.join(conflict_titles)}")
                     
                     # Si ya encontramos suficientes slots, salir del loop de franjas
                     # Pero solo si NO hay preferencia horaria específica del usuario
@@ -1386,13 +1481,30 @@ def find_next_available_slots(service, params, project_config=None, state=None):
             
             logger.info(f"BÚSQUEDA ESPECÍFICA DE DÍA: {target_day_name}")
 
-            for week_offset_day in range(4):
+            # Usar search_weeks_ahead en lugar de valor hardcodeado
+            max_weeks_to_search = search_weeks_ahead if search_weeks_ahead > 0 else 4
+            
+            for week_offset_day in range(max_weeks_to_search):
                 days_ahead = target_weekday - now_chile.weekday() + (week_offset_day * 7)
                 
                 if days_ahead < 0:
                     continue
                     
                 current_date = now_chile.date() + timedelta(days=days_ahead)
+                
+                # Aplicar filtros de exclusión
+                if exclude_weekends and current_date.weekday() in [5, 6]:
+                    logger.debug(f"📅 Saltando {current_date} - Fin de semana excluido")
+                    continue
+                
+                if exclude_holidays:
+                    try:
+                        from app.controler.chat.core.tools.datetime_tool import is_chile_holiday
+                        if is_chile_holiday(current_date):
+                            logger.debug(f"📅 Saltando {current_date} - Día feriado excluido")
+                            continue
+                    except Exception as holiday_error:
+                        logger.warning(f"Error verificando feriados para {current_date}: {holiday_error}")
                 
                 day_slots = []
                 time_slots_for_day = get_time_slots_for_day(target_day_name, granular_schedule)
@@ -1404,11 +1516,13 @@ def find_next_available_slots(service, params, project_config=None, state=None):
 
                     logger.debug(f"      Verificando franja {start_h}:00-{end_h}:00, ajustada a preferencia: {effective_start_hour}:00-{effective_end_hour}:00")
                     
-                    for hour in range(effective_start_hour, effective_end_hour - int(duration_hours) + 1):
-                        slot_start = datetime.combine(current_date, datetime.min.time().replace(hour=hour))
-                        slot_start = slot_start.replace(tzinfo=CHILE_TZ)
-                        slot_end = slot_start + timedelta(hours=duration_hours)
-
+                    # Obtener duración en minutos de la configuración
+                    duration_minutes = int(default_duration_minutes) if default_duration_minutes else 60
+                    
+                    # Generar slots basados en la duración configurada
+                    time_slots_list = generate_time_slots(effective_start_hour, effective_end_hour, duration_minutes, current_date, CHILE_TZ)
+                    
+                    for slot_start, slot_end in time_slots_list:
                         is_available, _ = check_slot_availability_safe(slot_start, slot_end)
                         
                         if is_available:
@@ -1429,12 +1543,27 @@ def find_next_available_slots(service, params, project_config=None, state=None):
             if not available_slots:
                 logger.info(f"{specific_day} no disponible, buscando siguiente día hábil...")
                 
-                for day_offset in range(1, 14):
+                # Usar search_weeks_ahead para el rango de búsqueda de respaldo
+                max_search_days_fallback = search_weeks_ahead * 7 if search_weeks_ahead > 0 else 14
+                
+                for day_offset in range(1, max_search_days_fallback + 1):
                     current_date = now_chile.date() + timedelta(days=day_offset)
                     current_day_name = day_names[current_date.weekday()]
                     
                     if current_day_name not in working_days:
                         continue
+                    
+                    # Aplicar filtros de exclusión
+                    if exclude_weekends and current_date.weekday() in [5, 6]:
+                        continue
+                    
+                    if exclude_holidays:
+                        try:
+                            from app.controler.chat.core.tools.datetime_tool import is_chile_holiday
+                            if is_chile_holiday(current_date):
+                                continue
+                        except Exception:
+                            pass  # Continuar si hay error verificando feriados
                     
                     time_slots = get_time_slots_for_day(current_day_name, granular_schedule)
                     
@@ -1446,11 +1575,13 @@ def find_next_available_slots(service, params, project_config=None, state=None):
 
                         logger.debug(f"      Verificando franja {start_hour}:00-{end_hour}:00, ajustada a preferencia: {effective_start_hour}:00-{effective_end_hour}:00")
 
-                        for hour in range(effective_start_hour, effective_end_hour - int(duration_hours) + 1):
-                            slot_start = datetime.combine(current_date, datetime.min.time().replace(hour=hour))
-                            slot_start = slot_start.replace(tzinfo=CHILE_TZ)
-                            slot_end = slot_start + timedelta(hours=duration_hours)
-                            
+                        # Obtener duración en minutos de la configuración
+                        duration_minutes = int(default_duration_minutes) if default_duration_minutes else 60
+                        
+                        # Generar slots basados en la duración configurada
+                        time_slots_list = generate_time_slots(effective_start_hour, effective_end_hour, duration_minutes, current_date, CHILE_TZ)
+                        
+                        for slot_start, slot_end in time_slots_list:
                             is_available, _ = check_slot_availability_safe(slot_start, slot_end)
                             
                             if is_available:
@@ -1469,9 +1600,11 @@ def find_next_available_slots(service, params, project_config=None, state=None):
                     return f"No hay horarios disponibles en los próximos 14 días hábiles después de verificar el calendario real."
         else:
             start_day_offset = week_offset * 7
-            end_day_offset = start_day_offset + 14
+            # Usar search_weeks_ahead de la configuración en lugar de valor hardcodeado
+            max_search_days = search_weeks_ahead * 7
+            end_day_offset = start_day_offset + max_search_days
             
-            logger.info(f"Buscando desde día {start_day_offset} hasta día {end_day_offset} (week_offset: {week_offset})...")
+            logger.info(f"🔍 Buscando desde día {start_day_offset} hasta día {end_day_offset} (week_offset: {week_offset}, search_weeks_ahead: {search_weeks_ahead})...")
             days_checked = 0
             slots_found = 0
             
@@ -1483,8 +1616,24 @@ def find_next_available_slots(service, params, project_config=None, state=None):
                 
                 # 1. Verificar si es día laboral
                 if current_day_name not in working_days:
-                    logger.info(f"    Saltando {current_date} ({current_day_name}) - No es día laboral")
+                    logger.debug(f"    Saltando {current_date} ({current_day_name}) - No es día laboral")
                     continue
+                
+                # 2. Aplicar filtro de fines de semana si está habilitado
+                if exclude_weekends and current_date.weekday() in [5, 6]:  # Sábado y Domingo
+                    logger.debug(f"📅 Saltando {current_date} ({current_day_name}) - Fin de semana excluido")
+                    continue
+                
+                # 3. Aplicar filtro de feriados si está habilitado
+                if exclude_holidays:
+                    try:
+                        from app.controler.chat.core.tools.datetime_tool import is_chile_holiday
+                        if is_chile_holiday(current_date):
+                            logger.debug(f"📅 Saltando {current_date} - Día feriado excluido")
+                            continue
+                    except Exception as holiday_error:
+                        logger.warning(f"Error verificando feriados para {current_date}: {holiday_error}")
+                        # Continuar sin excluir si hay error verificando feriados
                 
                 # Si pasa las validaciones, contamos como día verificado
                 days_checked += 1
@@ -1501,14 +1650,16 @@ def find_next_available_slots(service, params, project_config=None, state=None):
                     
                     logger.debug(f"      Verificando franja {start_hour}:00-{end_hour}:00, ajustada a preferencia: {effective_start_hour}:00-{effective_end_hour}:00")
                     
-                    for hour in range(effective_start_hour, effective_end_hour - int(duration_hours) + 1):
+                    # Obtener duración en minutos de la configuración
+                    duration_minutes = int(default_duration_minutes) if default_duration_minutes else 60
+                    
+                    # Generar slots basados en la duración configurada
+                    time_slots_list = generate_time_slots(effective_start_hour, effective_end_hour, duration_minutes, current_date, CHILE_TZ)
+                    
+                    for slot_start, slot_end in time_slots_list:
                         # Saltar horarios pasados
-                        if week_offset == 0 and day_offset == 0 and hour <= now_chile.hour:
+                        if week_offset == 0 and day_offset == 0 and slot_start <= now_chile:
                             continue
-                        
-                        slot_start = datetime.combine(current_date, datetime.min.time().replace(hour=hour))
-                        slot_start = slot_start.replace(tzinfo=CHILE_TZ)
-                        slot_end = slot_start + timedelta(hours=duration_hours)
                         
                         # Verificar disponibilidad
                         is_available, conflicts_or_error = check_slot_availability_safe(slot_start, slot_end)
@@ -1517,7 +1668,7 @@ def find_next_available_slots(service, params, project_config=None, state=None):
                             available_slots.append(create_slot_dict(slot_start, slot_end, duration_hours))
                             day_found_slot = True
                             slots_found += 1
-                            logger.info(f"         {hour}:00 DISPONIBLE - Slot #{slots_found} encontrado")
+                            logger.info(f"         {slot_start.strftime('%H:%M')} DISPONIBLE - Slot #{slots_found} encontrado")
                             if len(available_slots) >= max_slots_to_show:
                                 break
                         else:
@@ -1647,7 +1798,9 @@ def find_next_available_slots(service, params, project_config=None, state=None):
             logger.debug(f"DEBUG SLOT {index}: year: {slot['start'].year}")
             logger.debug(f"DEBUG SLOT {index}: time: {slot['start'].strftime('%H:%M')}")
             
-            response += f"{numero}. {fecha_esp.title()} a las {slot['start'].strftime('%H:%M')} horas\n"
+            # Usar time_str que contiene el rango completo (ej: "11:00 - 11:30")
+            time_range = slot.get('time_str', f"{slot['start'].strftime('%H:%M')} horas")
+            response += f"{numero}. {fecha_esp.title()} de {time_range}\n"
         
         response += f"\n**Horarios verificados contra tu calendario real de Google**\n"
         

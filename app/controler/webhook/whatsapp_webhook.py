@@ -326,9 +326,13 @@ async def process_message(message: Dict[str, Any], background_tasks: BackgroundT
             
         response_data = json.loads(response.body)
         
+        # Limpiar la respuesta de patrones de imagen antes de enviar
+        from app.controler.chat.core.utils import clean_response_from_image_patterns
+        clean_response = clean_response_from_image_patterns(response_data["response"])
+        
         # Enviar la respuesta de vuelta a WhatsApp
         logger.info(f"Enviando respuesta a WhatsApp para user_id: {user_id}")
-        await send_whatsapp_message(project_id, user_id, message["entry_id"], response_data["response"], source_id)
+        await send_whatsapp_message(project_id, user_id, message["entry_id"], clean_response, source_id)
         
         logger.info(f"Mensaje procesado de {user_id} y respuesta enviada")
     except Exception as e:

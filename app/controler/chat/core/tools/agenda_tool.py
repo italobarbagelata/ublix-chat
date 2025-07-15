@@ -1,5 +1,5 @@
 """
-AgendaTool refactorizada - Versión optimizada y modular.
+AgendaTool - Herramienta de agendamiento optimizada y modular.
 Utiliza servicios especializados para mejor mantenabilidad y performance.
 """
 
@@ -17,9 +17,9 @@ from app.controler.chat.core.security.error_handler import safe_execute, raise_c
 
 logger = logging.getLogger(__name__)
 
-class AgendaToolRefactored(BaseTool):
+class AgendaTool(BaseTool):
     """
-    Herramienta de agenda refactorizada con arquitectura modular.
+    Herramienta de agenda con arquitectura modular.
     
     Responsabilidades:
     - Coordinar workflows a través de WorkflowManager
@@ -28,14 +28,14 @@ class AgendaToolRefactored(BaseTool):
     - Proporcionar interfaz unificada para LangChain
     """
     
-    name: str = "agenda_tool_refactored"
+    name: str = "agenda_tool"
     
     class Config:
         """Configuración de Pydantic para permitir campos arbitrarios."""
         arbitrary_types_allowed = True
         extra = "allow"  # Permitir campos extra
     description: str = """
-    HERRAMIENTA PROFESIONAL DE AGENDAMIENTO Y HORARIOS (Versión Refactorizada)
+    HERRAMIENTA PROFESIONAL DE AGENDAMIENTO Y HORARIOS
     FUNCIONALIDAD PRINCIPAL:
     - Gestión completa de agendamiento con arquitectura modular optimizada
     - Validación robusta y manejo de errores sin fallos silenciosos
@@ -216,7 +216,7 @@ class AgendaToolRefactored(BaseTool):
                    **kwargs) -> str:
         """
         Ejecuta workflow de agenda de forma asíncrona.
-        Versión refactorizada con servicios especializados y validación robusta.
+        Implementación con servicios especializados y validación robusta.
         """
         try:
             self.logger.info(f" Iniciando workflow refactorizado: {workflow_type}")
@@ -396,6 +396,10 @@ class AgendaToolRefactored(BaseTool):
             return response
         
         elif workflow_type == 'AGENDA_COMPLETA':
+            # Verificar si es una cita duplicada
+            if workflow_result.get('is_duplicate', False):
+                return " ✅ **La cita ya fue agendada anteriormente**\n\n No se realizaron cambios duplicados."
+            
             event_url = workflow_result.get('event_url', '')
             meet_url = workflow_result.get('meet_url', '')
             
@@ -435,14 +439,14 @@ class AgendaToolRefactored(BaseTool):
             if hasattr(self, '_notification_service') and self._notification_service:
                 await self._notification_service.cleanup()
             
-            self.logger.info("AgendaToolRefactored cleanup completado")
+            self.logger.info("AgendaTool cleanup completado")
         except Exception as e:
             self.logger.error(f"Error en cleanup: {str(e)}")
     
     def get_tool_stats(self) -> Dict[str, Any]:
         """Obtiene estadísticas de la herramienta y servicios."""
         stats = {
-            'tool': 'AgendaToolRefactored',
+            'tool': 'AgendaTool',
             'initialized': getattr(self, '_initialized', False),
             'project_id': self.project_id,
             'user_id': self.user_id
@@ -492,10 +496,10 @@ class AgendaToolRefactored(BaseTool):
             self.logger.error(f"Error obteniendo configuración de agenda: {str(e)}")
             return None
 
-# Función de conveniencia para crear la herramienta refactorizada
-def create_agenda_tool_refactored(project_id: str = None, project=None, user_id: str = None) -> AgendaToolRefactored:
+# Función de conveniencia para crear la herramienta
+def create_agenda_tool(project_id: str = None, project=None, user_id: str = None) -> AgendaTool:
     """
-    Crea una instancia de AgendaTool refactorizada.
+    Crea una instancia de AgendaTool.
     
     Args:
         project_id: ID del proyecto
@@ -503,6 +507,6 @@ def create_agenda_tool_refactored(project_id: str = None, project=None, user_id:
         user_id: ID del usuario
         
     Returns:
-        Instancia configurada de AgendaToolRefactored
+        Instancia configurada de AgendaTool
     """
-    return AgendaToolRefactored(project_id=project_id, project=project, user_id=user_id)
+    return AgendaTool(project_id=project_id, project=project, user_id=user_id)

@@ -663,10 +663,7 @@ class SaveContactTool(BaseTool):
                     self.project_id, self.user_id, conversation_text
                 ))
                 if result:
-                    return f""" INFORMACIÓN CAPTURADA AUTOMÁTICAMENTE:
-{self._format_contact_info(result)}
-
- Campos detectados usando configuración del proyecto."""
+                    return ""
                 else:
                     # Si no se extrajo nada, mostrar información existente
                     existing = asyncio.run(self._get_existing_contact())
@@ -685,10 +682,7 @@ class SaveContactTool(BaseTool):
                         self.project_id, self.user_id, conversation_text, config
                     ))
                     if result:
-                        return f""" EXTRACCIÓN AUTOMÁTICA COMPLETADA (CONFIG MANUAL):
-{self._format_contact_info(result)}
-
- Se analizó la conversación y se extrajeron {len(config)} campos automáticamente."""
+                        return ""
                     else:
                         return " No se pudo extraer información adicional de la conversación con la configuración proporcionada."
             
@@ -713,10 +707,7 @@ class SaveContactTool(BaseTool):
                         ))
                         
                         if extraction_result:
-                            return f"""✅ INFORMACIÓN DETECTADA AUTOMÁTICAMENTE:
-{self._format_contact_info(extraction_result)}
-
-📋 Se extrajo automáticamente de su mensaje: "{recent_message[:50]}..." """
+                                return ""
                         
                         # Si la extracción automática no funcionó, intentar patrones básicos
                         basic_extraction = self._extract_basic_contact_info(recent_message)
@@ -729,10 +720,7 @@ class SaveContactTool(BaseTool):
                                 phone_number=basic_extraction.get('phone_number')
                             ))
                             if extraction_result:
-                                return f"""✅ NÚMERO DE TELÉFONO GUARDADO:
-{self._format_contact_info(extraction_result)}
-
-📱 Se detectó automáticamente: {basic_extraction.get('phone_number')}"""
+                                return ""
                 except Exception as e:
                     # Si la extracción automática falla, continuar con el flujo normal
                     pass
@@ -787,18 +775,10 @@ extrae esa información y úsala para guardar los datos."""
             if contact:
                 if existing_contact:
                     # Es una actualización
-                    return self._get_update_message(existing_contact, contact)
+                    return ""
                 else:
                     # Es un nuevo contacto
-                    return f""" NUEVO CONTACTO CREADO EXITOSAMENTE:
-{self._format_contact_info(contact)}
-
- Esta información se usará automáticamente para:
-•  Enviar emails personalizados
-•  Crear eventos de calendario con el email como asistente
-•  Ejecutar APIs que requieran datos de contacto
-•  Personalizar respuestas con información del usuario
-•  Seguimiento de leads y conversiones"""
+                    return ""
             else:
                 return " No se pudo guardar el contacto. Verifica que la información esté en formato válido."
                 
@@ -823,8 +803,7 @@ extrae esa información y úsala para guardar los datos."""
                     self.project_id, self.user_id, conversation_text
                 )
                 if result:
-                    return f""" EXTRACCIÓN AUTOMÁTICA COMPLETADA (CONFIG PROYECTO):
-{self._format_contact_info(result)}"""
+                    return ""
                 else:
                     return " No se encontró información para extraer con la configuración del proyecto."
             
@@ -836,8 +815,7 @@ extrae esa información y úsala para guardar los datos."""
                         self.project_id, self.user_id, conversation_text, config
                     )
                     if result:
-                        return f""" EXTRACCIÓN AUTOMÁTICA COMPLETADA (CONFIG MANUAL):
-{self._format_contact_info(result)}"""
+                        return ""
                     else:
                         return " No se encontró información para extraer."
 
@@ -860,10 +838,7 @@ extrae esa información y úsala para guardar los datos."""
                             phone_number=basic_extraction.get('phone_number')
                         )
                         if extraction_result:
-                            return f"""✅ INFORMACIÓN DETECTADA Y GUARDADA:
-{self._format_contact_info(extraction_result)}
-
-📱 Detectado de: "{conversation_text[:50]}..." """
+                                return ""
                 
                 # Verificar información existente
                 existing_contact = await self._get_existing_contact()
@@ -894,10 +869,9 @@ use los parámetros correspondientes del tool (phone_number, email, name)."""
                 
                 if result:
                     if existing_contact:
-                        return self._get_update_message(existing_contact, result)
+                        return ""
                     else:
-                        return f""" CONTACTO GUARDADO EXITOSAMENTE:
-{self._format_contact_info(result)}"""
+                        return ""
                 else:
                     return " No se pudo guardar la información de contacto."
             

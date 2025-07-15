@@ -468,9 +468,13 @@ async def process_instagram_message_content(message: Dict[str, Any], project_id:
             
         response_data = json.loads(response.body)
         
+        # Limpiar la respuesta de patrones de imagen antes de enviar
+        from app.controler.chat.core.utils import clean_response_from_image_patterns
+        clean_response = clean_response_from_image_patterns(response_data["response"])
+        
         # Enviar respuesta usando InstagramAdapter
         logger.info(f"📤 Enviando respuesta a través de InstagramAdapter")
-        api_response = await instagram_adapter.send_message(sender_id, response_data["response"])
+        api_response = await instagram_adapter.send_message(sender_id, clean_response)
         
         if isinstance(api_response, dict) and "error" in api_response:
             logger.error(f"❌ Error API IG al enviar mensaje: {api_response['error']}")

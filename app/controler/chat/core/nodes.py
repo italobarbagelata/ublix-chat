@@ -105,8 +105,22 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
             prompt_general_skeleton += f"""
             AGENDA_TOOL (agenda_tool):
             Herramienta para agendar citas. Tiene dos modos de operación principales definidos por `workflow_type`:
-            1. `BUSQUEDA_HORARIOS`: Busca horarios disponibles. Requiere `start_datetime` (la fecha para buscar) y `title` (la consulta del usuario, ej: "horas para la tarde").
-            2. `AGENDA_COMPLETA`: Confirma y agenda una cita. Requiere todos los detalles del evento, incluyendo el `start_datetime` exacto elegido por el usuario y la información del contacto. **Si el contacto tiene campos adicionales (additional_fields), debes pasarlos también en este workflow.**
+            
+            1. `BUSQUEDA_HORARIOS`: Busca horarios disponibles. 
+               - Requiere: `start_datetime` (fecha para buscar) y `title` (consulta del usuario)
+               - Úsalo cuando el usuario: consulta disponibilidad, pregunta por horarios, compara opciones
+            
+            2. `AGENDA_COMPLETA`: Confirma y agenda UNA SOLA cita final.
+               - Requiere: `start_datetime` exacto elegido + información del contacto
+               - **IMPORTANTE**: SOLO usar cuando el usuario confirmó UN horario específico
+               - **NUNCA** llamar múltiples veces en una sola respuesta
+               - **Si el contacto tiene campos adicionales, debes pasarlos también**
+            
+            🚨 REGLAS CRÍTICAS DE AGENDAMIENTO:
+            - AGENDA_COMPLETA se ejecuta SOLO UNA VEZ por conversación
+            - Si el usuario menciona múltiples horarios, pregúntale cuál prefiere
+            - Si no estás seguro de cuál horario quiere, usa BUSQUEDA_HORARIOS
+            - Confirma EXPLÍCITAMENTE antes de usar AGENDA_COMPLETA
             
             Usa `current_datetime_tool` y `check_chile_holiday_tool` para validar fechas antes de buscar horarios.
             Las instrucciones específicas del proyecto te indicarán el flujo exacto a seguir para solicitar datos y confirmar la cita.

@@ -206,3 +206,31 @@ def decorate_message(message: BaseMessage, initial_date: datetime.datetime, conv
     message.additional_kwargs["end_time_seconds"] = get_execution_time(
         initial_date)
     message.additional_kwargs["conversation_id"] = conversation_id
+
+
+def clean_response_from_image_patterns(response_text: str) -> str:
+    """
+    Limpia la respuesta removiendo patrones markdown de imágenes.
+    
+    Args:
+        response_text (str): Texto de respuesta que puede contener patrones ![Imagen](URL)
+        
+    Returns:
+        str: Texto limpio sin patrones de imagen
+    """
+    import re
+    
+    if not response_text:
+        return response_text
+    
+    # Remover patrones ![Imagen](URL) o ![imagen](URL) (case insensitive)
+    # El patrón busca: ![ + cualquier texto + ]( + cualquier cosa hasta ) + )
+    pattern = r'!\[[^\]]*\]\([^)]+\)'
+    cleaned_text = re.sub(pattern, '', response_text, flags=re.IGNORECASE)
+    
+    # Remover líneas vacías y espacios en blanco excesivos que puedan quedar
+    cleaned_text = re.sub(r'\n\s*\n', '\n', cleaned_text)  # Múltiples saltos de línea
+    cleaned_text = re.sub(r'\s+', ' ', cleaned_text)  # Múltiples espacios
+    cleaned_text = cleaned_text.strip()
+    
+    return cleaned_text

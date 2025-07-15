@@ -411,9 +411,14 @@ async def process_message(message: Dict[str, Any], background_tasks: BackgroundT
             logger.error(f"Error en la respuesta del chat: {response.body}")
             return
         response_data = json.loads(response.body)
+        
+        # Limpiar la respuesta de patrones de imagen antes de enviar
+        from app.controler.chat.core.utils import clean_response_from_image_patterns
+        clean_response = clean_response_from_image_patterns(response_data["response"])
+        
         # Enviar la respuesta de vuelta a Messenger
         logger.info(f"Enviando respuesta a Messenger para user_id: {user_id}")
-        await send_messenger_message(project_id, user_id, response_data["response"], source_id)
+        await send_messenger_message(project_id, user_id, clean_response, source_id)
         logger.info(f"Mensaje procesado de {user_id} y respuesta enviada")
     except Exception as e:
         logger.error(f"Error procesando mensaje: {e}", exc_info=True)
