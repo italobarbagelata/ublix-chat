@@ -121,6 +121,8 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
             - Si el usuario menciona múltiples horarios, pregúntale cuál prefiere
             - Si no estás seguro de cuál horario quiere, usa BUSQUEDA_HORARIOS
             - Confirma EXPLÍCITAMENTE antes de usar AGENDA_COMPLETA
+            - **⚠️ NUNCA confirmes al usuario que la cita fue agendada sin ejecutar primero agenda_tool(AGENDA_COMPLETA)**
+            - **🚨 OBLIGATORIO:** Debes ejecutar agenda_tool antes de decir "Su hora ha sido agendada"
             
             Usa `current_datetime_tool` y `check_chile_holiday_tool` para validar fechas antes de buscar horarios.
             Las instrucciones específicas del proyecto te indicarán el flujo exacto a seguir para solicitar datos y confirmar la cita.

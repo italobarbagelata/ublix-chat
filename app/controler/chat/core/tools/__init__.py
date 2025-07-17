@@ -13,7 +13,7 @@ from app.controler.chat.core.tools.tienda_tool import buscar_productos_tienda, c
 from app.controler.chat.core.tools.contact_tool import SaveContactTool
 from app.controler.chat.core.tools.email_tool import EmailTool
 from app.controler.chat.core.tools.image_processor_tool import ImageProcessorTool
-from app.controler.chat.core.tools.calendar_tool import google_calendar_tool, test_calendar_connectivity
+from app.controler.chat.core.tools.calendar_tool import google_calendar_tool
 from app.controler.chat.core.tools.agenda_tool import AgendaTool
 from app.controler.chat.core.tools.mcp_tool_factory import create_mcp_tools_for_project
 
@@ -102,7 +102,6 @@ async def agent_tools(project_id: str, user_id: str, name: str, number_phone_age
         week_info_tool,
         check_chile_holiday_tool,
         next_chile_holidays_tool,
-        test_calendar_connectivity,  # Herramienta de diagnóstico
         SaveContactTool(project_id, user_id),  # Esta necesita instanciación
     ]
     

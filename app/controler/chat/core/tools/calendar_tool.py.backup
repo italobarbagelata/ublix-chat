@@ -101,8 +101,8 @@ def get_project_calendar_config(project_id: str, agenda_data: dict = None) -> di
                 "end_hour": latest_hour if latest_hour > 0 else config["end_hour"],
                 "working_days": working_days if working_days else config["working_days"],
                 "auto_include_meet": general_settings.get("auto_include_meet", config.get("auto_include_meet", True)),
-                "timezone": general_settings.get("timezone", config["timezone"]),
-                "minimum_booking_days": agenda_settings.get("minimum_booking_days", 0)
+                "buffer_minutes": agenda_settings.get("buffer_minutes", config["buffer_minutes"]),
+                "timezone": general_settings.get("timezone", config["timezone"])
             })
             
             logger.info(f"Configuración de calendario obtenida desde tabla agenda para proyecto {project_id}: {config}")
@@ -125,9 +125,11 @@ def get_default_calendar_config() -> dict:
         "end_hour": 18,           # 6 PM
         "working_days": ["monday", "tuesday", "wednesday", "thursday", "friday"],
         "auto_include_meet": True,
+        "buffer_minutes": 15,
         "timezone": "America/Santiago"
     }
 
+# normalize_to_chile_timezone ahora se importa desde calendar_utils
 
 @tool(parse_docstring=False)
 def google_calendar_tool(query: str, state: Annotated[dict, InjectedState]) -> str:
@@ -161,7 +163,6 @@ def google_calendar_tool(query: str, state: Annotated[dict, InjectedState]) -> s
     - create_event|title=Reunión Cliente|start=2025-06-15T15:00:00|end=2025-06-15T16:00:00|description=Reunión|attendees=email@domain.com|meet=true
     - update_event|event_id=abc123|title=Nuevo Título|description=Nueva descripción
     - delete_event|event_id=abc123: Elimina evento
-    - add_attendee|event_id=abc123|attendee_email=usuario@email.com: Agrega asistente a evento existente
     
     CONFIGURACIÓN AUTOMÁTICA:
     - Zona horaria: Chile (America/Santiago) - conversión automática
@@ -245,8 +246,6 @@ def google_calendar_tool(query: str, state: Annotated[dict, InjectedState]) -> s
             return update_event(service, parts[1:] if len(parts) > 1 else [], project_config)
         elif action == 'delete_event':
             return delete_event(service, parts[1:] if len(parts) > 1 else [], project_config)
-        elif action == 'add_attendee':
-            return add_attendee(service, parts[1:] if len(parts) > 1 else [], project_config)
         elif action == 'check_availability':
             return check_availability(service, parts[1:] if len(parts) > 1 else [], project_config)
         elif action == 'find_available_slots':
@@ -255,7 +254,7 @@ def google_calendar_tool(query: str, state: Annotated[dict, InjectedState]) -> s
             project_config_with_id['project_id'] = project_id
             return find_next_available_slots(service, parts[1:] if len(parts) > 1 else [], project_config_with_id, state)
         else:
-            return f"Unknown action: {action}. Supported actions are list_events, search_events, create_event, get_event, update_event, delete_event, add_attendee, check_availability, and find_available_slots."
+            return f"Unknown action: {action}. Supported actions are list_events, search_events, create_event, get_event, update_event, delete_event, check_availability, and find_available_slots."
             
     except Exception as e:
         logger.error(f"Error in Google Calendar tool: {str(e)}")
@@ -751,46 +750,31 @@ def create_event(service, params, state=None, project_config=None):
             logger.info("Google Meet conference added to event")
         
         # Agregar attendees al evento
-        organizer_email = None
-        
-        # Obtener email del organizador desde las credenciales para marcarlo como aceptado automáticamente
-        try:
-            # Intentar obtener el email del organizador desde el servicio
-            calendar_info = service.calendars().get(calendarId='primary').execute()
-            organizer_email = calendar_info.get('id', '')
-            logger.info(f"📧 Email del organizador obtenido: {organizer_email}")
-        except Exception as e:
-            logger.warning(f"No se pudo obtener email del organizador: {e}")
-        
         for email in attendee_emails:
             if email:  # Verificar que no esté vacío
-                # Si es el organizador, marcarlo como aceptado automáticamente
-                response_status = 'accepted' if email == organizer_email else 'needsAction'
-                
                 event_data['attendees'].append({
                     'email': email,
-                    'responseStatus': response_status  # Aceptado automáticamente si es el organizador
+                    'responseStatus': 'needsAction'  # Marca que necesita respuesta del invitado
                 })
-                logger.info(f"📧 Attendee agregado: {email} (status: {response_status})")
         
         # Configuraciones adicionales para asegurar envío de correos
         if event_data['attendees']:
             event_data['guestsCanInviteOthers'] = False  # Los invitados no pueden invitar a otros
             event_data['guestsCanModify'] = False  # Los invitados no pueden modificar el evento
             event_data['guestsCanSeeOtherGuests'] = True  # Los invitados pueden ver otros invitados
+            event_data['reminders'] = {
+                'useDefault': False,
+                'overrides': [
+                    {'method': 'email', 'minutes': 24 * 60},  # Recordatorio por email 24 horas antes
+                    {'method': 'popup', 'minutes': 10}  # Recordatorio popup 10 minutos antes
+                ]
+            }
         else:
             # Si no hay attendees, remover la clave para evitar errores
             del event_data['attendees']
         
-        # SIEMPRE configurar recordatorios para el organizador (incluso sin attendees)
-        # Configurar recordatorios específicos para garantizar notificaciones al organizador
-        event_data['reminders'] = {
-            'useDefault': False,
-            'overrides': [
-                {'method': 'email', 'minutes': 10},       # Email 10 minutos antes (mínimo para activar notificaciones)
-                {'method': 'popup', 'minutes': 10}        # Popup 10 minutos antes
-            ]
-        }
+        logger.info("*********")
+        logger.info(f"Event data: {event_data}")
         
         # Verificar conflictos de horario (SIEMPRE se verifica)
         conflicts = check_time_conflicts(service, event_data['start']['dateTime'], event_data['end']['dateTime'])
@@ -810,14 +794,8 @@ def create_event(service, params, state=None, project_config=None):
             'calendarId': 'primary',
             'body': event_data,
             'sendNotifications': True,  # Forzar envío de notificaciones por correo
-            'sendUpdates': 'all',  # Enviar actualizaciones a todos los invitados
-            'supportsAttachments': False
+            'sendUpdates': 'all'  # Enviar actualizaciones a todos los invitados
         }
-        
-        logger.info("*********")
-        logger.info(f"Event data: {event_data}")
-        logger.info(f"📧 Notificaciones configuradas: {event_data.get('reminders', {})}")
-        logger.info(f"📧 Parámetros API: sendNotifications={insert_params.get('sendNotifications')}, sendUpdates={insert_params.get('sendUpdates')}")
         
         if add_meet:
             insert_params['conferenceDataVersion'] = 1  # Requerido para Google Meet
@@ -836,7 +814,6 @@ def create_event(service, params, state=None, project_config=None):
         
         # Preparar respuesta con información adicional
         response = f"Evento creado exitosamente: {event.get('htmlLink')}\n"
-        response += f"ID del evento: {event.get('id')}\n"
         response += f"Título: {event_data['summary']}\n"
         response += f"Inicio: {event_data['start']['dateTime']}\n"
         response += f"Fin: {event_data['end']['dateTime']}\n"
@@ -985,88 +962,6 @@ def delete_event(service, params, project_config=None):
             return f"Error: Event with ID {event_id} was not found. The event might not exist or may have been already deleted. Use search_events|title=Event Title to find the correct event ID."
         return f"Error deleting event: {error}"
 
-def add_attendee(service, params, project_config=None):
-    """Add an attendee to an existing event"""
-    try:
-        # Parse parameters
-        event_id = None
-        attendee_email = None
-        
-        for param in params:
-            if '=' in param:
-                key, value = param.split('=', 1)
-                key = key.strip().lower()
-                value = value.strip()
-                
-                if key == 'event_id':
-                    event_id = value
-                elif key == 'attendee_email' or key == 'email':
-                    attendee_email = value
-        
-        if not event_id:
-            return "Error: event_id parameter is required for add_attendee action."
-        
-        if not attendee_email:
-            return "Error: attendee_email parameter is required for add_attendee action."
-        
-        # Get the existing event
-        try:
-            event = service.events().get(calendarId='primary', eventId=event_id).execute()
-        except HttpError as error:
-            if hasattr(error, 'resp') and error.resp.status == 404:
-                return f"Error: Event with ID {event_id} was not found."
-            return f"Error retrieving event: {error}"
-        
-        # Get current attendees list or create empty list
-        attendees = event.get('attendees', [])
-        
-        # Check if the attendee is already added
-        for existing_attendee in attendees:
-            if existing_attendee.get('email', '').lower() == attendee_email.lower():
-                return f"Attendee {attendee_email} is already invited to this event."
-        
-        # Obtener email del organizador desde las credenciales para markarlo como aceptado automáticamente
-        organizer_email = None
-        try:
-            calendar_info = service.calendars().get(calendarId='primary').execute()
-            organizer_email = calendar_info.get('id', '')
-            logger.info(f"📧 Email del organizador obtenido: {organizer_email}")
-        except Exception as e:
-            logger.warning(f"No se pudo obtener email del organizador: {e}")
-        
-        # Add the new attendee
-        # Si es el organizador, marcarlo como aceptado automáticamente
-        response_status = 'accepted' if attendee_email == organizer_email else 'needsAction'
-        
-        new_attendee = {
-            'email': attendee_email,
-            'responseStatus': response_status
-        }
-        attendees.append(new_attendee)
-        
-        # Update the event with new attendees list
-        event['attendees'] = attendees
-        
-        # Update the event in calendar - sendNotifications=True ensures email invitations are sent
-        updated_event = service.events().update(
-            calendarId='primary',
-            eventId=event_id,
-            body=event,
-            sendNotifications=True,  # Send email notifications to new attendee
-            sendUpdates='all'  # Send updates to all attendees
-        ).execute()
-        
-        logger.info(f"📧 Attendee agregado: {attendee_email} (status: {response_status})")
-        logger.info(f"📧 Notificación enviada automáticamente vía email")
-        
-        return f"Attendee {attendee_email} successfully added to event '{event.get('summary', 'Unknown')}'. Email invitation sent automatically."
-        
-    except HttpError as error:
-        return f"Error adding attendee: {error}"
-    except Exception as e:
-        logger.error(f"Unexpected error in add_attendee: {str(e)}")
-        return f"Error adding attendee: {str(e)}"
-
 def check_availability(service, params, project_config=None):
     """Check if a specific time slot is available"""
     try:
@@ -1196,15 +1091,6 @@ def find_next_available_slots(service, params, project_config=None, state=None):
             
             return slots
         working_days = project_config.get("working_days", ["monday", "tuesday", "wednesday", "thursday", "friday"])
-        minimum_booking_days = project_config.get("minimum_booking_days", 0)
-        
-        # Obtener la fecha y hora actual en Chile
-        now_chile = datetime.now(CHILE_TZ)
-        
-        # Log del buffer mínimo
-        if minimum_booking_days > 0:
-            min_date = (now_chile.date() + timedelta(days=minimum_booking_days)).strftime('%Y-%m-%d')
-            logger.info(f"📅 Buffer mínimo configurado: {minimum_booking_days} día(s) - No agendar antes del {min_date}")
         
         # Estas variables indican si el usuario especificó preferencias explícitamente
         user_specified_start_hour = None
@@ -1315,6 +1201,9 @@ def find_next_available_slots(service, params, project_config=None, state=None):
         preferred_start_hour = user_specified_start_hour if user_specified_start_hour is not None else default_start_hour
         preferred_end_hour = user_specified_end_hour if user_specified_end_hour is not None else default_end_hour
         
+        # Obtener la fecha y hora actual en Chile
+        now_chile = datetime.now(CHILE_TZ)
+        
         logger.info(f"INICIANDO BÚSQUEDA DE HORARIOS DISPONIBLES:")
         logger.info(f"   Fecha actual: {now_chile.strftime('%Y-%m-%d %H:%M')} (Chile)")
         duration_minutes_used = int(default_duration_minutes) if default_duration_minutes else 60
@@ -1406,13 +1295,9 @@ def find_next_available_slots(service, params, project_config=None, state=None):
                 logger.info(f"   Duración: {duration_minutes_used} minutos ({duration_hours} horas)")
                 logger.info(f"   Horario preferido: {preferred_start_hour}:00 - {preferred_end_hour}:00")
                 
-                # Verificar si la fecha está en el pasado o dentro del buffer mínimo
-                min_allowed_date = now_chile.date() + timedelta(days=minimum_booking_days)
-                if target_date < min_allowed_date:
-                    if minimum_booking_days > 0:
-                        return f"Lo siento, no puedo agendar para el {target_date.strftime('%Y-%m-%d')}. Requiero al menos {minimum_booking_days} día(s) de anticipación. Las fechas disponibles son desde el {min_allowed_date.strftime('%Y-%m-%d')} en adelante."
-                    else:
-                        return f"La fecha {specific_date} ya pasó. Por favor elige una fecha futura."
+                # Verificar si la fecha está en el pasado
+                if target_date < now_chile.date():
+                    return f"La fecha {specific_date} ya pasó. Por favor elige una fecha futura."
                 
                 # Verificar si es día laboral
                 if target_day_name not in working_days:
@@ -1517,26 +1402,6 @@ def find_next_available_slots(service, params, project_config=None, state=None):
             first_week_date = None
             
             logger.info(f"BÚSQUEDA ESPECÍFICA DE DÍA: {target_day_name}")
-            
-            # Verificar si el primer día solicitado está dentro del buffer mínimo
-            first_occurrence_days_ahead = target_weekday - now_chile.weekday()
-            if first_occurrence_days_ahead <= 0:
-                first_occurrence_days_ahead += 7  # Próxima semana
-            
-            day_blocked_by_buffer = False
-            if minimum_booking_days > 0 and first_occurrence_days_ahead < minimum_booking_days:
-                day_blocked_by_buffer = True
-                # Calcular cuándo será la próxima ocurrencia disponible
-                next_available_occurrence = first_occurrence_days_ahead + 7  # Siguiente semana
-                while next_available_occurrence < minimum_booking_days:
-                    next_available_occurrence += 7
-                
-                next_available_date = now_chile.date() + timedelta(days=next_available_occurrence)
-                dias_semana_esp = {
-                    "monday": "lunes", "tuesday": "martes", "wednesday": "miércoles", 
-                    "thursday": "jueves", "friday": "viernes", "saturday": "sábado", "sunday": "domingo"
-                }
-                dia_esp = dias_semana_esp[target_day_name]
 
             # Usar search_weeks_ahead en lugar de valor hardcodeado
             max_weeks_to_search = search_weeks_ahead if search_weeks_ahead > 0 else 4
@@ -1544,8 +1409,7 @@ def find_next_available_slots(service, params, project_config=None, state=None):
             for week_offset_day in range(max_weeks_to_search):
                 days_ahead = target_weekday - now_chile.weekday() + (week_offset_day * 7)
                 
-                # Aplicar buffer mínimo de días
-                if days_ahead < minimum_booking_days:
+                if days_ahead < 0:
                     continue
                     
                 current_date = now_chile.date() + timedelta(days=days_ahead)
@@ -1592,16 +1456,12 @@ def find_next_available_slots(service, params, project_config=None, state=None):
                         first_week_date = current_date
             
             if not available_slots:
-                # Si el día está bloqueado por el buffer, dar una respuesta específica
-                if day_blocked_by_buffer:
-                    return f"Para {dia_esp} no tengo disponibilidad porque requiero al menos {minimum_booking_days} día(s) de anticipación. El próximo {dia_esp} disponible es el {next_available_date.strftime('%d/%m/%Y')}. ¿Te gustaría ver horarios para esa fecha o prefieres otro día?"
-                
                 logger.info(f"{specific_day} no disponible, buscando siguiente día hábil...")
                 
                 # Usar search_weeks_ahead para el rango de búsqueda de respaldo
                 max_search_days_fallback = search_weeks_ahead * 7 if search_weeks_ahead > 0 else 14
                 
-                for day_offset in range(max(1, minimum_booking_days), max_search_days_fallback + 1):
+                for day_offset in range(1, max_search_days_fallback + 1):
                     current_date = now_chile.date() + timedelta(days=day_offset)
                     current_day_name = day_names[current_date.weekday()]
                     
@@ -1657,10 +1517,7 @@ def find_next_available_slots(service, params, project_config=None, state=None):
             days_checked = 0
             slots_found = 0
             
-            # Aplicar buffer mínimo de días al inicio
-            adjusted_start_offset = max(start_day_offset, minimum_booking_days)
-            
-            for day_offset in range(adjusted_start_offset, end_day_offset):
+            for day_offset in range(start_day_offset, end_day_offset):
                 current_date = now_chile.date() + timedelta(days=day_offset)
                 
                 day_names = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
@@ -1724,13 +1581,7 @@ def find_next_available_slots(service, params, project_config=None, state=None):
                     if day_found_slot:
                         break
                 
-                # Si encontramos slots y no es búsqueda específica (día o fecha), 
-                # terminar después del primer día con disponibilidad
-                if day_found_slot and not specific_day and not specific_date:
-                    current_date_str = current_date.strftime('%Y-%m-%d')
-                    slots_today = len([s for s in available_slots if s['start'].date().strftime('%Y-%m-%d') == current_date_str])
-                    logger.info(f"📅 Consulta general: Mostrando solo el primer día disponible ({current_date}) con {slots_today} slots")
-                    break
+                # Continuar buscando en todos los días disponibles
                 
                 # Límite de seguridad para evitar loops infinitos
                 if days_checked >= 10:
@@ -1794,18 +1645,7 @@ def find_next_available_slots(service, params, project_config=None, state=None):
                 else:
                     response = f"**Horarios disponibles para {specific_day} (verificados en calendario real):**\n\n"
         else:
-            # Para consultas generales, obtener la fecha del primer slot
-            if available_slots:
-                first_slot_date = available_slots[0]['start'].date()
-                dias_semana_es = ['lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo']
-                meses_es = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
-                           'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre']
-                dia_esp = dias_semana_es[first_slot_date.weekday()]
-                mes_esp = meses_es[first_slot_date.month - 1]
-                fecha_legible = f"{dia_esp} {first_slot_date.day} de {mes_esp}"
-                response = f"**Horarios disponibles para {fecha_legible} (próximo día disponible):**\n\n"
-            else:
-                response = "**Próximas fechas disponibles para reunión (verificadas en calendario real de Google):**\n\n"
+            response = "**Próximas fechas disponibles para reunión (verificadas en calendario real de Google):**\n\n"
         
         dias_semana = {
             'Monday': 'lunes', 'Tuesday': 'martes', 'Wednesday': 'miércoles', 
@@ -1860,6 +1700,233 @@ def find_next_available_slots(service, params, project_config=None, state=None):
     except Exception as e:
         logger.error(f"ERROR CRÍTICO en find_next_available_slots: {str(e)}")
         return f"Error buscando horarios disponibles: {str(e)}\n\nPor favor verifica que la integración con Google Calendar esté configurada correctamente." 
+
+def test_google_calendar_connection(service):
+    """
+    Función de diagnóstico para probar la conectividad real con Google Calendar
+    
+    Args:
+        service: Google Calendar API service
+        
+    Returns:
+        dict: Resultado del test con detalles de conectividad
+    """
+    try:
+        logger.info("INICIANDO TEST DE CONECTIVIDAD CON GOOGLE CALENDAR...")
+        
+        # Test 1: Listar calendarios disponibles
+        try:
+            calendars_result = service.calendarList().list().execute()
+            calendars = calendars_result.get('items', [])
+            logger.info(f"Test 1 PASADO: {len(calendars)} calendario(s) accesible(s)")
+        except Exception as test1_error:
+            logger.error(f"Test 1 FALLIDO: Error listando calendarios - {test1_error}")
+            return {
+                'success': False,
+                'error': f"No se pueden listar calendarios: {test1_error}",
+                'test_details': {
+                    'calendars_test': False,
+                    'events_test': False,
+                    'create_test': False
+                }
+            }
+        
+        # Test 2: Listar eventos del calendario principal
+        try:
+            now = datetime.now(CHILE_TZ)
+            tomorrow = now + timedelta(days=1)
+            
+            events_result = service.events().list(
+                calendarId='primary',
+                timeMin=now.isoformat(),
+                timeMax=tomorrow.isoformat(),
+                maxResults=5,
+                singleEvents=True,
+                orderBy='startTime'
+            ).execute()
+            
+            events = events_result.get('items', [])
+            logger.info(f"Test 2 PASADO: {len(events)} evento(s) encontrado(s) para hoy/mañana")
+        except Exception as test2_error:
+            logger.error(f"Test 2 FALLIDO: Error listando eventos - {test2_error}")
+            return {
+                'success': False,
+                'error': f"No se pueden listar eventos: {test2_error}",
+                'test_details': {
+                    'calendars_test': True,
+                    'events_test': False,
+                    'create_test': False
+                }
+            }
+        
+        # Test 3: Verificar permisos de escritura (crear evento de prueba y eliminarlo)
+        try:
+            test_start = now + timedelta(hours=1)
+            test_end = test_start + timedelta(minutes=1)
+            
+            test_event = {
+                'summary': '[TEST] Prueba de conectividad - ELIMINAR',
+                'description': 'Evento de prueba creado automáticamente para verificar conectividad. Se eliminará inmediatamente.',
+                'start': {'dateTime': test_start.isoformat()},
+                'end': {'dateTime': test_end.isoformat()}
+            }
+            
+            # Crear evento de prueba
+            created_event = service.events().insert(calendarId='primary', body=test_event).execute()
+            test_event_id = created_event.get('id')
+            logger.info(f"Test 3a PASADO: Evento de prueba creado con ID {test_event_id}")
+            
+            # Eliminar evento de prueba inmediatamente
+            service.events().delete(calendarId='primary', eventId=test_event_id).execute()
+            logger.info(f"Test 3b PASADO: Evento de prueba eliminado correctamente")
+            
+        except Exception as test3_error:
+            logger.error(f"Test 3 FALLIDO: Error creando/eliminando evento de prueba - {test3_error}")
+            return {
+                'success': False,
+                'error': f"No se pueden crear/eliminar eventos: {test3_error}",
+                'test_details': {
+                    'calendars_test': True,
+                    'events_test': True,
+                    'create_test': False
+                }
+            }
+        
+        logger.info("TODOS LOS TESTS DE CONECTIVIDAD PASARON")
+        return {
+            'success': True,
+            'message': "Conectividad con Google Calendar verificada exitosamente",
+            'test_details': {
+                'calendars_test': True,
+                'events_test': True,
+                'create_test': True
+            },
+            'calendar_count': len(calendars),
+            'events_today_tomorrow': len(events)
+        }
+        
+    except Exception as e:
+        logger.error(f"ERROR CRÍTICO en test de conectividad: {str(e)}")
+        return {
+            'success': False,
+            'error': f"Error crítico: {str(e)}",
+            'test_details': {
+                'calendars_test': False,
+                'events_test': False,
+                'create_test': False
+            }
+        }
+
+@tool(parse_docstring=False)
+def test_calendar_connectivity(query: str, state: Annotated[dict, InjectedState]) -> str:
+    """Herramienta de diagnóstico para probar la conectividad real con Google Calendar.
+    
+    PROPÓSITO: Verificar que la integración con Google Calendar esté funcionando correctamente.
+    
+    Esta herramienta ejecuta una serie de tests para validar:
+    1. Conexión con la API de Google Calendar
+    2. Permisos de lectura (listar calendarios y eventos)  
+    3. Permisos de escritura (crear y eliminar eventos de prueba)
+    4. Formato correcto de fechas y zona horaria
+    
+    CASOS DE USO:
+    - Diagnosticar problemas de conectividad antes de agendar
+    - Verificar que las credenciales estén funcionando
+    - Confirmar que los permisos estén correctamente configurados
+    - Debug de problemas de integración
+    
+    Args:
+        query: Texto libre (no se usa, puede estar vacío)
+        state: Estado inyectado que contiene configuración del proyecto
+    
+    Returns:
+        str: Resultado detallado del test de conectividad
+        
+    Ejemplos de uso:
+        - "test_calendar_connectivity" → Ejecuta todos los tests de conectividad
+        - "probar calendario" → Ejecuta todos los tests de conectividad
+    """
+    try:
+        # Extract project info
+        project = state.get("project")
+        if not project:
+            return "Error: No se encontró información del proyecto en el estado"
+        
+        # Get project ID
+        project_id = project.id if hasattr(project, 'id') else getattr(project, 'project_id', None)
+        if not project_id:
+            return "Error: No se pudo obtener el ID del proyecto"
+        
+        logger.info(f"INICIANDO TEST DE CONECTIVIDAD para proyecto {project_id}")
+        
+        # Get credentials
+        credentials = get_google_credentials(project_id)
+        if not credentials:
+            return f"""**Error de configuración**: No se encontró integración con Google Calendar para este proyecto.
+
+**Para solucionarlo:**
+1. Ve a la configuración del proyecto
+2. Configura la integración con Google Calendar
+3. Autoriza los permisos necesarios
+4. Prueba nuevamente
+
+**Proyecto ID**: {project_id}"""
+        
+        # Build the Calendar API service
+        try:
+            service = build('calendar', 'v3', credentials=credentials)
+            logger.info("Servicio de Google Calendar creado exitosamente")
+        except Exception as service_error:
+            return f"Error creando servicio de Google Calendar: {str(service_error)}"
+        
+        # Ejecutar tests de conectividad
+        test_result = test_google_calendar_connection(service)
+        
+        if test_result['success']:
+            calendar_count = test_result.get('calendar_count', 0)
+            events_count = test_result.get('events_today_tomorrow', 0)
+            
+            return f"""**CONECTIVIDAD CON GOOGLE CALENDAR VERIFICADA**
+
+**Todos los tests pasaron exitosamente:**
+• Conexión con API establecida
+• Permisos de lectura confirmados
+• Permisos de escritura confirmados
+• Zona horaria configurada correctamente
+
+**Información del calendario:**
+• Calendarios accesibles: {calendar_count}
+• Eventos hoy/mañana: {events_count}
+• Zona horaria: Chile (America/Santiago)
+
+**¡El sistema está listo para agendar reuniones!**"""
+        else:
+            test_details = test_result.get('test_details', {})
+            error_msg = test_result.get('error', 'Error desconocido')
+            
+            status_tests = []
+            status_tests.append(f"• {'' if test_details.get('calendars_test', False) else ''} Test de calendarios")
+            status_tests.append(f"• {'' if test_details.get('events_test', False) else ''} Test de eventos")  
+            status_tests.append(f"• {'' if test_details.get('create_test', False) else ''} Test de creación/eliminación")
+            
+            return f"""**PROBLEMA DE CONECTIVIDAD DETECTADO**
+
+**Resultado de los tests:**
+{chr(10).join(status_tests)}
+
+**Error específico:** {error_msg}
+
+**Posibles soluciones:**
+1. Verificar que la integración con Google Calendar esté activa
+2. Revisar que los permisos no hayan expirado
+3. Reautorizar la conexión con Google Calendar
+4. Contactar al administrador del sistema
+
+**Proyecto ID**: {project_id}"""
+            
+    except Exception as e:
+        logger.error(f"Error en test_calendar_connectivity: {str(e)}")
+        return f"Error ejecutando test de conectividad: {str(e)}"
 
 def validate_date_consistency(text: str) -> tuple:
     """

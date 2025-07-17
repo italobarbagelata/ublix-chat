@@ -36,7 +36,6 @@ class CalendarService:
                                  title: str = "",
                                  specific_date: Optional[str] = None,
                                  duration_hours: int = 1,
-                                 max_slots: Optional[int] = None,
                                  project: Any = None,
                                  search_config: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         """
@@ -48,17 +47,13 @@ class CalendarService:
             title: Título de búsqueda (para contexto)
             specific_date: Fecha específica (YYYY-MM-DD)
             duration_hours: Duración en horas
-            max_slots: Máximo número de slots a retornar
             project: Objeto proyecto para configuración
-            search_config: Configuración de filtros (exclude_holidays, exclude_weekends, search_weeks_ahead)
+            search_config: Configuración de filtros (exclude_holidays, search_weeks_ahead)
             
         Returns:
             Lista de slots disponibles
         """
         try:
-            # Detectar si hay preferencias de tiempo en el título
-            has_time_preference = self._has_time_preference(title)
-            
             # Construir query para calendar_tool
             query_parts = ["find_available_slots"]
             
@@ -74,27 +69,15 @@ class CalendarService:
             # Agregar configuraciones de filtro si están disponibles
             if search_config:
                 exclude_holidays = search_config.get('exclude_holidays', True)
-                exclude_weekends = search_config.get('exclude_weekends', True)
                 search_weeks_ahead = search_config.get('search_weeks_ahead', 3)
                 
                 if exclude_holidays:
                     query_parts.append("exclude_holidays=true")
                     
-                if exclude_weekends:
-                    query_parts.append("exclude_weekends=true")
-                    
                 if search_weeks_ahead != 3:  # Solo agregar si es diferente al valor por defecto
                     query_parts.append(f"search_weeks_ahead={search_weeks_ahead}")
                 
-                self.logger.info(f"🔍 Filtros aplicados: exclude_holidays={exclude_holidays}, exclude_weekends={exclude_weekends}, search_weeks_ahead={search_weeks_ahead}")
-            
-            # Si hay preferencia de tiempo, usar un límite mayor para buscar en todo el día
-            if has_time_preference:
-                search_limit = 15  # Buscar más slots para tener opciones de toda la franja horaria
-                query_parts.append(f"limit={search_limit}")
-                self.logger.info(f"Preferencia de tiempo detectada en '{title}' - usando límite expandido: {search_limit}")
-            elif max_slots is not None:
-                query_parts.append(f"limit={max_slots}")
+                self.logger.info(f"🔍 Filtros aplicados: exclude_holidays={exclude_holidays}, search_weeks_ahead={search_weeks_ahead}")
             
             calendar_query = "|".join(query_parts)
             
@@ -124,16 +107,9 @@ class CalendarService:
                 # Parsear slots del resultado de texto
                 slots = self._parse_available_slots(result)
                 
-                # Aplicar filtros de preferencia de tiempo antes de limitar
-                self.logger.info(f"Aplicando filtros de preferencia de tiempo para '{title}' con {len(slots)} slots")
-                filtered_slots = self._filter_slots_by_time_preference(slots, title)
-                self.logger.info(f"Después del filtrado: {len(filtered_slots)} slots")
-                
-                # Aplicar límite final
-                if max_slots is not None:
-                    return filtered_slots[:max_slots]
-                else:
-                    return filtered_slots
+                # Devolver todos los slots disponibles encontrados
+                self.logger.info(f"Se encontraron {len(slots)} slots disponibles para '{title}'")
+                return slots
             
             return []
             
@@ -560,6 +536,13 @@ class CalendarService:
                 'attendee_email': original_params.get('attendee_email', '')
             })
         
+        # Extraer event_id directamente de la respuesta (método preferido)
+        if "ID del evento:" in result_text:
+            import re
+            id_match = re.search(r'ID del evento:\s*(\S+)', result_text)
+            if id_match:
+                event_data['event_id'] = id_match.group(1)
+        
         # Extraer URL del evento
         if "http" in result_text:
             import re
@@ -567,8 +550,8 @@ class CalendarService:
             if urls:
                 event_data['event_url'] = urls[0]
                 
-                # Extraer event_id de la URL si es posible
-                if 'calendar.google.com' in urls[0]:
+                # Extraer event_id de la URL como método de respaldo
+                if 'calendar.google.com' in urls[0] and not event_data.get('event_id'):
                     parts = urls[0].split('/')
                     if len(parts) > 6:
                         event_data['event_id'] = parts[6].split('?')[0]
@@ -663,158 +646,71 @@ class CalendarService:
         # Si llegamos aquí, se agotaron los reintentos
         raise last_exception
     
-    def _filter_slots_by_time_preference(self, slots: List[Dict[str, Any]], title: str) -> List[Dict[str, Any]]:
+    async def add_attendee_to_event(self, 
+                                  event_id: str, 
+                                  attendee_email: str, 
+                                  project_id: str,
+                                  project: Any = None) -> Dict[str, Any]:
         """
-        Filtra slots basándose en preferencias de tiempo detectadas en el título.
+        Agrega un asistente a un evento existente en Google Calendar.
         
         Args:
-            slots: Lista de slots disponibles
-            title: Título/consulta del usuario que puede contener preferencias de tiempo
+            event_id: ID del evento
+            attendee_email: Email del asistente a agregar
+            project_id: ID del proyecto
+            project: Objeto proyecto (opcional)
             
         Returns:
-            Lista filtrada de slots priorizando las preferencias de tiempo
+            Resultado de la operación
         """
-        if not slots or not title:
-            return slots
-        
-        title_lower = title.lower()
-        
-        # Detectar preferencias de tiempo en el título
-        is_afternoon_preference = any(word in title_lower for word in [
-            'tarde', 'afternoon', 'después del mediodía', 'después de almorzar'
-        ])
-        
-        is_morning_preference = any(word in title_lower for word in [
-            'mañana', 'morning', 'temprano', 'antes del mediodía'
-        ])
-        
-        is_evening_preference = any(word in title_lower for word in [
-            'noche', 'evening', 'nocturno', 'al final del día'
-        ])
-        
-        # Si no hay preferencia específica, devolver slots originales
-        if not (is_afternoon_preference or is_morning_preference or is_evening_preference):
-            return slots
-        
-        # Clasificar slots por horario
-        morning_slots = []    # 6:00 - 11:59
-        afternoon_slots = []  # 12:00 - 17:59  
-        evening_slots = []    # 18:00 - 23:59
-        
-        for slot in slots:
-            # Extraer hora del slot
-            time_text = slot.get('time_text', '')
-            hour = self._extract_hour_from_slot(time_text)
+        try:
+            # Construir query para agregar asistente
+            query_parts = [
+                "add_attendee",
+                f"event_id={event_id}",
+                f"attendee_email={attendee_email}"
+            ]
             
-            if hour is not None:
-                if 6 <= hour < 12:
-                    morning_slots.append(slot)
-                elif 12 <= hour < 18:
-                    afternoon_slots.append(slot)
-                elif 18 <= hour <= 23:
-                    evening_slots.append(slot)
-                else:
-                    # Hora fuera de rango, agregar a la categoría correspondiente más cercana
-                    if hour < 6:
-                        morning_slots.append(slot)
-                    else:
-                        evening_slots.append(slot)
-            else:
-                # Si no se puede extraer la hora, mantener el slot al final
-                pass
-        
-        # Ordenar slots según preferencia
-        if is_afternoon_preference:
-            self.logger.info(f"Preferencia de TARDE detectada en '{title}' - priorizando slots de 12:00-17:59")
-            return afternoon_slots + evening_slots + morning_slots
-        elif is_morning_preference:
-            self.logger.info(f"Preferencia de MAÑANA detectada en '{title}' - priorizando slots de 6:00-11:59")
-            return morning_slots + afternoon_slots + evening_slots
-        elif is_evening_preference:
-            self.logger.info(f"Preferencia de NOCHE detectada en '{title}' - priorizando slots de 18:00-23:59")
-            return evening_slots + afternoon_slots + morning_slots
-        
-        return slots
+            calendar_query = "|".join(query_parts)
+            
+            # Preparar estado
+            mock_state = {
+                "project_id": project_id
+            }
+            
+            # Si se proporciona proyecto, pasar también para compatibilidad
+            if project:
+                mock_state["project"] = project
+            
+            # Ejecutar operación con timeout y retry
+            result = await self._execute_calendar_operation_with_retry(
+                google_calendar_tool.invoke,
+                {"query": calendar_query, "state": mock_state}
+            )
+            
+            # Parsear resultado
+            if isinstance(result, str):
+                if "exitosamente" in result or "successfully" in result or "added" in result.lower():
+                    return {
+                        'success': True,
+                        'message': result
+                    }
+                elif "error" in result.lower() or "❌" in result:
+                    return {
+                        'success': False,
+                        'error': result
+                    }
+            
+            return {
+                'success': False,
+                'error': 'Respuesta inesperada al agregar asistente'
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error agregando asistente al evento {event_id}: {str(e)}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
     
-    def _extract_hour_from_slot(self, time_text: str) -> Optional[int]:
-        """
-        Extrae la hora de un slot de tiempo.
-        
-        Args:
-            time_text: Texto del slot (ej: "Lunes 14 de julio de 2025 a las 15:00 horas")
-            
-        Returns:
-            Hora como entero (0-23) o None si no se puede extraer
-        """
-        import re
-        
-        # Buscar patrones de hora en el texto
-        # Patrones: "15:00", "3:00 PM", "15 horas"
-        hour_patterns = [
-            r'(\d{1,2}):(\d{2})',  # 15:00, 9:30
-            r'(\d{1,2})\s*horas?',  # 15 horas, 9 hora
-            r'(\d{1,2})\s*[:.]\s*(\d{2})\s*(?:AM|PM|am|pm)',  # 3:00 PM
-        ]
-        
-        for pattern in hour_patterns:
-            match = re.search(pattern, time_text)
-            if match:
-                try:
-                    hour = int(match.group(1))
-                    
-                    # Ajustar para formato 12 horas si es necesario
-                    if 'PM' in time_text.upper() or 'pm' in time_text:
-                        if hour != 12:  # 12 PM sigue siendo 12
-                            hour += 12
-                    elif 'AM' in time_text.upper() or 'am' in time_text:
-                        if hour == 12:  # 12 AM es 0
-                            hour = 0
-                    
-                    # Validar rango de hora
-                    if 0 <= hour <= 23:
-                        return hour
-                except ValueError:
-                    continue
-        
-        return None
     
-    def _has_time_preference(self, title: str) -> bool:
-        """
-        Detecta si el título contiene preferencias de tiempo específicas.
-        
-        Args:
-            title: Título/consulta del usuario
-            
-        Returns:
-            True si se detectan preferencias de tiempo, False si no
-        """
-        if not title:
-            return False
-        
-        title_lower = title.lower()
-        
-        # Detectar preferencias explícitas de tiempo
-        time_preference_patterns = [
-            'tarde', 'afternoon', 'después del mediodía', 'después de almorzar',
-            'mañana', 'morning', 'temprano', 'antes del mediodía', 'de mañana',
-            'noche', 'evening', 'nocturno', 'al final del día', 'de noche',
-            'en la tarde', 'por la tarde', 'para la tarde', 'de la tarde',
-            'en la mañana', 'por la mañana', 'para la mañana',
-            'en la noche', 'por la noche', 'para la noche',
-            'horarios de tarde', 'horarios de mañana', 'horarios de noche'
-        ]
-        
-        # Detectar si algún patrón está presente
-        has_preference = any(pattern in title_lower for pattern in time_preference_patterns)
-        
-        # Excluir casos donde "mañana" significa "tomorrow" y no "morning"
-        tomorrow_indicators = ['para mañana', 'mañana día', 'mañana por', 'tomorrow']
-        is_tomorrow = any(indicator in title_lower for indicator in tomorrow_indicators)
-        
-        # Si detectamos "mañana" pero en contexto de "tomorrow", no es preferencia de tiempo
-        if has_preference and 'mañana' in title_lower and is_tomorrow:
-            # Re-evaluar sin considerar "mañana" como preferencia de tiempo
-            other_preferences = [p for p in time_preference_patterns if p != 'mañana' and p != 'de mañana']
-            has_preference = any(pattern in title_lower for pattern in other_preferences)
-        
-        return has_preference

@@ -1,10 +1,11 @@
 from typing import Dict
 import dateparser
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import logging
 from langchain.tools import tool
 import locale
 import pytz
+import holidays
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +17,39 @@ except:
         locale.setlocale(locale.LC_TIME, 'es_ES')
     except:
         logger.warning("No se pudo configurar locale en español")
+
+def is_chile_holiday(date_obj) -> bool:
+    """
+    Verifica si una fecha es feriado en Chile.
+    
+    Args:
+        date_obj: Objeto datetime o date
+        
+    Returns:
+        bool: True si es feriado, False si no
+    """
+    try:
+        # Obtener solo la fecha si es datetime
+        if hasattr(date_obj, 'date'):
+            check_date = date_obj.date()
+        else:
+            check_date = date_obj
+            
+        # Verificar feriados de Chile para el año de la fecha
+        # Incluimos subdiv='RM' para feriados de la Región Metropolitana
+        chile_holidays = holidays.country_holidays('CL', subdiv='RM', years=check_date.year)
+        
+        is_holiday = check_date in chile_holidays
+        
+        if is_holiday:
+            holiday_name = chile_holidays.get(check_date)
+            logger.info(f"La fecha {check_date} es feriado: {holiday_name}")
+        
+        return is_holiday
+        
+    except Exception as e:
+        logger.error(f"Error verificando feriado: {str(e)}")
+        return False
 
 @tool(parse_docstring=False)
 def current_datetime_tool(query: str) -> str:

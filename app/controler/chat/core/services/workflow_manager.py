@@ -8,7 +8,7 @@ import logging
 import hashlib
 import uuid
 from typing import Dict, Any, Optional, List
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 
 from app.controler.chat.core.security.input_validator import InputValidator, ValidationResult
@@ -31,7 +31,7 @@ class WorkflowContext:
         self.user_id = user_id
         self.project_id = project_id
         self.project = project
-        self.timestamp = datetime.utcnow()
+        self.timestamp = datetime.now(timezone.utc)
         # Usar UUID para garantizar unicidad incluso en ejecuciones simultáneas
         self.execution_id = f"{project_id}_{user_id}_{int(self.timestamp.timestamp())}_{uuid.uuid4().hex[:8]}"
 
@@ -66,7 +66,7 @@ class WorkflowManager:
     
     def _cleanup_expired_appointments(self):
         """Limpia citas expiradas del cache (más de 10 minutos)."""
-        current_time = datetime.utcnow()
+        current_time = datetime.now(timezone.utc)
         expired_keys = []
         
         for hash_key, cache_entry in self.appointment_cache.items():
@@ -99,7 +99,7 @@ class WorkflowManager:
         self.appointment_cache[appointment_hash] = {
             'event_id': event_id,
             'execution_id': execution_id,
-            'cached_at': datetime.utcnow(),
+            'cached_at': datetime.now(timezone.utc),
             'project_id': project_id,
             'title': title,
             'start_datetime': start_datetime,
@@ -160,12 +160,8 @@ class WorkflowManager:
         Returns:
             True si la fecha debe ser excluida, False si es válida
         """
-        # Verificar si es fin de semana y exclude_weekends está activo
-        if search_config.get('exclude_weekends', True):
-            # weekday() devuelve 0=Monday, 6=Sunday
-            if date_obj.weekday() in [5, 6]:  # Sábado y Domingo
-                self.logger.debug(f"📅 Excluyendo fin de semana: {date_obj.strftime('%Y-%m-%d %A')}")
-                return True
+        # Los fines de semana ya están manejados por la configuración de working_days
+        # No necesitamos un filtro adicional de exclude_weekends
         
         # Verificar si es feriado y exclude_holidays está activo
         if search_config.get('exclude_holidays', True):
@@ -305,17 +301,8 @@ class WorkflowManager:
             from app.controler.chat.core.services.calendar_service import CalendarService
             calendar_service = CalendarService()
             
-            # Obtener configuración completa de búsqueda desde tabla agenda
+            # Obtener configuración completa de búsqueda desde tabla agenda (incluye duración)
             search_config = await self._get_search_configuration(context.project_id)
-            max_slots_limit = search_config.get('max_slots_to_show')
-            
-            # Detectar si se requiere búsqueda exhaustiva basada en el título o parámetros
-            needs_comprehensive_search = self._should_show_comprehensive_results(title, parameters)
-            
-            # Aplicar límite inteligente
-            effective_max_slots = None if needs_comprehensive_search else max_slots_limit
-            
-            self.logger.info(f"Slot limit configuration: max_slots_to_show={max_slots_limit}, comprehensive_search={needs_comprehensive_search}, effective_limit={effective_max_slots}")
             
             # Buscar horarios disponibles con filtros de configuración
             available_slots = await calendar_service.find_available_slots(
@@ -323,8 +310,7 @@ class WorkflowManager:
                 user_id=context.user_id,
                 title=title,
                 specific_date=target_date,  # Ahora incluirá la fecha extraída del título
-                duration_hours=1,  # duración por defecto
-                max_slots=effective_max_slots,  # Usar límite inteligente
+                duration_hours=search_config['default_duration_hours'],  # duración desde configuración
                 project=context.project,  # Para compatibilidad temporal hasta migración completa
                 search_config=search_config  # Pasar configuración de filtros
             )
@@ -334,16 +320,10 @@ class WorkflowManager:
                 
                 # Formatear horarios específicos para mostrar al usuario
                 formatted_slots = "**Horarios disponibles encontrados:**\n\n"
-                # No limitar aquí - el CalendarService ya aplicó el límite y filtros de preferencia
+                # Mostrar todos los horarios disponibles del día
                 for i, slot in enumerate(available_slots, 1):
                     time_text = slot.get('time_text', 'Horario disponible')
                     formatted_slots += f"{i}. {time_text}\n"
-                
-                # Agregar información sobre el límite si se aplicó
-                if effective_max_slots is not None and len(available_slots) == effective_max_slots:
-                    formatted_slots += f"\n📋 *Mostrando los primeros {len(available_slots)} horarios disponibles.*"
-                    if not needs_comprehensive_search:
-                        formatted_slots += " *Si necesitas ver más opciones, puedes solicitar 'todos los horarios disponibles'.*"
                 
                 formatted_slots += f"\nPor favor, indícame cuál de estos {len(available_slots)} horarios prefieres para agendar la cita."
                 
@@ -412,7 +392,7 @@ class WorkflowManager:
     
     async def _get_search_configuration(self, project_id: str) -> Dict[str, Any]:
         """
-        Obtiene todas las configuraciones de BUSQUEDA_HORARIOS desde la tabla agenda.
+        Obtiene todas las configuraciones de BUSQUEDA_HORARIOS y AGENDA_COMPLETA desde la tabla agenda.
         
         Args:
             project_id: ID del proyecto
@@ -421,10 +401,9 @@ class WorkflowManager:
             Diccionario con configuraciones de búsqueda o valores por defecto
         """
         default_config = {
-            'max_slots_to_show': None,
             'exclude_holidays': True,
-            'exclude_weekends': True,
-            'search_weeks_ahead': 3
+            'search_weeks_ahead': 3,
+            'default_duration_hours': 1.0  # fallback
         }
         
         try:
@@ -436,12 +415,17 @@ class WorkflowManager:
                 agenda_config = response.data[0]
                 workflow_settings = agenda_config.get('workflow_settings', {})
                 busqueda_settings = workflow_settings.get('BUSQUEDA_HORARIOS', {})
+                agenda_completa_settings = workflow_settings.get('AGENDA_COMPLETA', {})
                 
                 # Combinar configuración con valores por defecto
                 config = default_config.copy()
                 config.update(busqueda_settings)
                 
-                self.logger.info(f"🔍 Configuración BUSQUEDA_HORARIOS obtenida: {config}")
+                # Obtener duración desde AGENDA_COMPLETA
+                default_duration_minutes = agenda_completa_settings.get('default_duration_minutes', 60)
+                config['default_duration_hours'] = default_duration_minutes / 60.0
+                
+                self.logger.info(f"🔍 Configuración completa obtenida: {config}")
                 return config
             else:
                 self.logger.warning(f"No se encontró configuración para project_id: {project_id}, usando valores por defecto")
@@ -450,120 +434,6 @@ class WorkflowManager:
         except Exception as e:
             self.logger.error(f"Error obteniendo configuración de búsqueda: {str(e)}")
             return default_config
-
-    async def _get_max_slots_configuration(self, project_id: str) -> Optional[int]:
-        """
-        Obtiene la configuración max_slots_to_show desde la tabla agenda.
-        
-        Args:
-            project_id: ID del proyecto
-            
-        Returns:
-            Número máximo de slots a mostrar o None si no hay límite configurado
-        """
-        try:
-            from app.controler.chat.store.supabase_client import SupabaseClient
-            supabase_client = SupabaseClient()
-            response = supabase_client.client.table("agenda").select("workflow_settings").eq("project_id", project_id).execute()
-            
-            if response.data and len(response.data) > 0:
-                agenda_config = response.data[0]
-                workflow_settings = agenda_config.get('workflow_settings', {})
-                busqueda_settings = workflow_settings.get('BUSQUEDA_HORARIOS', {})
-                max_slots = busqueda_settings.get('max_slots_to_show')
-                
-                if max_slots is not None:
-                    try:
-                        max_slots_int = int(max_slots)
-                        self.logger.info(f"Configuración max_slots_to_show obtenida desde workflow_settings: {max_slots_int}")
-                        return max_slots_int
-                    except (ValueError, TypeError):
-                        self.logger.warning(f"Valor inválido para max_slots_to_show: {max_slots}")
-                        return None
-                else:
-                    self.logger.info(f"No se encontró configuración max_slots_to_show en workflow_settings para project_id: {project_id}")
-                    return None
-            else:
-                self.logger.warning(f"No se encontró configuración de agenda para project_id: {project_id}")
-                return None
-        except Exception as e:
-            self.logger.error(f"Error obteniendo configuración max_slots_to_show: {str(e)}")
-            return None
-    
-    def _should_show_comprehensive_results(self, title: str, parameters: Dict[str, Any]) -> bool:
-        """
-        Determina si se debe mostrar resultados exhaustivos basado en el contexto de la búsqueda.
-        
-        Args:
-            title: Título/consulta del usuario
-            parameters: Parámetros de la búsqueda
-            
-        Returns:
-            True si se requiere búsqueda exhaustiva, False para usar límite configurado
-        """
-        if not title:
-            return False
-        
-        # Verificar si hay indicadores en los parámetros que sugieran búsqueda exhaustiva
-        has_comprehensive_param = parameters.get('comprehensive_search', False)
-        if has_comprehensive_param:
-            return True
-            
-        title_lower = title.lower()
-        
-        # Detectar palabras clave que indican necesidad de búsqueda exhaustiva
-        comprehensive_keywords = [
-            'todo el dia', 'todos los horarios', 'toda la tarde', 'toda la mañana',
-            'todos los disponibles', 'cualquier horario', 'todo disponible',
-            'buscar todo', 'mostrar todo', 'ver todo', 'listar todo',
-            'all day', 'all available', 'show all', 'list all',
-            'comprehensive', 'exhaustive', 'complete'
-        ]
-        
-        # Detectar preferencias específicas de tiempo que requieren más opciones
-        # Solo activar si la preferencia de tiempo es el foco principal, no una mención casual
-        time_preference_patterns = [
-            'en la tarde', 'por la tarde', 'para la tarde', 'de la tarde',
-            'en la mañana', 'por la mañana', 'para la mañana', 'de la mañana', 
-            'en la noche', 'por la noche', 'para la noche', 'de la noche',
-            'afternoon slots', 'morning slots', 'evening slots',
-            'horarios de tarde', 'horarios de mañana', 'horarios de noche'
-        ]
-        
-        has_comprehensive_request = any(keyword in title_lower for keyword in comprehensive_keywords)
-        has_time_preference = any(pattern in title_lower for pattern in time_preference_patterns)
-        
-        # También detectar palabras simples si no hay contexto de fecha específica
-        simple_time_words = ['tarde', 'mañana', 'noche', 'afternoon', 'morning', 'evening']
-        has_simple_time_word = any(word in title_lower for word in simple_time_words)
-        
-        # Detectar si hay mención de días específicos que podrían estar limitando la búsqueda  
-        specific_day_indicators = ['lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo',
-                                  'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday',
-                                  'hoy', 'today']
-        
-        # Detectar "mañana" como día (tomorrow) vs tiempo (morning) según contexto
-        tomorrow_indicators = ['para mañana', 'mañana día', 'mañana por', 'tomorrow']
-        has_tomorrow = any(indicator in title_lower for indicator in tomorrow_indicators)
-        
-        has_specific_day = any(day in title_lower for day in specific_day_indicators) or has_tomorrow
-        
-        # Solo aplicar preferencia de tiempo si no hay un día específico mencionado
-        if has_simple_time_word and has_specific_day and not has_time_preference:
-            # Caso como "para mañana martes" - tiene día específico, no buscar exhaustivamente
-            has_time_preference = False
-        elif has_simple_time_word and not has_specific_day:
-            # Caso como "para la tarde" - sin día específico, buscar exhaustivamente 
-            has_time_preference = True
-        
-        # Si el usuario especifica una preferencia de tiempo, mostrar más opciones para esa franja
-        # Si solicita explícitamente resultados completos, no limitar
-        should_be_comprehensive = has_comprehensive_request or has_time_preference
-        
-        if should_be_comprehensive:
-            self.logger.info(f"Búsqueda exhaustiva detectada en '{title}' - comprehensive_request: {has_comprehensive_request}, time_preference: {has_time_preference}")
-        
-        return should_be_comprehensive
     
     async def _execute_agenda_completa(self, context: WorkflowContext, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """Ejecuta workflow completo de agendamiento."""
@@ -577,6 +447,7 @@ class WorkflowManager:
         # Verificar si el email es requerido según configuración de la tabla agenda
         require_email = True  # Por defecto requerido para compatibilidad
         agenda_config = None
+        agenda_completa_settings = {}  # Inicializar con diccionario vacío
         
         try:
             # Obtener configuración desde tabla agenda
@@ -586,9 +457,14 @@ class WorkflowManager:
             
             if response.data and len(response.data) > 0:
                 agenda_config = response.data[0]
+                workflow_settings = agenda_config.get('workflow_settings', {})
+                agenda_completa_settings = workflow_settings.get('AGENDA_COMPLETA', {})
                 general_settings = agenda_config.get('general_settings', {})
-                require_email = general_settings.get('require_attendee_email', True)
-                self.logger.info(f"Configuración require_attendee_email desde tabla agenda: {require_email}")
+                
+                # Leer require_email desde AGENDA_COMPLETA primero, luego fallback a general_settings
+                require_email = agenda_completa_settings.get('require_email', 
+                              general_settings.get('require_attendee_email', True))
+                self.logger.info(f"Configuración require_email desde AGENDA_COMPLETA: {require_email}")
             else:
                 self.logger.warning(f"No se encontró configuración de agenda para project_id: {context.project_id}")
         except Exception as e:
@@ -643,6 +519,23 @@ class WorkflowManager:
             }
         
         try:
+            # 0. PRIMERO: SIEMPRE calcular end_datetime usando default_duration_minutes (ignorar lo que pase el AI)
+            if parameters.get('start_datetime'):
+                duration_minutes = agenda_completa_settings.get('default_duration_minutes', 60)
+                self.logger.info(f"🕐 Configuración AGENDA_COMPLETA obtenida: {agenda_completa_settings}")
+                self.logger.info(f"🕐 Duración configurada: {duration_minutes} minutos")
+                self.logger.info(f"🕐 Start datetime recibido del AI: {parameters.get('start_datetime')}")
+                self.logger.info(f"🕐 End datetime recibido del AI: {parameters.get('end_datetime')} (será ignorado)")
+                
+                from datetime import datetime, timedelta
+                start_dt = datetime.fromisoformat(parameters['start_datetime'])
+                end_dt = start_dt + timedelta(minutes=duration_minutes)
+                parameters['end_datetime'] = end_dt.isoformat()
+                
+                self.logger.info(f"🕐 Duración forzada a {duration_minutes} minutos")
+                self.logger.info(f"🕐 end_datetime recalculado: {parameters['end_datetime']}")
+                self.logger.info(f"🕐 Horario final para reservar: {parameters['start_datetime']} - {parameters['end_datetime']}")
+
             # 1. Verificar disponibilidad
             conflicts = await calendar_service.check_conflicts(
                 start_time=parameters['start_datetime'],
@@ -689,12 +582,29 @@ class WorkflowManager:
                 parameters=parameters
             )
             
-            # 4. Crear evento
+            # 4. Obtener email del dueño de la agenda ANTES de crear el evento
+            calendar_owner_email = None
+            
+            try:
+                from app.controler.chat.store.supabase_client import SupabaseClient
+                supabase_client = SupabaseClient()
+                integration_response = supabase_client.client.table("calendar_integrations").select("user_email").eq("project_id", context.project_id).eq("is_active", True).execute()
+                
+                if integration_response.data and len(integration_response.data) > 0:
+                    calendar_owner_email = integration_response.data[0].get('user_email', '')
+                    self.logger.info(f"📧 Email del dueño para incluir en evento: {calendar_owner_email}")
+            except Exception as e:
+                self.logger.error(f"📧 Error obteniendo email del dueño: {str(e)}")
+            
+            # 5. Crear evento SIN attendees primero (como funcionaba antes)
+            self.logger.info(f"📧 Creando evento sin attendees, luego agregando al dueño: {calendar_owner_email}")
+            
+            # 6. Crear evento SIN attendees (como funcionaba antes)
             event_result = await calendar_service.create_event(
                 title=personalized_title,
                 start_datetime=parameters['start_datetime'],
                 end_datetime=parameters.get('end_datetime'),
-                attendee_email=parameters.get('attendee_email', ''),  # Opcional para uso interno
+                attendee_email='',  # SIN attendees durante la creación
                 description=parameters.get('description', ''),
                 include_meet=include_meet_final,
                 force_create=bool(conflicts and (parameters.get('force_create', False) or auto_force_create)),
@@ -719,18 +629,18 @@ class WorkflowManager:
             else:
                 self.logger.info("Cita creada para uso interno (sin email del cliente)")
             
-            # 6. Enviar notificaciones (en paralelo) - solo si hay email
+            # 6. Preparar datos de contacto para notificaciones y webhook (SIEMPRE)
+            contact_data = {
+                'email': attendee_email,
+                'name': parameters.get('attendee_name', ''),
+                'phone': parameters.get('attendee_phone', ''),
+                'phone_number': parameters.get('attendee_phone', '')  # Para compatibilidad
+            }
+            
+            # Si hay email, obtener datos del contacto
             if attendee_email:
                 # Obtener datos reales del contacto desde la base de datos
                 stored_contact = await contact_manager.get_contact(context.user_id, context.project_id)
-                
-                # Combinar datos del contacto almacenado con parámetros actuales
-                contact_data = {
-                    'email': attendee_email,
-                    'name': parameters.get('attendee_name', ''),
-                    'phone': parameters.get('attendee_phone', ''),
-                    'phone_number': parameters.get('attendee_phone', '')  # Para compatibilidad
-                }
                 
                 # Si existe contacto almacenado, usar sus datos como prioritarios
                 if stored_contact:
@@ -744,6 +654,7 @@ class WorkflowManager:
                 else:
                     self.logger.warning(f"📞 No se encontró contacto almacenado para user_id={context.user_id}, usando parámetros actuales")
                 
+                # Enviar notificaciones por email (respeta configuración send_email_notifications)
                 await notification_service.send_appointment_notifications(
                     event_data=event_result['event_data'],
                     contact_data=contact_data,
@@ -751,6 +662,54 @@ class WorkflowManager:
                     user_id=context.user_id,
                     conversation_summary=parameters.get('conversation_summary', '')
                 )
+            
+            # 7. Agregar attendees al evento (DESPUÉS de crear, como funcionaba antes)
+            attendees_to_add = []
+            
+            # Agregar email del cliente si existe
+            if parameters.get('attendee_email'):
+                attendees_to_add.append(('cliente', parameters['attendee_email']))
+            
+            # SIEMPRE agregar al dueño de la agenda
+            if calendar_owner_email:
+                attendees_to_add.append(('dueño', calendar_owner_email))
+                self.logger.info(f"📧 Agregando al dueño como attendee: {calendar_owner_email}")
+            
+            # Enviar invitaciones a todos los emails usando add_attendee_to_event
+            for email_type, email in attendees_to_add:
+                try:
+                    result = await calendar_service.add_attendee_to_event(
+                        event_id=event_result['event_id'],
+                        attendee_email=email,
+                        project_id=context.project_id,
+                        project=context.project
+                    )
+                    if result.get('success'):
+                        self.logger.info(f"📧 Invitación enviada exitosamente al {email_type}: {email}")
+                    else:
+                        self.logger.error(f"📧 Error enviando invitación al {email_type} ({email}): {result.get('error')}")
+                except Exception as invite_error:
+                    self.logger.error(f"📧 Excepción enviando invitación al {email_type} ({email}): {str(invite_error)}")
+                    # No fallar el workflow por error de invitación
+            
+            # 8. Enviar webhook SIEMPRE que esté configurado (independiente del email)
+            try:
+                webhook_result = await notification_service._send_webhook_notification(
+                    event_data=event_result['event_data'],
+                    contact_data=contact_data,
+                    project_id=context.project_id,
+                    user_id=context.user_id,
+                    conversation_summary=parameters.get('conversation_summary', '')
+                )
+                if webhook_result.get('success'):
+                    self.logger.info("📡 Webhook enviado exitosamente")
+                elif webhook_result.get('skipped'):
+                    self.logger.info("📡 Webhook no configurado - omitido")
+                else:
+                    self.logger.warning(f"📡 Webhook falló: {webhook_result.get('error', 'Unknown error')}")
+            except Exception as webhook_error:
+                self.logger.error(f"📡 Error enviando webhook: {str(webhook_error)}")
+                # No fallar el workflow por error de webhook
             
             # 💾 CACHEAR CITA PARA DEDUPLICACIÓN FUTURA (usar título personalizado)
             self._cache_appointment(

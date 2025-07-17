@@ -7,7 +7,7 @@ import asyncio
 import aiohttp
 import logging
 from typing import Dict, Any, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor
 
 from app.controler.chat.core.tools.email_tool import EmailTool, send_email_async
@@ -62,12 +62,20 @@ class NotificationService:
         # Ejecutar notificaciones en paralelo
         tasks = []
         
+        # Verificar si el proyecto tiene habilitado el envío de emails
+        send_emails = True  # Por defecto enviar emails
+        if self.cached_project_config:
+            general_settings = self.cached_project_config.get('general_settings', {})
+            send_emails = general_settings.get('send_email_notifications', True)
+        
         # Task para email
-        if contact_data.get('email'):
+        if contact_data.get('email') and send_emails:
             email_task = asyncio.create_task(
                 self._send_email_notification(event_data, contact_data, project_id)
             )
             tasks.append(('email', email_task))
+        elif contact_data.get('email') and not send_emails:
+            self.logger.info("📧 Email no enviado - deshabilitado en configuración del proyecto")
         
         # Task para webhook
         webhook_task = asyncio.create_task(
@@ -161,7 +169,7 @@ class NotificationService:
             # Preparar datos del webhook
             webhook_data = {
                 "event_type": "appointment_scheduled",
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "project_id": project_id,
                 "appointment_data": {
                     "title": event_data.get('title', ''),
@@ -175,7 +183,7 @@ class NotificationService:
                 "conversation_data": {
                     "summary": conversation_summary,
                     "client_email": contact_data.get('email', ''),
-                    "scheduled_at": datetime.utcnow().isoformat()
+                    "scheduled_at": datetime.now(timezone.utc).isoformat()
                 },
                 "user_data": {
                     "user_id": user_id,
@@ -261,7 +269,7 @@ class NotificationService:
             # Preparar datos de actualización
             update_data = {
                 "event_type": "appointment_updated",
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "project_id": project_id,
                 "event_data": event_data,
                 "user_id": user_id
@@ -294,7 +302,7 @@ class NotificationService:
             # Preparar datos de cancelación
             cancellation_data = {
                 "event_type": "appointment_cancelled",
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "project_id": project_id,
                 "cancelled_event_data": event_data,
                 "user_id": user_id

@@ -6,9 +6,6 @@ manteniendo todas las configuraciones y funcionalidades.
 """
 
 from .email_service import EmailService
-from .webhook_service import WebhookService
-from .schedule_validator import ScheduleValidator
-from .appointment_orchestrator import AppointmentOrchestrator
 from .workflow_manager import WorkflowManager
 from .calendar_service import CalendarService
 from .notification_service import NotificationService
@@ -18,9 +15,6 @@ from .service_initializer import service_initializer, initialize_services, clean
 
 __all__ = [
     'EmailService',
-    'WebhookService', 
-    'ScheduleValidator',
-    'AppointmentOrchestrator',
     'WorkflowManager',
     'CalendarService',
     'NotificationService',
