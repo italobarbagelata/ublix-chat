@@ -644,12 +644,31 @@ class WorkflowManager:
                 
                 # Si existe contacto almacenado, usar sus datos como prioritarios
                 if stored_contact:
+                    # Actualizar campos básicos
                     contact_data.update({
                         'name': stored_contact.get('name', contact_data['name']),
                         'phone': stored_contact.get('phone_number', contact_data['phone']),
                         'phone_number': stored_contact.get('phone_number', contact_data['phone_number']),
                         'email': stored_contact.get('email', contact_data['email'])
                     })
+                    
+                    # CRÍTICO: Incluir additional_fields del contacto (datos dinámicos como ciudad, profesión, etc.)
+                    additional_fields = stored_contact.get('additional_fields')
+                    if additional_fields:
+                        # Si additional_fields es un string JSON, parsearlo
+                        if isinstance(additional_fields, str):
+                            try:
+                                import json
+                                additional_fields = json.loads(additional_fields)
+                            except json.JSONDecodeError:
+                                self.logger.warning(f"Error parseando additional_fields JSON: {additional_fields}")
+                                additional_fields = {}
+                        
+                        # Si es un dict, fusionar los campos al contact_data
+                        if isinstance(additional_fields, dict):
+                            contact_data.update(additional_fields)
+                            self.logger.info(f"📞 Additional_fields incluidos en webhook: {list(additional_fields.keys())}")
+                    
                     self.logger.info(f"📞 Datos de contacto obtenidos desde DB: phone={contact_data['phone']}, name={contact_data['name']}")
                 else:
                     self.logger.warning(f"📞 No se encontró contacto almacenado para user_id={context.user_id}, usando parámetros actuales")

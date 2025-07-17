@@ -189,7 +189,9 @@ class NotificationService:
                     "user_id": user_id,
                     "name": contact_data.get('name', ''),
                     "email": contact_data.get('email', ''),
-                    "phone": contact_data.get('phone_number', contact_data.get('phone', ''))
+                    "phone": contact_data.get('phone_number', contact_data.get('phone', '')),
+                    # Incluir todos los datos adicionales del contacto
+                    **{k: v for k, v in contact_data.items() if k not in ['name', 'email', 'phone', 'phone_number']}
                 }
             }
             
