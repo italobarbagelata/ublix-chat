@@ -76,6 +76,12 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
         - Usa esta herramienta para guardar o actualizar la información del usuario (nombre, email, teléfono, o campos personalizados definidos en las instrucciones).
         - Puedes llamarla sin parámetros para verificar los datos que ya tienes.
         - Las instrucciones del proyecto te indicarán qué datos solicitar y cuándo.
+        
+        📅 GESTIÓN DE HORARIOS DE CALENDARIO:
+        - Al mostrar horarios disponibles al usuario, presenta MÁXIMO 3 opciones por vez.
+        - Si el calendario devuelve más de 3 horarios, muestra solo los primeros 3 y menciona que hay más disponibles.
+        - Si el usuario dice "más horarios", "más tarde", "ver más opciones" o similar, vuelve a buscar horarios del mismo día y muestra los siguientes 3.
+        - Nunca muestres listas largas de más de 3 horarios en una sola respuesta.
         """
             
         if "email" in project.enabled_tools:

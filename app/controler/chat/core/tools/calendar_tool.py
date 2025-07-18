@@ -152,7 +152,7 @@ def google_calendar_tool(query: str, state: Annotated[dict, InjectedState]) -> s
     - check_availability|start=2025-06-15T16:00:00|end=2025-06-15T17:00:00: Verifica disponibilidad
     
     BÚSQUEDA DE HORARIOS LIBRES:
-    - find_available_slots: Encuentra próximos 3 horarios disponibles (configuración estándar: 60 min, horario laboral)
+    - find_available_slots: Encuentra horarios disponibles (configuración estándar: 60 min, horario laboral)
     - find_available_slots|duration=1.5|start_hour=10|end_hour=16: Búsqueda personalizada
     - find_available_slots|day=miércoles|duration=1: Busca en día específico de la semana
     - find_available_slots|specific_date=2025-07-09|duration=1: Busca en fecha específica (YYYY-MM-DD)
@@ -193,7 +193,7 @@ def google_calendar_tool(query: str, state: Annotated[dict, InjectedState]) -> s
         str: Resultado de la operación de calendario, incluyendo detalles del evento o información de disponibilidad
         
     Ejemplos:
-        - "find_available_slots" → Muestra próximos 3 horarios disponibles
+        - "find_available_slots" → Muestra horarios disponibles
         - "create_event|title=Reunión|start=2025-06-15T15:00:00|end=2025-06-15T16:00:00|attendees=usuario@email.com|meet=true"
         - "find_available_slots|day=viernes|duration=2" → Busca slots de 2 horas el viernes
     """

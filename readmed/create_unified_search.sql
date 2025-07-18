@@ -109,11 +109,3 @@ $$;
 
 -- Comentario sobre la función
 COMMENT ON FUNCTION search_all_content_unified IS 'Función unificada para buscar en documentos, FAQs y productos de una sola vez. Combina búsqueda semántica y por texto para mejores resultados.';
-
--- Verificar que la función se creó correctamente
-SELECT 
-  proname as function_name,
-  proargtypes::regtype[] as argument_types,
-  prorettype::regtype as return_type
-FROM pg_proc 
-WHERE proname = 'search_all_content_unified'; 
