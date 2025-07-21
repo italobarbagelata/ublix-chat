@@ -25,62 +25,10 @@ conversation_lock = asyncio.Lock()
 # 📬 SISTEMA DE COLAS - Instancia global para conservar mensajes
 message_queue = MessageQueue(max_queue_size=100)
 
-# 🧠 CONTEXTO ACUMULADO - Mantener el contexto de mensajes encolados por usuario
-user_accumulated_context = {}
-context_lock = asyncio.Lock()
-
-async def add_to_accumulated_context(user_id: str, project_id: str, message: str):
-    """Añade un mensaje al contexto acumulado del usuario"""
-    async with context_lock:
-        context_key = f"{project_id}_{user_id}"
-        if context_key not in user_accumulated_context:
-            user_accumulated_context[context_key] = []
-        
-        user_accumulated_context[context_key].append({
-            "message": message,
-            "timestamp": datetime.now().isoformat()
-        })
-        
-        # Limitar el contexto acumulado a los últimos 10 mensajes para evitar sobrecarga
-        if len(user_accumulated_context[context_key]) > 10:
-            user_accumulated_context[context_key] = user_accumulated_context[context_key][-10:]
-        
-        logger.info(f"📝 Añadido al contexto acumulado para {user_id}: {len(user_accumulated_context[context_key])} mensajes")
-
-async def get_and_clear_accumulated_context(user_id: str, project_id: str) -> list:
-    """Obtiene y limpia el contexto acumulado del usuario"""
-    async with context_lock:
-        context_key = f"{project_id}_{user_id}"
-        accumulated = user_accumulated_context.get(context_key, [])
-        if context_key in user_accumulated_context:
-            del user_accumulated_context[context_key]
-        return accumulated
 
 async def process_chat_message(message: QueuedMessage) -> dict:
     """Handler para procesar mensajes de chat desde la cola"""
     try:
-        # Obtener contexto acumulado si existe
-        accumulated_context = await get_and_clear_accumulated_context(
-            message.user_id, 
-            message.project_id
-        )
-        
-        # Construir mensaje final con contexto acumulado
-        final_message = message.content
-        if accumulated_context:
-            context_messages = []
-            for ctx in accumulated_context:
-                context_messages.append(f"[{ctx['timestamp']}] {ctx['message']}")
-            
-            final_message = f"""Mensaje principal: {message.content}
-
-Mensajes adicionales recibidos mientras procesaba:
-{chr(10).join(context_messages)}
-
-Por favor responde considerando toda esta información."""
-            
-            logger.info(f"📨 Procesando mensaje con contexto acumulado: {len(accumulated_context)} mensajes adicionales")
-        
         # Obtener metadatos del mensaje
         metadata = message.metadata
         background_tasks = metadata.get('background_tasks')
@@ -97,12 +45,7 @@ Por favor responde considerando toda esta información."""
             project=metadata.get('project')
         )
         
-        response = await graph.execute_with_immediate_response(final_message, background_tasks)
-        
-        # Añadir información sobre mensajes procesados
-        if accumulated_context:
-            response['messages_processed'] = len(accumulated_context) + 1
-            response['includes_queued_messages'] = True
+        response = await graph.execute(message.content, background_tasks)
         
         return response
         
@@ -196,8 +139,6 @@ async def chat(
                     else:
                         final_message = f"![Imagen]({image_url})"
                 
-                # Añadir al contexto acumulado
-                await add_to_accumulated_context(user_id, project_id, final_message)
                 
                 return JSONResponse(
                     status_code=200,
@@ -269,7 +210,7 @@ async def chat(
                 else:
                     final_message = f"![Imagen]({image_url})"
 
-            response = await graph.execute_with_immediate_response(final_message, background_tasks)
+            response = await graph.execute(final_message, background_tasks)
             
             # NO enviar la imagen de vuelta al usuario
             # La imagen se usa solo para procesamiento interno
@@ -320,8 +261,6 @@ async def chat_stream(request: Request, background_tasks: BackgroundTasks):
     if not can_process:
         # 📬 CONSERVAR MENSAJE: En lugar de rechazar, encolar para procesamiento posterior
         try:
-            # Añadir al contexto acumulado
-            await add_to_accumulated_context(user_id, project_id, message)
             
             # Para streaming, enviar evento de confirmación
             async def queued_message_generator():

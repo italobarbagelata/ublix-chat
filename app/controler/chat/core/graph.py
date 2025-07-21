@@ -14,69 +14,10 @@ from app.controler.chat.store.persistence import Persist
 from app.controler.chat.store.persistence_state import MemoryStatePersistence
 from collections import OrderedDict
 from app.controler.chat.core.generate_summary import generate_summary, SummaryPayload
-from app.controler.chat.core.intelligent_memory import IntelligentMemoryManager
-from app.controler.chat.core.robust_error_handler import error_handler, RetryConfig, CircuitBreakerOpenError
 from uuid import uuid4
 from datetime import datetime
 import time
 
-# 🚀 RESPUESTAS INMEDIATAS - Placeholders para diferentes tipos de consultas
-IMMEDIATE_RESPONSES = {
-    "agenda": "📅 Revisando tu agenda...",
-    "productos": "🛍️ Buscando productos...",
-    "informacion": "🔍 Buscando información...",
-    "email": "📧 Preparando email...",
-    "api": "🔌 Consultando datos...",
-    "default": "⏳ Procesando tu mensaje..."
-}
-
-def detect_query_type(message: str) -> str:
-    """Detecta el tipo de consulta para enviar respuesta inmediata apropiada"""
-    message_lower = message.lower()
-    
-    # Palabras clave para agenda
-    agenda_keywords = ['agenda', 'cita', 'reunión', 'reunión', 'horario', 'agendar', 'calendario', 'disponible']
-    if any(keyword in message_lower for keyword in agenda_keywords):
-        return "agenda"
-    
-    # Palabras clave para productos
-    product_keywords = ['producto', 'precio', 'comprar', 'vender', 'catálogo', 'tienda', 'oferta']
-    if any(keyword in message_lower for keyword in product_keywords):
-        return "productos"
-    
-    # Palabras clave para email
-    email_keywords = ['enviar', 'email', 'correo', 'notificar', 'mensaje']
-    if any(keyword in message_lower for keyword in email_keywords):
-        return "email"
-    
-    # Palabras clave para información general
-    info_keywords = ['qué', 'cómo', 'cuándo', 'dónde', 'información', 'ayuda']
-    if any(keyword in message_lower for keyword in info_keywords):
-        return "informacion"
-    
-    return "default"
-
-async def get_user_accumulated_context(user_id: str, project_id: str) -> list:
-    """
-    🧠 NUEVA FUNCIÓN: Obtiene el contexto acumulado del usuario desde el módulo principal
-    """
-    try:
-        # Import dinámico para evitar circular imports
-        from app.controler.chat import get_and_clear_accumulated_context
-        return await get_and_clear_accumulated_context(user_id, project_id)
-    except Exception as e:
-        logging.error(f"Error getting accumulated context: {str(e)}")
-        return []
-
-def build_message_with_context(original_message: str, accumulated_context: list) -> str:
-    """
-    Simplifica el mensaje final: 'mensaje principal extra: extra1 | extra2 | ...'
-    """
-    if not accumulated_context:
-        return original_message
-    extras = [ctx.get('message', '') for ctx in accumulated_context if ctx.get('message')]
-    extras_str = ' | '.join(extras)
-    return f"{original_message} extra: {extras_str}"
 
 class Graph():
     @classmethod
@@ -91,13 +32,12 @@ class Graph():
         self.number_phone_agent = number_phone_agent
         self.source_id = source_id
         self.source = source
-        self.project = project
+        self.project = project  # Proyecto ya viene cacheado desde el controlador
         self.workflow = StateGraph(CustomState)
         self.database = Persist()
         self.database_state = MemoryStatePersistence()
         self.logger = logging.getLogger(__name__)
         
-
         self.unique_id = unique_id
         self.source = source
         self.executor = ThreadPoolExecutor(max_workers=3)
@@ -162,40 +102,6 @@ class Graph():
             self.logger.info(f"No previous state found for user {self.state.user_id}. Starting with empty memory.")
         return memory
     
-    @error_handler.with_retry(
-        config=RetryConfig(max_retries=2, base_delay=1.0),
-        circuit_breaker_key="graph_execution",
-        fallback=None
-    )
-    async def execute_with_immediate_response(self, message, background_tasks):
-        """
-        🚀 NUEVA FUNCIÓN: Ejecuta con respuesta inmediata
-        ✅ MEJORADO: Incluye contexto acumulado de mensajes encolados
-        ✅ ROBUSTO: Con retry automático y circuit breaker
-        """
-        # 1. Obtener contexto acumulado si existe
-        accumulated_context = await get_user_accumulated_context(self.user_id, self.project_id)
-        
-        # 2. Construir mensaje final con contexto
-        final_message = build_message_with_context(message, accumulated_context)
-        
-        # 3. Detectar tipo de consulta y enviar respuesta inmediata
-        query_type = detect_query_type(message)
-        immediate_response = IMMEDIATE_RESPONSES.get(query_type, IMMEDIATE_RESPONSES["default"])
-        
-        # 4. Ejecutar el procesamiento real con el mensaje completo
-        response = await self.execute(final_message, background_tasks)
-        
-        # 5. Agregar metadatos de timing y contexto
-        response['immediate_response'] = immediate_response
-        response['query_type'] = query_type
-        response['processing_time'] = response.get('processing_time', 0)
-        
-        if accumulated_context:
-            response['messages_processed'] = len(accumulated_context) + 1
-            response['includes_queued_messages'] = True
-        
-        return response
         
     async def execute(self, message, debug=False):
         unique_id = self.unique_id
@@ -203,12 +109,7 @@ class Graph():
         logging.info(f"{unique_id} Graph execution started for project {self.state.project_id}, user {self.state.user_id}")
         loop = asyncio.get_event_loop()
 
-        # Obtener el proyecto en paralelo mientras preparamos el mensaje
-        project_future = loop.run_in_executor(
-            self.executor,
-            self.database.find_project,
-            self.state.project_id
-        )
+        # Usar el proyecto ya cargado desde el controlador
 
         # Preparar datos iniciales
         user_id = self.state.user_id
@@ -218,8 +119,8 @@ class Graph():
         human_message = HumanMessage(content=message)
         decorate_message(human_message, initial_time, conversation_id)
 
-        # Esperar por el proyecto
-        project = await project_future
+        # Proyecto ya disponible
+        project = self.project
 
         logging.info(f"{unique_id} Invoking LangGraph with initial message: '{message[:100]}...'" if len(message) > 100 else f"{unique_id} Invoking LangGraph with message: '{message}'")
 
@@ -253,21 +154,8 @@ class Graph():
         if not isinstance(nested_dict, OrderedDict):
             nested_dict = OrderedDict(nested_dict)
 
-        # 🧠 SISTEMA DE MEMORIA INTELIGENTE AVANZADO
-        # Usar el nuevo sistema adaptativo que calcula automáticamente el tamaño óptimo
-        state_dict = IntelligentMemoryManager.optimize_memory_state(state_dict)
-        
-        # Generar analíticas de memoria para monitoreo
-        memory_analytics = IntelligentMemoryManager.get_memory_analytics(state_dict)
-        logging.debug(f"Memory analytics: {memory_analytics}")
-        
-        # Obtener sugerencias de optimización
-        optimization_suggestions = IntelligentMemoryManager.suggest_memory_optimization(state_dict)
-        if optimization_suggestions:
-            logging.debug(f"Memory optimization suggestions: {len(optimization_suggestions)} items")
-        
-        # Crear backup de elementos críticos
-        backup_hash = IntelligentMemoryManager.create_memory_backup(state_dict)
+        # Sistema de memoria simplificado
+        # Mantener solo la lógica básica de estado
         self.state.state = state_dict
 
         logging.info(unique_id + " saving state")
@@ -307,7 +195,6 @@ class Graph():
     async def execute_stream(self, message, background_tasks):
         """
         Ejecuta el grafo en modo streaming, devolviendo chunks de respuesta en tiempo real.
-        ✅ MEJORADO: Incluye contexto acumulado de mensajes encolados
         
         Args:
             message (str): Mensaje del usuario
@@ -327,39 +214,14 @@ class Graph():
         logging.info(f"{unique_id} Iniciando ejecución en modo streaming")
         
         try:
-            # 🧠 OBTENER CONTEXTO ACUMULADO - Verificar si hay mensajes adicionales
-            accumulated_context = await get_user_accumulated_context(self.user_id, self.project_id)
-            
-            # 📝 CONSTRUIR MENSAJE FINAL - Incluir contexto si existe
-            final_message = build_message_with_context(message, accumulated_context)
-            
-            # 🚀 RESPUESTA INMEDIATA - Detectar tipo de consulta y enviar respuesta inmediata
-            query_type = detect_query_type(message)
-            immediate_response = IMMEDIATE_RESPONSES.get(query_type, IMMEDIATE_RESPONSES["default"])
-            
-            # Enviar respuesta inmediata con información de contexto
-            immediate_yield = {
-                "type": "immediate_response",
-                "content": immediate_response,
-                "query_type": query_type,
-                "is_complete": False
-            }
-            
-            # Añadir información de contexto si hay mensajes adicionales
-            if accumulated_context:
-                immediate_yield["messages_processed"] = len(accumulated_context) + 1
-                immediate_yield["includes_queued_messages"] = True
-                immediate_yield["content"] = f"{immediate_response} (procesando {len(accumulated_context)} mensajes adicionales)"
-            
-            yield immediate_yield
             
             # Preparar datos iniciales
             user_id = self.state.user_id
             initial_time = self.state.datetime
             conversation_id = str(uuid4())
             
-            # Crear mensaje humano con el mensaje final (incluye contexto)
-            human_message = HumanMessage(content=final_message)
+            # Crear mensaje humano
+            human_message = HumanMessage(content=message)
             decorate_message(human_message, initial_time, conversation_id)
             
             # Estado inicial para el grafo
@@ -402,13 +264,7 @@ class Graph():
             if not isinstance(nested_dict, OrderedDict):
                 nested_dict = OrderedDict(nested_dict)
                 
-            # 🧠 SISTEMA DE MEMORIA INTELIGENTE AVANZADO para streaming
-            state_dict = IntelligentMemoryManager.optimize_memory_state(state_dict)
-            
-            # Log analíticas en modo debug para streaming
-            if logging.getLogger().isEnabledFor(logging.DEBUG):
-                memory_analytics = IntelligentMemoryManager.get_memory_analytics(state_dict)
-                logging.debug(f"Streaming memory analytics: {memory_analytics}")
+            # Sistema de memoria simplificado para streaming
             self.state.state = state_dict
             
             # Guardar estado y generar resumen en segundo plano
@@ -422,15 +278,6 @@ class Graph():
                 )
             )
             
-        except CircuitBreakerOpenError as e:
-            logging.error(f"Circuit breaker open during streaming: {str(e)}")
-            yield {
-                "type": "error",
-                "error": "Servicio temporalmente no disponible. Intenta en unos minutos.",
-                "error_type": "circuit_breaker",
-                "is_complete": True,
-                "retry_after": 60
-            }
         except Exception as e:
             logging.error(f"Error in streaming execution: {str(e)}", exc_info=True)
             
@@ -487,17 +334,6 @@ class Graph():
         else:
             return "Ocurrió un error inesperado. Por favor intenta nuevamente o contacta soporte si el problema persiste."
     
-    def get_error_stats(self) -> dict:
-        """
-        Obtiene estadísticas de errores del sistema.
-        
-        Returns:
-            Diccionario con estadísticas de errores
-        """
-        return {
-            'function_stats': error_handler.get_stats(),
-            'circuit_breaker_stats': error_handler.get_circuit_breaker_status()
-        }
         
         
         
