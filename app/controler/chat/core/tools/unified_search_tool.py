@@ -119,23 +119,33 @@ def unified_search_tool(
             'project_id_filter': project.id,
             'content_types': content_types,
             'match_count': limit,
-            'similarity_threshold': 0.5,
+            'similarity_threshold': 0.3,  # Reducido para encontrar más resultados
             'category_filter': category,
             'min_price': None,
             'max_price': None
         }
         
         # Buscar contenido usando la función RPC unificada
-        response = supabase_client.rpc(
-            'search_all_content_unified',
-            rpc_params
-        ).execute()
-        
-        logger.info(f"Respuesta recibida. Resultados encontrados: {len(response.data) if response.data else 0}")
+        try:
+            response = supabase_client.rpc(
+                'search_all_content_unified',
+                rpc_params
+            ).execute()
+            
+            logger.info(f"Respuesta recibida. Resultados encontrados: {len(response.data) if response.data else 0}")
+            
+            # Log de debug para ver la estructura de la respuesta
+            if response.data and len(response.data) > 0:
+                logger.debug(f"Estructura del primer resultado: {list(response.data[0].keys())}")
+        except Exception as rpc_error:
+            logger.error(f"Error al ejecutar RPC search_all_content_unified: {str(rpc_error)}")
+            raise
 
         if not response.data:
-            logger.warning("No se encontró contenido relevante")
-            return "No se encontró información relevante para tu consulta."
+            logger.warning(f"No se encontró contenido relevante para query='{query}', project_id={project.id}, types={content_types}")
+            # Log adicional para debugging
+            logger.info(f"Parámetros RPC utilizados: {rpc_params}")
+            return "No se encontraron productos con esas características. ¿Te gustaría ver otros productos disponibles?"
 
         # Organizar resultados por tipo
         results_by_type = {
@@ -221,17 +231,41 @@ def unified_search_tool(
             for product in results_by_type['product']:
                 product_parts = []
                 
+                # 1. Nombre del producto
                 if product.get('title'):
                     product_parts.append(f"**{product['title']}**")
                 
+                # 2. Imagen (según instrucciones del bot)
+                if product.get('images') and product['images']:
+                    images = product['images']
+                    logger.debug(f"Formato de imágenes para {product.get('title')}: tipo={type(images)}, contenido={images[:1] if isinstance(images, list) else images}")
+                    
+                    if isinstance(images, list) and len(images) > 0:
+                        # Mostrar la primera imagen si está disponible
+                        first_image = images[0]
+                        if isinstance(first_image, dict) and 'url' in first_image:
+                            product_parts.append(f"![{product.get('title', 'Producto')}]({first_image['url']})")
+                        elif isinstance(first_image, str):
+                            product_parts.append(f"![{product.get('title', 'Producto')}]({first_image})")
+                    elif isinstance(images, str):
+                        # Si images es directamente una URL string
+                        product_parts.append(f"![{product.get('title', 'Producto')}]({images})")
+                
+                # 3. Descripción breve (máx. 2 líneas según instrucciones)
+                if product.get('description'):
+                    description = product['description']
+                    # Limitar a aproximadamente 2 líneas (200 caracteres)
+                    if len(description) > 200:
+                        description = description[:197] + "..."
+                    product_parts.append(f"**Descripción:** {description}")
+                
+                # 4. Precio
                 if product.get('price') is not None:
                     price = product['price']
                     currency = product.get('currency', 'CLP')
                     product_parts.append(f"**Precio:** ${price:,.0f} {currency}")
                 
-                if product.get('description'):
-                    product_parts.append(f"**Descripción:** {product['description']}")
-                
+                # 5. Stock (opcional)
                 if product.get('stock') is not None:
                     stock = product['stock']
                     if stock > 0:
@@ -239,16 +273,9 @@ def unified_search_tool(
                     else:
                         product_parts.append("**Stock:** ⚠️ Sin stock")
                 
+                # 6. URL del producto
                 if product.get('source_url'):
-                    product_parts.append(f"**URL:** {product['source_url']}")
-                
-                if product.get('images') and product['images']:
-                    images = product['images']
-                    if isinstance(images, list) and len(images) > 0:
-                        product_parts.append(f"**Imágenes:** {len(images)} disponible(s)")
-                
-                if product.get('similarity'):
-                    product_parts.append(f"*Relevancia: {product['similarity']:.1%}*")
+                    product_parts.append(f"[Ver producto]({product['source_url']})")
                 
                 if product_parts:
                     product_section.append("\n".join(product_parts))
@@ -281,6 +308,9 @@ def unified_search_tool(
 
         return final_response
 
+    except ValueError as e:
+        logger.error(f"Error de validación en unified search tool: {str(e)}")
+        return "Lo siento, no pude acceder a la información en este momento. Por favor, intenta nuevamente."
     except Exception as e:
-        logger.error(f"Error en unified search tool: {str(e)}")
-        return f"Error al buscar información: {str(e)}" 
+        logger.error(f"Error inesperado en unified search tool: {str(e)}", exc_info=True)
+        return "Ocurrió un error al buscar la información. Por favor, intenta nuevamente o contacta soporte." 
