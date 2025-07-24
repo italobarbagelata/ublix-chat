@@ -8,7 +8,7 @@ import logging
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 
-from app.controler.chat.core.services.db_pool_manager import db_pool
+from app.controler.chat.core.agenda_workflow.db_pool_manager import db_pool
 from app.controler.chat.core.security.input_validator import InputValidator
 from app.controler.chat.core.security.error_handler import raise_calendar_error, ErrorCategory, ErrorSeverity
 

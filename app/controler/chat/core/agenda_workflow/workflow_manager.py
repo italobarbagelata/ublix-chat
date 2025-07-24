@@ -5,7 +5,6 @@ Maneja los diferentes flujos de trabajo de forma eficiente y escalable.
 
 import asyncio
 import logging
-import hashlib
 import uuid
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timedelta, timezone
@@ -44,68 +43,7 @@ class WorkflowManager:
     def __init__(self):
         self.logger = logging.getLogger(__name__)
         self.active_workflows: Dict[str, WorkflowContext] = {}
-        # Cache de deduplicación para prevenir agendamientos duplicados
-        self.appointment_cache: Dict[str, Dict[str, Any]] = {}
     
-    def _generate_appointment_hash(self, project_id: str, title: str, start_datetime: str, attendee_email: str = "") -> str:
-        """
-        Genera un hash único para identificar citas potencialmente duplicadas.
-        
-        Args:
-            project_id: ID del proyecto
-            title: Título de la cita
-            start_datetime: Fecha/hora de inicio
-            attendee_email: Email del asistente (opcional)
-            
-        Returns:
-            Hash MD5 de la combinación de parámetros
-        """
-        # Crear una cadena única con los parámetros clave
-        unique_string = f"{project_id}_{title}_{start_datetime}_{attendee_email}".lower().strip()
-        return hashlib.md5(unique_string.encode()).hexdigest()
-    
-    def _cleanup_expired_appointments(self):
-        """Limpia citas expiradas del cache (más de 10 minutos)."""
-        current_time = datetime.now(timezone.utc)
-        expired_keys = []
-        
-        for hash_key, cache_entry in self.appointment_cache.items():
-            cache_time = cache_entry.get('cached_at', current_time)
-            if current_time - cache_time > timedelta(minutes=10):
-                expired_keys.append(hash_key)
-        
-        for key in expired_keys:
-            self.appointment_cache.pop(key, None)
-        
-        if expired_keys:
-            self.logger.info(f"Limpiadas {len(expired_keys)} citas expiradas del cache de deduplicación")
-    
-    def _is_duplicate_appointment(self, project_id: str, title: str, start_datetime: str, attendee_email: str = "") -> Optional[Dict[str, Any]]:
-        """
-        Verifica si una cita es duplicada basándose en el cache.
-        
-        Returns:
-            Datos de la cita duplicada si existe, None si no es duplicada
-        """
-        # Limpiar cache expirado primero
-        self._cleanup_expired_appointments()
-        
-        appointment_hash = self._generate_appointment_hash(project_id, title, start_datetime, attendee_email)
-        return self.appointment_cache.get(appointment_hash)
-    
-    def _cache_appointment(self, project_id: str, title: str, start_datetime: str, attendee_email: str, event_id: str, execution_id: str):
-        """Cache una cita para deduplicación futura."""
-        appointment_hash = self._generate_appointment_hash(project_id, title, start_datetime, attendee_email)
-        self.appointment_cache[appointment_hash] = {
-            'event_id': event_id,
-            'execution_id': execution_id,
-            'cached_at': datetime.now(timezone.utc),
-            'project_id': project_id,
-            'title': title,
-            'start_datetime': start_datetime,
-            'attendee_email': attendee_email
-        }
-        self.logger.info(f"💾 Cita cacheada para deduplicación: {appointment_hash[:8]}")
     
     def _personalize_event_title(self, original_title: str, agenda_config: Optional[Dict[str, Any]], parameters: Dict[str, Any]) -> str:
         """
@@ -298,7 +236,7 @@ class WorkflowManager:
                 self.logger.info(f"Using extracted/provided target_date: {target_date} for calendar search")
             
             # Implementar la búsqueda de horarios directamente usando CalendarService
-            from app.controler.chat.core.services.calendar_service import CalendarService
+            from app.controler.chat.core.agenda_workflow.calendar_service import CalendarService
             calendar_service = CalendarService()
             
             # Obtener configuración completa de búsqueda desde tabla agenda (incluye duración)
@@ -323,7 +261,7 @@ class WorkflowManager:
                 # Mostrar todos los horarios disponibles del día
                 for i, slot in enumerate(available_slots, 1):
                     time_text = slot.get('time_text', 'Horario disponible')
-                    formatted_slots += f"{i}. {time_text}\n"
+                    formatted_slots += f"{i}. **{time_text}**\n"
                 
                 formatted_slots += f"\nPor favor, indícame cuál de estos {len(available_slots)} horarios prefieres para agendar la cita."
                 
@@ -435,106 +373,158 @@ class WorkflowManager:
             self.logger.error(f"Error obteniendo configuración de búsqueda: {str(e)}")
             return default_config
     
+    async def _get_agenda_configuration(self, project_id: str) -> Dict[str, Any]:
+        """Obtiene configuración de agenda desde base de datos con cache."""
+        try:
+            from app.controler.chat.store.supabase_client import SupabaseClient
+            supabase_client = SupabaseClient()
+            response = supabase_client.client.table("agenda").select("*").eq("project_id", project_id).execute()
+            
+            if response.data and len(response.data) > 0:
+                return response.data[0]
+            else:
+                self.logger.warning(f"No se encontró configuración de agenda para project_id: {project_id}")
+                return {}
+        except Exception as e:
+            self.logger.error(f"Error obteniendo configuración de agenda: {str(e)}")
+            return {}
+
+    def _calculate_event_duration(self, parameters: Dict[str, Any], agenda_settings: Dict[str, Any]) -> None:
+        """Calcula la duración del evento usando la configuración."""
+        if not parameters.get('start_datetime'):
+            return
+            
+        duration_minutes = agenda_settings.get('default_duration_minutes', 60)
+        self.logger.info(f"🕐 Duración configurada: {duration_minutes} minutos")
+        self.logger.info(f"🕐 Start datetime: {parameters.get('start_datetime')}")
+        
+        from datetime import datetime, timedelta
+        start_dt = datetime.fromisoformat(parameters['start_datetime'])
+        end_dt = start_dt + timedelta(minutes=duration_minutes)
+        parameters['end_datetime'] = end_dt.isoformat()
+        
+        self.logger.info(f"🕐 End datetime calculado: {parameters['end_datetime']}")
+        self.logger.info(f"🕐 Horario final: {parameters['start_datetime']} - {parameters['end_datetime']}")
+
+    async def _prepare_contact_data(self, context: WorkflowContext, parameters: Dict[str, Any], 
+                                   contact_manager, attendee_email: str) -> Dict[str, Any]:
+        """Prepara datos de contacto combinando parámetros y base de datos."""
+        # Datos base de parámetros
+        contact_data = {
+            'email': attendee_email,
+            'name': parameters.get('attendee_name', ''),
+            'phone': parameters.get('attendee_phone', ''),
+            'phone_number': parameters.get('attendee_phone', '')  # Para compatibilidad
+        }
+        
+        # Si hay email, enriquecer con datos de base de datos
+        if attendee_email:
+            try:
+                stored_contact = await contact_manager.get_contact(context.user_id, context.project_id)
+                
+                if stored_contact:
+                    # Actualizar campos básicos
+                    contact_data.update({
+                        'name': stored_contact.get('name', contact_data['name']),
+                        'phone': stored_contact.get('phone_number', contact_data['phone']),
+                        'phone_number': stored_contact.get('phone_number', contact_data['phone_number']),
+                        'email': stored_contact.get('email', contact_data['email'])
+                    })
+                    
+                    # Incluir additional_fields si existen
+                    additional_fields = stored_contact.get('additional_fields')
+                    if additional_fields:
+                        if isinstance(additional_fields, str):
+                            try:
+                                import json
+                                additional_fields = json.loads(additional_fields)
+                            except json.JSONDecodeError:
+                                self.logger.warning(f"Error parseando additional_fields JSON: {additional_fields}")
+                                additional_fields = {}
+                        
+                        if isinstance(additional_fields, dict):
+                            contact_data.update(additional_fields)
+                            self.logger.info(f"📞 Additional_fields incluidos: {list(additional_fields.keys())}")
+                    
+                    self.logger.info(f"📞 Datos de contacto obtenidos desde DB: phone={contact_data['phone']}, name={contact_data['name']}")
+                else:
+                    self.logger.warning(f"📞 No se encontró contacto almacenado para user_id={context.user_id}")
+            except Exception as e:
+                self.logger.error(f"Error obteniendo datos de contacto: {str(e)}")
+        
+        return contact_data
+
+    async def _add_event_attendees(self, calendar_service, event_id: str, parameters: Dict[str, Any], 
+                                  calendar_owner_email: str, context: WorkflowContext) -> None:
+        """Agrega attendees al evento después de crearlo."""
+        attendees_to_add = []
+        
+        # Agregar email del cliente si existe
+        if parameters.get('attendee_email'):
+            attendees_to_add.append(('cliente', parameters['attendee_email']))
+        
+        # SIEMPRE agregar al dueño de la agenda
+        if calendar_owner_email:
+            attendees_to_add.append(('dueño', calendar_owner_email))
+            self.logger.info(f"📧 Agregando al dueño como attendee: {calendar_owner_email}")
+        
+        # Enviar invitaciones a todos los emails
+        for email_type, email in attendees_to_add:
+            try:
+                result = await calendar_service.add_attendee_to_event(
+                    event_id=event_id,
+                    attendee_email=email,
+                    project_id=context.project_id,
+                    project=context.project
+                )
+                if result.get('success'):
+                    self.logger.info(f"📧 Invitación enviada exitosamente al {email_type}: {email}")
+                else:
+                    self.logger.error(f"📧 Error enviando invitación al {email_type} ({email}): {result.get('error')}")
+            except Exception as invite_error:
+                self.logger.error(f"📧 Excepción enviando invitación al {email_type} ({email}): {str(invite_error)}")
+                # No fallar el workflow por error de invitación
+
     async def _execute_agenda_completa(self, context: WorkflowContext, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """Ejecuta workflow completo de agendamiento."""
         from .calendar_service import CalendarService
         from .notification_service import NotificationService
         from .contact_manager import ContactManager
         
-        # Validar parámetros requeridos (email es opcional para uso interno)
+        # 1. Obtener configuración
+        agenda_config = await self._get_agenda_configuration(context.project_id)
+        workflow_settings = agenda_config.get('workflow_settings', {})
+        agenda_completa_settings = workflow_settings.get('AGENDA_COMPLETA', {})
+        general_settings = agenda_config.get('general_settings', {})
+        
+        # 2. Verificar si el email es requerido
+        require_email = agenda_completa_settings.get('require_email', 
+                      general_settings.get('require_attendee_email', True))
+        self.logger.info(f"Configuración require_email desde AGENDA_COMPLETA: {require_email}")
+        
+        # 3. Validar parámetros requeridos
         required_params = ['title', 'start_datetime']
-        
-        # Verificar si el email es requerido según configuración de la tabla agenda
-        require_email = True  # Por defecto requerido para compatibilidad
-        agenda_config = None
-        agenda_completa_settings = {}  # Inicializar con diccionario vacío
-        
-        try:
-            # Obtener configuración desde tabla agenda
-            from app.controler.chat.store.supabase_client import SupabaseClient
-            supabase_client = SupabaseClient()
-            response = supabase_client.client.table("agenda").select("*").eq("project_id", context.project_id).execute()
-            
-            if response.data and len(response.data) > 0:
-                agenda_config = response.data[0]
-                workflow_settings = agenda_config.get('workflow_settings', {})
-                agenda_completa_settings = workflow_settings.get('AGENDA_COMPLETA', {})
-                general_settings = agenda_config.get('general_settings', {})
-                
-                # Leer require_email desde AGENDA_COMPLETA primero, luego fallback a general_settings
-                require_email = agenda_completa_settings.get('require_email', 
-                              general_settings.get('require_attendee_email', True))
-                self.logger.info(f"Configuración require_email desde AGENDA_COMPLETA: {require_email}")
-            else:
-                self.logger.warning(f"No se encontró configuración de agenda para project_id: {context.project_id}")
-        except Exception as e:
-            self.logger.error(f"Error obteniendo configuración de agenda: {str(e)}")
-            # Continuar con valor por defecto
-        
-        # Inicializar servicios con la configuración obtenida
-        calendar_service = CalendarService()
-        notification_service = NotificationService(cached_project_config=agenda_config)
-        contact_manager = ContactManager()
-        
-        # Agregar email a parámetros requeridos solo si está configurado como requerido
         if require_email:
             required_params.append('attendee_email')
         
         missing_params = [param for param in required_params if not parameters.get(param)]
-        
         if missing_params:
-            if 'attendee_email' in missing_params and not require_email:
-                # Si email no es requerido, removerlo de la lista de faltantes
-                missing_params.remove('attendee_email')
-            
-            if missing_params:  # Solo fallar si hay otros parámetros faltantes
-                raise_calendar_error(
-                    f"Parámetros requeridos faltantes: {', '.join(missing_params)}",
-                    ErrorCategory.VALIDATION,
-                    ErrorSeverity.MEDIUM,
-                    "MISSING_REQUIRED_PARAMS"
-                )
+            raise_calendar_error(
+                f"Parámetros requeridos faltantes: {', '.join(missing_params)}",
+                ErrorCategory.VALIDATION,
+                ErrorSeverity.MEDIUM,
+                "MISSING_REQUIRED_PARAMS"
+            )
         
-        # 🚨 VALIDACIÓN ANTI-DUPLICADOS
-        # Verificar si ya existe una cita idéntica reciente
-        duplicate_check = self._is_duplicate_appointment(
-            project_id=context.project_id,
-            title=parameters['title'],
-            start_datetime=parameters['start_datetime'],
-            attendee_email=parameters.get('attendee_email', '')
-        )
+        # 4. Inicializar servicios
+        calendar_service = CalendarService()
+        notification_service = NotificationService(cached_project_config=agenda_config)
+        contact_manager = ContactManager()
         
-        if duplicate_check:
-            self.logger.warning(f"🚨 CITA DUPLICADA DETECTADA - Previniendo agendamiento duplicado")
-            self.logger.warning(f"   Original event_id: {duplicate_check['event_id']}")
-            self.logger.warning(f"   Original execution_id: {duplicate_check['execution_id']}")
-            
-            return {
-                'success': True,  # Devolver éxito para no confundir al agente
-                'workflow_type': WorkflowType.AGENDA_COMPLETA.value,
-                'event_id': duplicate_check['event_id'],
-                'execution_id': duplicate_check['execution_id'],
-                'message': 'La cita ya fue agendada anteriormente',
-                'is_duplicate': True
-            }
+        # 5. Calcular duración usando configuración
+        self._calculate_event_duration(parameters, agenda_completa_settings)
         
         try:
-            # 0. PRIMERO: SIEMPRE calcular end_datetime usando default_duration_minutes (ignorar lo que pase el AI)
-            if parameters.get('start_datetime'):
-                duration_minutes = agenda_completa_settings.get('default_duration_minutes', 60)
-                self.logger.info(f"🕐 Configuración AGENDA_COMPLETA obtenida: {agenda_completa_settings}")
-                self.logger.info(f"🕐 Duración configurada: {duration_minutes} minutos")
-                self.logger.info(f"🕐 Start datetime recibido del AI: {parameters.get('start_datetime')}")
-                self.logger.info(f"🕐 End datetime recibido del AI: {parameters.get('end_datetime')} (será ignorado)")
-                
-                from datetime import datetime, timedelta
-                start_dt = datetime.fromisoformat(parameters['start_datetime'])
-                end_dt = start_dt + timedelta(minutes=duration_minutes)
-                parameters['end_datetime'] = end_dt.isoformat()
-                
-                self.logger.info(f"🕐 Duración forzada a {duration_minutes} minutos")
-                self.logger.info(f"🕐 end_datetime recalculado: {parameters['end_datetime']}")
-                self.logger.info(f"🕐 Horario final para reservar: {parameters['start_datetime']} - {parameters['end_datetime']}")
 
             # 1. Verificar disponibilidad
             conflicts = await calendar_service.check_conflicts(
@@ -615,7 +605,7 @@ class WorkflowManager:
             if not event_result['success']:
                 return event_result
             
-            # 5. Actualizar contacto (solo si hay email)
+            # 6. Actualizar contacto y preparar datos para notificaciones
             attendee_email = parameters.get('attendee_email', '')
             if attendee_email:  
                 await contact_manager.update_or_create_contact(
@@ -629,116 +619,37 @@ class WorkflowManager:
             else:
                 self.logger.info("Cita creada para uso interno (sin email del cliente)")
             
-            # 6. Preparar datos de contacto para notificaciones y webhook (SIEMPRE)
-            contact_data = {
-                'email': attendee_email,
-                'name': parameters.get('attendee_name', ''),
-                'phone': parameters.get('attendee_phone', ''),
-                'phone_number': parameters.get('attendee_phone', '')  # Para compatibilidad
-            }
+            # 7. Preparar datos completos de contacto para notificaciones y webhook
+            contact_data = await self._prepare_contact_data(context, parameters, contact_manager, attendee_email)
             
-            # Si hay email, obtener datos del contacto
-            if attendee_email:
-                # Obtener datos reales del contacto desde la base de datos
-                stored_contact = await contact_manager.get_contact(context.user_id, context.project_id)
-                
-                # Si existe contacto almacenado, usar sus datos como prioritarios
-                if stored_contact:
-                    # Actualizar campos básicos
-                    contact_data.update({
-                        'name': stored_contact.get('name', contact_data['name']),
-                        'phone': stored_contact.get('phone_number', contact_data['phone']),
-                        'phone_number': stored_contact.get('phone_number', contact_data['phone_number']),
-                        'email': stored_contact.get('email', contact_data['email'])
-                    })
-                    
-                    # CRÍTICO: Incluir additional_fields del contacto (datos dinámicos como ciudad, profesión, etc.)
-                    additional_fields = stored_contact.get('additional_fields')
-                    if additional_fields:
-                        # Si additional_fields es un string JSON, parsearlo
-                        if isinstance(additional_fields, str):
-                            try:
-                                import json
-                                additional_fields = json.loads(additional_fields)
-                            except json.JSONDecodeError:
-                                self.logger.warning(f"Error parseando additional_fields JSON: {additional_fields}")
-                                additional_fields = {}
-                        
-                        # Si es un dict, fusionar los campos al contact_data
-                        if isinstance(additional_fields, dict):
-                            contact_data.update(additional_fields)
-                            self.logger.info(f"📞 Additional_fields incluidos en webhook: {list(additional_fields.keys())}")
-                    
-                    self.logger.info(f"📞 Datos de contacto obtenidos desde DB: phone={contact_data['phone']}, name={contact_data['name']}")
-                else:
-                    self.logger.warning(f"📞 No se encontró contacto almacenado para user_id={context.user_id}, usando parámetros actuales")
-                
-                # Enviar notificaciones por email (respeta configuración send_email_notifications)
-                await notification_service.send_appointment_notifications(
-                    event_data=event_result['event_data'],
-                    contact_data=contact_data,
-                    project_id=context.project_id,
-                    user_id=context.user_id,
-                    conversation_summary=parameters.get('conversation_summary', '')
-                )
-            
-            # 7. Agregar attendees al evento (DESPUÉS de crear, como funcionaba antes)
-            attendees_to_add = []
-            
-            # Agregar email del cliente si existe
-            if parameters.get('attendee_email'):
-                attendees_to_add.append(('cliente', parameters['attendee_email']))
-            
-            # SIEMPRE agregar al dueño de la agenda
-            if calendar_owner_email:
-                attendees_to_add.append(('dueño', calendar_owner_email))
-                self.logger.info(f"📧 Agregando al dueño como attendee: {calendar_owner_email}")
-            
-            # Enviar invitaciones a todos los emails usando add_attendee_to_event
-            for email_type, email in attendees_to_add:
-                try:
-                    result = await calendar_service.add_attendee_to_event(
-                        event_id=event_result['event_id'],
-                        attendee_email=email,
-                        project_id=context.project_id,
-                        project=context.project
-                    )
-                    if result.get('success'):
-                        self.logger.info(f"📧 Invitación enviada exitosamente al {email_type}: {email}")
-                    else:
-                        self.logger.error(f"📧 Error enviando invitación al {email_type} ({email}): {result.get('error')}")
-                except Exception as invite_error:
-                    self.logger.error(f"📧 Excepción enviando invitación al {email_type} ({email}): {str(invite_error)}")
-                    # No fallar el workflow por error de invitación
-            
-            # 8. Enviar webhook SIEMPRE que esté configurado (independiente del email)
-            try:
-                webhook_result = await notification_service._send_webhook_notification(
-                    event_data=event_result['event_data'],
-                    contact_data=contact_data,
-                    project_id=context.project_id,
-                    user_id=context.user_id,
-                    conversation_summary=parameters.get('conversation_summary', '')
-                )
-                if webhook_result.get('success'):
-                    self.logger.info("📡 Webhook enviado exitosamente")
-                elif webhook_result.get('skipped'):
-                    self.logger.info("📡 Webhook no configurado - omitido")
-                else:
-                    self.logger.warning(f"📡 Webhook falló: {webhook_result.get('error', 'Unknown error')}")
-            except Exception as webhook_error:
-                self.logger.error(f"📡 Error enviando webhook: {str(webhook_error)}")
-                # No fallar el workflow por error de webhook
-            
-            # 💾 CACHEAR CITA PARA DEDUPLICACIÓN FUTURA (usar título personalizado)
-            self._cache_appointment(
+            # 8. Enviar notificaciones por email y webhook
+            notifications_result = await notification_service.send_appointment_notifications(
+                event_data=event_result['event_data'],
+                contact_data=contact_data,
                 project_id=context.project_id,
-                title=personalized_title,
-                start_datetime=parameters['start_datetime'],
-                attendee_email=parameters.get('attendee_email', ''),
-                event_id=event_result['event_id'],
-                execution_id=context.execution_id
+                user_id=context.user_id,
+                conversation_summary=parameters.get('conversation_summary', '')
             )
+            
+            # Log del resultado del webhook desde las notificaciones
+            if notifications_result:
+                webhook_sent = notifications_result.get('webhook_sent', False)
+                errors = notifications_result.get('errors', [])
+                webhook_errors = [e for e in errors if e.startswith('webhook:')]
+                
+                if webhook_sent:
+                    self.logger.info("📡 Workflow completado - webhook procesado")
+                elif webhook_errors:
+                    self.logger.warning(f"⚠️ Workflow completado - webhook falló: {webhook_errors[0]}")
+                else:
+                    self.logger.info("📡 Webhook no configurado - omitido")
+            else:
+                self.logger.warning("📡 No se recibió resultado de las notificaciones")
+            
+            # 9. Agregar attendees al evento (DESPUÉS de crear, como funcionaba antes)
+            await self._add_event_attendees(calendar_service, event_result['event_id'], parameters, calendar_owner_email, context)
+            
+            
             
             return {
                 'success': True,

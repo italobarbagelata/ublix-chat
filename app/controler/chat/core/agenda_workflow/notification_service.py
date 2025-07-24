@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor
 
 from app.controler.chat.core.tools.email_tool import EmailTool, send_email_async
-from app.controler.chat.core.services.email_service import EmailService
+from app.controler.chat.core.agenda_workflow.email_service import EmailService
 from app.controler.chat.core.security.webhook_security import webhook_security_manager
 from app.controler.chat.core.security.error_handler import raise_calendar_error, ErrorCategory, ErrorSeverity
 
@@ -221,7 +221,7 @@ class NotificationService:
                             timeout=aiohttp.ClientTimeout(total=15)
                         ) as response:
                             if response.status == 200:
-                                self.logger.info(f"Webhook enviado exitosamente a {webhook_url}")
+                                self.logger.info(f"✅ Webhook HTTP 200 OK - enviado a {webhook_url}")
                                 return {'success': True}
                             else:
                                 error_msg = f"HTTP {response.status}"

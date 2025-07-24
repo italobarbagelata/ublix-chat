@@ -8,10 +8,10 @@ import asyncio
 from typing import Optional, Dict, Any
 from langchain.tools import BaseTool
 
-from app.controler.chat.core.services.workflow_manager import WorkflowManager, WorkflowContext
-from app.controler.chat.core.services.calendar_service import CalendarService
-from app.controler.chat.core.services.notification_service import NotificationService
-from app.controler.chat.core.services.contact_manager import ContactManager
+from app.controler.chat.core.agenda_workflow.workflow_manager import WorkflowManager, WorkflowContext
+from app.controler.chat.core.agenda_workflow.calendar_service import CalendarService
+from app.controler.chat.core.agenda_workflow.notification_service import NotificationService
+from app.controler.chat.core.agenda_workflow.contact_manager import ContactManager
 from app.controler.chat.core.security.input_validator import InputValidator, SecurityAuditLogger
 from app.controler.chat.core.security.error_handler import safe_execute, raise_calendar_error, ErrorCategory, ErrorSeverity
 
