@@ -10,12 +10,11 @@ from datetime import datetime, timedelta
 from app.controler.chat.store.persistence import SupabaseDatabase
 from app.models import ChatRequest
 from app.chatbot import chatbot
-from app.controler.webhook.instagram_adapter import InstagramAdapter
-
 INSTAGRAM_API_VERSION = "v23.0"
 INSTAGRAM_API_BASE_URL = f"https://graph.instagram.com/{INSTAGRAM_API_VERSION}"
+INSTAGRAM_COLLECTION = "integration_instagram"
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
 
-# Configurar logging con más detalle
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -23,17 +22,7 @@ logging.basicConfig(
 logger = logging.getLogger("instagram_webhook")
 load_dotenv()
 
-INSTAGRAM_COLLECTION = "integration_instagram"
-FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
 
-# Cache para deduplicación de mensajes
-message_cache = {}
-CACHE_EXPIRY_MINUTES = 30
-
-
-########################################################
-# Verificación de webhook de Instagram
-########################################################
 async def verify_webhook_instagram(request: Request):
     """Verifica el webhook de Instagram cuando Facebook/Meta lo configura inicialmente."""
     logger.info("Iniciando verificación de webhook de Instagram")
@@ -65,69 +54,45 @@ async def verify_webhook_instagram(request: Request):
         raise HTTPException(status_code=403, detail="Verificación fallida")
 
 
-########################################################
-# Funciones auxiliares
-########################################################
-def is_message_duplicate(message_id: str, timestamp: int) -> bool:
-    """
-    Verifica si un mensaje ya fue procesado usando message_id y timestamp.
-    
-    Args:
-        message_id: ID único del mensaje de Instagram
-        timestamp: Timestamp del mensaje
-        
-    Returns:
-        True si el mensaje ya fue procesado, False si es nuevo
-    """
+async def process_webhook_instagram(request: Request, background_tasks: BackgroundTasks) -> Dict[str, Any]:
+    """Procesa los mensajes de webhook entrantes de Instagram."""
     try:
-        # Crear clave única combinando message_id y timestamp
-        cache_key = f"{message_id}_{timestamp}"
+        logger.info("Iniciando procesamiento de webhook de Instagram")
+        body = await request.json()
+        logger.info(f"Webhook recibido: {json.dumps(body, indent=2)}")
         
-        # Obtener tiempo actual
-        current_time = datetime.now()
+        extracted_messages = extract_instagram_messages(body)
+        total_messages = len(extracted_messages)
         
-        # Limpiar cache de mensajes expirados
-        expired_keys = []
-        for key, cached_time in message_cache.items():
-            if current_time - cached_time > timedelta(minutes=CACHE_EXPIRY_MINUTES):
-                expired_keys.append(key)
+        logger.info(f"Se extrajeron {total_messages} mensajes del webhook")
         
-        # Remover claves expiradas
-        for key in expired_keys:
-            del message_cache[key]
-            
-        # Verificar si el mensaje ya existe en cache
-        if cache_key in message_cache:
-            logger.info(f"Mensaje duplicado detectado: {message_id} con timestamp {timestamp}")
-            return True
-            
-        # Agregar mensaje al cache
-        message_cache[cache_key] = current_time
-        logger.debug(f"Mensaje agregado al cache: {cache_key}")
-        return False
+        if total_messages == 0:
+            logger.info("No hay mensajes para procesar (posiblemente un mensaje de eco)")
+            return {"status": "ok", "processed": 0, "total": 0, "message": "No messages to process"}
+        
+        for message in extracted_messages:
+            logger.debug(f"Programando procesamiento asíncrono para mensaje: {message.get('message_id', 'unknown')}")
+            background_tasks.add_task(process_message_async, message)
+        
+        background_tasks.add_task(save_webhook_to_file, body)
+        
+        logger.info(f"Webhook procesado exitosamente. {total_messages} mensajes programados para procesamiento asíncrono")
+        return {
+            "status": "ok", 
+            "total": total_messages,
+            "message": f"Webhook received. {total_messages} messages scheduled for async processing",
+            "timestamp": datetime.now().isoformat()
+        }
         
     except Exception as e:
-        logger.error(f"Error verificando duplicación de mensaje: {e}")
-        # En caso de error, no bloquear el mensaje
-        return False
-async def save_webhook_to_file(webhook_data: Dict[str, Any]):
-    """Guarda un webhook en un archivo para referencia futura."""
-    try:
-        import os
-        from datetime import datetime
-        
-        imports_dir = os.path.join(os.getcwd(), "imports")
-        if not os.path.exists(imports_dir):
-            os.makedirs(imports_dir)
-            
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        file_path = os.path.join(imports_dir, f"instagram_webhook_{timestamp}.json")
-        
-        with open(file_path, 'w') as f:
-            json.dump(webhook_data, f, indent=2)
-            
-    except Exception as e:
-        logger.warning(f"Error guardando webhook en archivo: {e}")
+        logger.error(f"Error procesando webhook de Instagram: {e}", exc_info=True)
+        return {
+            "status": "error", 
+            "detail": "Internal server error processing webhook",
+            "message": "Webhook received but encountered processing error",
+            "timestamp": datetime.now().isoformat()
+        }
+
 
 def extract_instagram_messages(body: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Extrae los mensajes del webhook de Instagram."""
@@ -141,7 +106,7 @@ def extract_instagram_messages(body: Dict[str, Any]) -> List[Dict[str, Any]]:
             for event in entry.get("messaging", []):
                 if "message" in event:
                     message_obj = event["message"]
-                    # Ignorar mensajes que son ecos
+                    
                     if message_obj.get("is_echo", False):
                         logger.debug("Ignorando mensaje eco")
                         continue
@@ -153,12 +118,6 @@ def extract_instagram_messages(body: Dict[str, Any]) -> List[Dict[str, Any]]:
                     
                     logger.debug(f"Mensaje encontrado - Sender: {sender_id}, Recipient: {recipient_id}, Message ID: {message_id}")
                     
-                    # Verificar duplicación antes de procesar
-                    if is_message_duplicate(message_id, timestamp):
-                        logger.info(f"Mensaje duplicado ignorado: {message_id} con timestamp {timestamp}")
-                        continue
-                    
-                    # Procesar mensajes de texto
                     if "text" in message_obj:
                         message_data = {
                             "recipient_id": recipient_id,
@@ -172,7 +131,6 @@ def extract_instagram_messages(body: Dict[str, Any]) -> List[Dict[str, Any]]:
                         logger.debug(f"Agregando mensaje de texto: {json.dumps(message_data, indent=2)}")
                         messages.append(message_data)
                     
-                    # Procesar mensajes con archivos adjuntos (imágenes, videos, audio)
                     elif "attachments" in message_obj:
                         attachments = message_obj.get("attachments", [])
                         for attachment in attachments:
@@ -191,14 +149,12 @@ def extract_instagram_messages(body: Dict[str, Any]) -> List[Dict[str, Any]]:
                                     "entry_id": entry_id
                                 }
                                 
-                                # Si hay texto junto con el archivo adjunto
                                 if "text" in message_obj:
                                     message_data["text"] = message_obj.get("text", "")
                                 
                                 logger.debug(f"Agregando mensaje con {attachment_type}: {json.dumps(message_data, indent=2)}")
                                 messages.append(message_data)
                     
-                    # Procesar stickers
                     elif "sticker_id" in message_obj:
                         message_data = {
                             "recipient_id": recipient_id,
@@ -215,6 +171,8 @@ def extract_instagram_messages(body: Dict[str, Any]) -> List[Dict[str, Any]]:
     except Exception as e:
         logger.error(f"Error extrayendo mensajes IG: {e}", exc_info=True)
     return messages
+
+
 
 async def get_project_id_for_instagram(recipient_id: str, sender_id: Optional[str] = None) -> Optional[str]:
     """Encuentra el project_id asociado con un webhook de Instagram."""
@@ -236,77 +194,26 @@ async def get_project_id_for_instagram(recipient_id: str, sender_id: Optional[st
         logger.error(f"Error buscando project_id para Instagram: {e}", exc_info=True)
         return None
 
-async def get_instagram_user_info(instagram_id: str, access_token: str) -> Dict[str, Any]:
-    """
-    Obtiene la información de un usuario de Instagram usando su ID.
-    
-    Args:
-        instagram_id: El ID de Instagram del usuario.
-        access_token: Token de acceso para la API de Instagram.
-        
-    Returns:
-        Dict con la información del usuario o información de error.
-    """
-    if not access_token:
-        error_msg = "No hay token de acceso configurado"
-        logger.error(error_msg)
-        return {"error": {"message": error_msg, "code": 400}}
-        
-    try:
-        async with httpx.AsyncClient() as client:
-            url = f"{INSTAGRAM_API_BASE_URL}/{instagram_id}"
-            params = {
-                "access_token": access_token,
-                "fields": "id,username,name"
-            }
-            
-            response = await client.get(url, params=params)
-            
-            if response.status_code != 200:
-                error_msg = f"Error al obtener información del usuario: {response.status_code}"
-                logger.error(f"{error_msg} - {response.text}")
-                return {"error": {"message": error_msg, "code": response.status_code}}
-            
-            user_data = response.json()
-            logger.info(f"Información obtenida del usuario Instagram {instagram_id}: {user_data}")
-            return user_data
-            
-    except httpx.HTTPError as e:
-        error_msg = f"Error HTTP al obtener información del usuario: {str(e)}"
-        logger.error(error_msg)
-        return {"error": {"message": error_msg, "code": 500}}
-    except Exception as e:
-        error_msg = f"Error inesperado al obtener información del usuario: {str(e)}"
-        logger.error(error_msg)
-        return {"error": {"message": error_msg, "code": 500}}
 
 
-########################################################
-# Procesamiento de mensaje de Instagram
-########################################################
-async def process_instagram_message_background(message: Dict[str, Any]):
-    """
-    Procesa un mensaje de Instagram en background sin bloquear la respuesta del webhook.
-    Esta función se ejecuta de forma completamente asíncrona.
-    """
+async def process_message_async(message: Dict[str, Any]):
+    """Procesa un mensaje de Instagram en background sin bloquear la respuesta del webhook."""
     try:
         message_id = message.get('message_id', 'unknown')
         recipient_id = message.get("recipient_id")
         sender_id = message.get("sender_id")
         
-        logger.info(f"🔄 Iniciando procesamiento en background para mensaje {message_id} - Sender: {sender_id}, Recipient: {recipient_id}")
+        logger.info(f"Iniciando procesamiento en background para mensaje {message_id} - Sender: {sender_id}, Recipient: {recipient_id}")
         
         if not recipient_id or not sender_id:
-            logger.warning(f"❌ Mensaje IG omitido en background - Recipient: {recipient_id}, Sender: {sender_id}")
+            logger.warning(f"Mensaje IG omitido en background - Recipient: {recipient_id}, Sender: {sender_id}")
             return
         
-        # Buscar project_id
         project_id = await get_project_id_for_instagram(recipient_id, sender_id)
         if not project_id:
-            logger.error(f"❌ No se encontró project_id válido para IG Recipient ID: {recipient_id}")
+            logger.error(f"No se encontró project_id válido para IG Recipient ID: {recipient_id}")
             return
 
-        # Verificar estado de conversación
         db = SupabaseDatabase()
         conversation_state = db.find_one("instagram_conversation_states", {
             "project_id": project_id,
@@ -315,7 +222,6 @@ async def process_instagram_message_background(message: Dict[str, Any]):
         })
         
         if not conversation_state:
-            # Crear nuevo estado de conversación
             conversation_state = {
                 "project_id": project_id,
                 "instagram_page_id": recipient_id,
@@ -323,155 +229,43 @@ async def process_instagram_message_background(message: Dict[str, Any]):
                 "bot_active": True
             }
             db.insert("instagram_conversation_states", conversation_state)
-            logger.info(f"✅ Nuevo estado de conversación de Instagram creado para usuario {sender_id}")
+            logger.info(f"Nuevo estado de conversación de Instagram creado para usuario {sender_id}")
         elif not conversation_state.get("bot_active", True):
-            logger.info(f"🚫 Bot desactivado para usuario {sender_id} - omitiendo procesamiento")
+            logger.info(f"Bot desactivado para usuario {sender_id} - omitiendo procesamiento")
             return
 
-        # Procesar el mensaje completo
-        await process_instagram_message_content(message, project_id)
+        await process_message_content(message, project_id)
         
-        logger.info(f"✅ Procesamiento en background completado para mensaje {message_id}")
+        logger.info(f"Procesamiento en background completado para mensaje {message_id}")
         
     except Exception as e:
-        logger.error(f"❌ Error en procesamiento background de mensaje IG: {e}", exc_info=True)
+        logger.error(f"Error en procesamiento background de mensaje IG: {e}", exc_info=True)
 
 
-async def process_instagram_message_content(message: Dict[str, Any], project_id: str):
-    """
-    Procesa el contenido del mensaje de Instagram y envía la respuesta.
-    Separado para mejor organización del código.
-    """
+async def process_message_content(message: Dict[str, Any], project_id: str):
+    """Procesa el contenido del mensaje de Instagram y envía la respuesta."""
     try:
         recipient_id = message.get("recipient_id")
         sender_id = message.get("sender_id")
         message_type = message.get("type")
         
-        # Inicializar el adaptador de Instagram
-        instagram_adapter = InstagramAdapter(project_id, recipient_id)
+        logger.info(f"Procesando contenido del mensaje - Tipo: {message_type}, Usuario: {sender_id}")
         
-        logger.info(f"📝 Procesando contenido del mensaje - Tipo: {message_type}, Usuario: {sender_id}")
-        
-        # Obtener información del usuario de Instagram
         username = "Instagram User"
         user_id = sender_id
         source_id = message.get("recipient_id")
         
-        # Intentar obtener el nombre de usuario real
-        try:
-            db = SupabaseDatabase()
-            instagram_config = db.find_one(INSTAGRAM_COLLECTION, {"instagram_page_id": recipient_id, "active": True})
-            if instagram_config and instagram_config.get("access_token"):
-                access_token = instagram_config.get("access_token")
-                user_info = await get_instagram_user_info(sender_id, access_token)
-                
-                if not user_info.get("error"):
-                    # Usar username si está disponible, sino usar name, sino usar el ID
-                    if user_info.get("username"):
-                        username = f"@{user_info['username']}"
-                    elif user_info.get("name"):
-                        username = user_info["name"]
-                    else:
-                        username = f"Instagram User {sender_id}"
-                    logger.info(f"👤 Usuario obtenido: {username}")
-                else:
-                    logger.warning(f"❌ Error obteniendo info del usuario: {user_info['error']['message']}")
-            else:
-                logger.warning("⚠️ No se encontró access_token para obtener info del usuario")
-        except Exception as e:
-            logger.warning(f"❌ Error obteniendo nombre de usuario de Instagram: {e}")
-            # Mantener el valor por defecto
-        
-        # Preparar el mensaje y la imagen
         text_message = message.get("text", "")
         image_url = None
         
-        # Procesar imágenes si las hay
         if message_type == "image" and message.get("attachment_url"):
-            try:
-                logger.info(f"🖼️ Procesando imagen de Instagram: {message.get('attachment_url')}")
-                
-                # Descargar la imagen desde Instagram
-                async with httpx.AsyncClient(timeout=30.0) as client:
-                    response = await client.get(message.get("attachment_url"))
-                    if response.status_code == 200:
-                        # Crear directorio temporal si no existe
-                        import os
-                        from datetime import datetime
-                        
-                        temp_dir = os.path.join(os.getcwd(), "temp_images")
-                        if not os.path.exists(temp_dir):
-                            os.makedirs(temp_dir)
-                        
-                        # Generar nombre único para la imagen
-                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                        temp_filename = f"instagram_{sender_id}_{timestamp}.jpg"
-                        temp_filepath = os.path.join(temp_dir, temp_filename)
-                        
-                        # Guardar la imagen
-                        with open(temp_filepath, "wb") as f:
-                            f.write(response.content)
-                        
-                        logger.info(f"💾 Imagen guardada temporalmente: {temp_filepath} ({len(response.content)} bytes)")
-                        
-                        # Crear UploadFile simulado
-                        from fastapi import UploadFile
-                        from io import BytesIO
-                        
-                        with open(temp_filepath, "rb") as f:
-                            image_content = f.read()
-                        
-                        image_file = UploadFile(
-                            filename=temp_filename,
-                            file=BytesIO(image_content)
-                        )
-                        
-                        # Guardar imagen en Supabase
-                        from app.controler.chat.store.file_storage import FileStorage
-                        file_storage = FileStorage()
-                        image_url = await file_storage.save_image(project_id, image_file, content_type="image/jpeg")
-                        
-                        logger.info(f"☁️ Imagen guardada en Supabase: {image_url}")
-                        
-                        # Limpiar archivo temporal
-                        try:
-                            os.remove(temp_filepath)
-                            logger.debug(f"🗑️ Archivo temporal eliminado: {temp_filepath}")
-                        except Exception as cleanup_error:
-                            logger.warning(f"⚠️ Error eliminando archivo temporal: {cleanup_error}")
-                        
-                    else:
-                        logger.error(f"❌ Error descargando imagen de Instagram: {response.status_code} - {response.text}")
-                        
-            except Exception as e:
-                logger.error(f"❌ Error procesando imagen de Instagram: {e}", exc_info=True)
+            image_url = await process_image_attachment(message.get("attachment_url"), sender_id, project_id)
         
-        # Registrar otros tipos de contenido multimedia
         elif message_type in ["video", "audio"] and message.get("attachment_url"):
-            logger.info(f"🎬 Contenido multimedia recibido - Tipo: {message_type}, URL: {message.get('attachment_url')}")
+            logger.info(f"Contenido multimedia recibido - Tipo: {message_type}, URL: {message.get('attachment_url')}")
         
-        # Construir el mensaje final
-        final_message = text_message
-        if image_url:
-            if text_message:
-                final_message = f"{text_message}\n\n![Imagen]({image_url})"
-            else:
-                final_message = f"![Imagen]({image_url})"
+        final_message = build_final_message(text_message, image_url, message_type)
         
-        # Crear mensaje descriptivo si no hay texto ni imagen
-        if not final_message:
-            if message_type == "image":
-                final_message = "![Imagen recibida]"
-            elif message_type == "video":
-                final_message = "📹 Video recibido"
-            elif message_type == "audio":
-                final_message = "🎵 Audio recibido"
-            elif message_type == "sticker":
-                final_message = "😊 Sticker recibido"
-            else:
-                final_message = f"📎 Archivo {message_type} recibido"
-        
-        # Crear el objeto ChatRequest
         chat_request = ChatRequest(
             message=final_message,
             project_id=project_id,
@@ -483,79 +277,267 @@ async def process_instagram_message_content(message: Dict[str, Any], project_id:
             debug=False
         )
         
-        logger.info(f"🤖 Enviando mensaje al chatbot: {final_message[:100]}...")
+        logger.info(f"Enviando mensaje al chatbot: {final_message[:100]}...")
         
-        # Obtener la respuesta del chatbot
         response = await chatbot(chat_request)
         
         if response.status_code != 200:
-            logger.error(f"❌ Error en la respuesta del chat: {response.body}")
+            logger.error(f"Error en la respuesta del chat: {response.body}")
             return
             
         response_data = json.loads(response.body)
         
-        # Limpiar la respuesta de patrones de imagen antes de enviar
         from app.controler.chat.core.utils import clean_response_from_image_patterns
         clean_response = clean_response_from_image_patterns(response_data["response"])
         
-        # Enviar respuesta usando InstagramAdapter
-        logger.info(f"📤 Enviando respuesta a través de InstagramAdapter")
-        api_response = await instagram_adapter.send_message(sender_id, clean_response)
+        logger.info(f"Enviando respuesta a Instagram")
+        api_response = await send_instagram_message(sender_id, clean_response, project_id, recipient_id)
         
         if isinstance(api_response, dict) and "error" in api_response:
-            logger.error(f"❌ Error API IG al enviar mensaje: {api_response['error']}")
+            logger.error(f"Error API IG al enviar mensaje: {api_response['error']}")
         else:
-            logger.info(f"✅ Respuesta enviada exitosamente a Instagram para usuario {sender_id}")
-            logger.debug(f"📋 Respuesta de Instagram API: {json.dumps(api_response, indent=2)}")
+            logger.info(f"Respuesta enviada exitosamente a Instagram para usuario {sender_id}")
+            logger.debug(f"Respuesta de Instagram API: {json.dumps(api_response, indent=2)}")
 
     except Exception as e:
-        logger.error(f"❌ Error procesando contenido de mensaje IG: {e}", exc_info=True)
+        logger.error(f"Error procesando contenido de mensaje IG: {e}", exc_info=True)
 
 
-########################################################
-# Procesamiento de webhook de Instagram
-########################################################
-async def process_webhook_instagram(request: Request, background_tasks: BackgroundTasks) -> Dict[str, Any]:
-    """Procesa los mensajes de webhook entrantes de Instagram."""
+async def process_image_attachment(attachment_url: str, sender_id: str, project_id: str) -> Optional[str]:
+    """Procesa una imagen adjunta descargándola y guardándola en Supabase."""
     try:
-        logger.info("Iniciando procesamiento de webhook de Instagram")
-        body = await request.json()
-        logger.info(f"Webhook recibido: {json.dumps(body, indent=2)}")
+        logger.info(f"Procesando imagen de Instagram: {attachment_url}")
         
-        # RESPUESTA INMEDIATA: Extraer mensajes básicos para validación rápida
-        extracted_msgs = extract_instagram_messages(body)
-        total_messages = len(extracted_msgs)
-        
-        logger.info(f"Se extrajeron {total_messages} mensajes del webhook")
-        
-        if total_messages == 0:
-            logger.info("No hay mensajes para procesar (posiblemente un mensaje de eco)")
-            # Respuesta inmediata para Instagram
-            return {"status": "ok", "processed": 0, "total": 0, "message": "No messages to process"}
-        
-        # PROGRAMAR PROCESAMIENTO ASÍNCRONO: Agregar todas las tareas a background_tasks
-        for msg in extracted_msgs:
-            logger.debug(f"Programando procesamiento asíncrono para mensaje: {msg.get('message_id', 'unknown')}")
-            background_tasks.add_task(process_instagram_message_background, msg)
-        
-        # Guardar webhook para referencia (también en background)
-        background_tasks.add_task(save_webhook_to_file, body)
-        
-        # RESPUESTA INMEDIATA A INSTAGRAM: Evitar reenvíos
-        logger.info(f"✅ Webhook procesado exitosamente. {total_messages} mensajes programados para procesamiento asíncrono")
-        return {
-            "status": "ok", 
-            "total": total_messages,
-            "message": f"Webhook received. {total_messages} messages scheduled for async processing",
-            "timestamp": datetime.now().isoformat()
-        }
-        
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(attachment_url)
+            if response.status_code == 200:
+                import os
+                from datetime import datetime
+                from fastapi import UploadFile
+                from io import BytesIO
+                
+                temp_dir = os.path.join(os.getcwd(), "temp_images")
+                if not os.path.exists(temp_dir):
+                    os.makedirs(temp_dir)
+                
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                temp_filename = f"instagram_{sender_id}_{timestamp}.jpg"
+                temp_filepath = os.path.join(temp_dir, temp_filename)
+                
+                with open(temp_filepath, "wb") as f:
+                    f.write(response.content)
+                
+                logger.info(f"Imagen guardada temporalmente: {temp_filepath} ({len(response.content)} bytes)")
+                
+                with open(temp_filepath, "rb") as f:
+                    image_content = f.read()
+                
+                image_file = UploadFile(
+                    filename=temp_filename,
+                    file=BytesIO(image_content)
+                )
+                
+                from app.controler.chat.store.file_storage import FileStorage
+                file_storage = FileStorage()
+                image_url = await file_storage.save_image(project_id, image_file, content_type="image/jpeg")
+                
+                logger.info(f"Imagen guardada en Supabase: {image_url}")
+                
+                try:
+                    os.remove(temp_filepath)
+                    logger.debug(f"Archivo temporal eliminado: {temp_filepath}")
+                except Exception as cleanup_error:
+                    logger.warning(f"Error eliminando archivo temporal: {cleanup_error}")
+                
+                return image_url
+                
+            else:
+                logger.error(f"Error descargando imagen de Instagram: {response.status_code} - {response.text}")
+                return None
+                
     except Exception as e:
-        # Incluso si hay error, responder 200 para evitar reenvíos de Instagram
-        logger.error(f"Error procesando webhook de Instagram: {e}", exc_info=True)
-        return {
-            "status": "error", 
-            "detail": "Internal server error processing webhook",
-            "message": "Webhook received but encountered processing error",
-            "timestamp": datetime.now().isoformat()
+        logger.error(f"Error procesando imagen de Instagram: {e}", exc_info=True)
+        return None
+
+
+def build_final_message(text_message: str, image_url: Optional[str], message_type: str) -> str:
+    """Construye el mensaje final combinando texto e imagen si están disponibles."""
+    final_message = text_message
+    
+    if image_url:
+        if text_message:
+            final_message = f"{text_message}\n\n![Imagen]({image_url})"
+        else:
+            final_message = f"![Imagen]({image_url})"
+    
+    if not final_message:
+        message_type_descriptions = {
+            "image": "![Imagen recibida]",
+            "video": "Video recibido",
+            "audio": "Audio recibido",
+            "sticker": "Sticker recibido"
         }
+        final_message = message_type_descriptions.get(message_type, f"Archivo {message_type} recibido")
+    
+    return final_message
+
+
+async def load_instagram_config(project_id: str, instagram_page_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Carga la configuración de Instagram desde la base de datos."""
+    try:
+        db = SupabaseDatabase()
+        query = {"active": True}
+        
+        if instagram_page_id:
+            query["instagram_page_id"] = instagram_page_id
+        else:
+            query["project_id"] = project_id
+
+        config = db.find_one(INSTAGRAM_COLLECTION, query)
+        if config:
+            logger.info(f"Configuración cargada - IG Account ID: {config.get('instagram_business_account_id')}, Token disponible: {'Sí' if config.get('user_access_token') else 'No'}")
+            return config
+        logger.warning(f"No se encontró configuración activa para project_id: {project_id}, instagram_page_id: {instagram_page_id}")
+        return None
+    except Exception as e:
+        logger.error(f"Error cargando configuración: {e}")
+        return None
+
+
+async def send_instagram_message(recipient_igid: str, text: str, project_id: str, instagram_page_id: Optional[str] = None, message_type: str = "text", attachment: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Envía un mensaje a un usuario de Instagram."""
+    logger.info(f"Intentando enviar mensaje de tipo '{message_type}' a recipient: {recipient_igid}")
+    
+    config = await load_instagram_config(project_id, instagram_page_id)
+    if not config:
+        error_msg = "Instagram no está configurado"
+        logger.error(error_msg)
+        return {"error": {"message": error_msg, "code": 400}}
+
+    user_access_token = config.get("user_access_token")
+    instagram_business_account_id = config.get("instagram_business_account_id")
+
+    if not user_access_token:
+        error_msg = "Token de acceso de Instagram no disponible"
+        logger.error(error_msg)
+        return {"error": {"message": error_msg, "code": 400}}
+
+    payload = {
+        "recipient": {"id": recipient_igid}
+    }
+
+    if message_type == "text":
+        payload["message"] = {"text": text}
+    elif message_type in ["image", "audio", "video"]:
+        if not attachment or "url" not in attachment:
+            error_msg = f"URL requerida para {message_type}"
+            logger.error(error_msg)
+            return {"error": {"message": error_msg, "code": 400}}
+        payload["message"] = {
+            "attachment": {
+                "type": message_type,
+                "payload": {"url": attachment["url"]}
+            }
+        }
+    elif message_type == "sticker":
+        payload["message"] = {"attachment": {"type": "like_heart"}}
+    elif message_type == "media_share":
+        if not attachment or "id" not in attachment:
+            error_msg = "ID de post requerido"
+            logger.error(error_msg)
+            return {"error": {"message": error_msg, "code": 400}}
+        payload["message"] = {
+            "attachment": {
+                "type": "MEDIA_SHARE",
+                "payload": {"id": attachment["id"]}
+            }
+        }
+    else:
+        error_msg = f"Tipo de mensaje no soportado: {message_type}"
+        logger.error(error_msg)
+        return {"error": {"message": error_msg, "code": 400}}
+
+    logger.debug(f"Payload construido: {payload}")
+
+    try:
+        async with httpx.AsyncClient() as client:
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {user_access_token}"
+            }
+            
+            url = f"{INSTAGRAM_API_BASE_URL}/me/messages"
+            logger.info(f"Enviando mensaje a: {url}")
+            
+            response = await client.post(
+                url,
+                json=payload,
+                headers=headers
+            )
+            
+            logger.info(f"Respuesta inicial: {response.status_code}")
+            
+            if response.status_code >= 400:
+                logger.warning(f"Fallo con /me/messages (status: {response.status_code}), intentando con /{instagram_business_account_id}/messages")
+                url = f"{INSTAGRAM_API_BASE_URL}/{instagram_business_account_id}/messages"
+                logger.info(f"URL alternativa: {url}")
+                
+                response = await client.post(
+                    url,
+                    json=payload,
+                    headers=headers
+                )
+                
+                logger.info(f"Respuesta con URL alternativa: {response.status_code}")
+            
+            try:
+                response_data = response.json()
+                logger.debug(f"Response body: {response_data}")
+            except:
+                logger.debug(f"Response text: {response.text}")
+            
+            response.raise_for_status()
+            return response.json()
+
+    except httpx.HTTPStatusError as e:
+        error_msg = f"Client error '{e.response.status_code} {e.response.reason_phrase}' for url '{e.request.url}'"
+        logger.error(f"Error HTTP: {error_msg}")
+        
+        try:
+            error_details = e.response.json()
+            logger.error(f"Detalles del error de Instagram API: {error_details}")
+            
+            if e.response.status_code == 403:
+                error_msg = "Token inválido o sin permisos suficientes para Instagram"
+            elif e.response.status_code == 400:
+                if "error" in error_details:
+                    error_msg = f"Error 400: {error_details.get('error', {}).get('message', error_msg)}"
+            
+        except:
+            logger.error(f"No se pudo parsear el error response: {e.response.text}")
+            
+        return {"error": {"message": error_msg, "code": e.response.status_code}}
+    except Exception as e:
+        error_msg = f"Error inesperado: {str(e)}"
+        logger.error(error_msg)
+        return {"error": {"message": error_msg, "code": 500}}
+
+
+async def save_webhook_to_file(webhook_data: Dict[str, Any]):
+    """Guarda un webhook en un archivo para referencia futura."""
+    try:
+        import os
+        from datetime import datetime
+        
+        imports_dir = os.path.join(os.getcwd(), "imports")
+        if not os.path.exists(imports_dir):
+            os.makedirs(imports_dir)
+            
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        file_path = os.path.join(imports_dir, f"instagram_webhook_{timestamp}.json")
+        
+        with open(file_path, 'w') as f:
+            json.dump(webhook_data, f, indent=2)
+            
+    except Exception as e:
+        logger.warning(f"Error guardando webhook en archivo: {e}")
