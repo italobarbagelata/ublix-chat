@@ -44,7 +44,7 @@ def unified_search_tool(
     query: str, 
     state: Annotated[dict, InjectedState], 
     content_types: Optional[List[str]] = None,
-    limit: int = 15,
+    limit: int = 8,
     category: Optional[str] = None
 ) -> str:
     """
@@ -59,7 +59,7 @@ def unified_search_tool(
         state (dict): Estado del sistema que incluye la configuración del proyecto
         content_types (List[str], optional): Tipos de contenido a buscar. 
             Opciones: ['document', 'faq', 'product']. Por defecto busca en todos.
-        limit (int): Número máximo de resultados a retornar (por defecto 15)
+        limit (int): Número máximo de resultados a retornar (por defecto 8)
         category (str, optional): Categoría específica para filtrar productos
         
     Returns:

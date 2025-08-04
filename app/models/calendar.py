@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from datetime import datetime
 from uuid import UUID
 
@@ -44,4 +44,64 @@ class CalendarEventResponse(CalendarEventBase):
 
 class CalendarWithEvents(CalendarResponse):
     """Calendar with its associated events"""
-    events: List[CalendarEventResponse] = [] 
+    events: List[CalendarEventResponse] = []
+
+
+# Modelos para eventos locales (nueva tabla calendar_events)
+class CalendarEventLocalBase(BaseModel):
+    """Modelo base para eventos almacenados localmente"""
+    title: str
+    description: Optional[str] = None
+    start_datetime: datetime
+    end_datetime: datetime
+    attendee_email: Optional[str] = None
+    attendee_name: Optional[str] = None
+    attendee_phone: Optional[str] = None
+    location: Optional[str] = None
+    google_meet_url: Optional[str] = None
+    event_url: Optional[str] = None
+    status: str = 'confirmed'
+    conversation_summary: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+
+
+class CalendarEventLocalCreate(CalendarEventLocalBase):
+    """Modelo para crear eventos locales"""
+    project_id: UUID
+    google_event_id: Optional[str] = None
+    created_by_user_id: Optional[str] = None
+
+
+class CalendarEventLocalUpdate(BaseModel):
+    """Modelo para actualizar eventos locales"""
+    title: Optional[str] = None
+    description: Optional[str] = None
+    start_datetime: Optional[datetime] = None
+    end_datetime: Optional[datetime] = None
+    attendee_email: Optional[str] = None
+    attendee_name: Optional[str] = None
+    attendee_phone: Optional[str] = None
+    location: Optional[str] = None
+    google_meet_url: Optional[str] = None
+    event_url: Optional[str] = None
+    status: Optional[str] = None
+    conversation_summary: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+
+
+class CalendarEventLocalResponse(CalendarEventLocalBase):
+    """Modelo de respuesta para eventos locales"""
+    id: UUID
+    project_id: UUID
+    google_event_id: Optional[str] = None
+    created_by_user_id: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class CalendarEventListResponse(BaseModel):
+    """Respuesta para lista de eventos con paginación"""
+    events: List[CalendarEventLocalResponse]
+    total_count: int
+    page: int = 1
+    page_size: int = 50 

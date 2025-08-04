@@ -12,6 +12,10 @@ from enum import Enum
 
 from app.controler.chat.core.security.input_validator import InputValidator, ValidationResult
 from app.controler.chat.core.security.error_handler import safe_execute, raise_calendar_error, ErrorCategory, ErrorSeverity
+from .event_persistence_service import EventPersistenceService
+
+from app.models.calendar import CalendarEventLocalCreate, CalendarEventLocalUpdate
+
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +47,7 @@ class WorkflowManager:
     def __init__(self):
         self.logger = logging.getLogger(__name__)
         self.active_workflows: Dict[str, WorkflowContext] = {}
+        self.persistence_service = EventPersistenceService()
     
     
     def _personalize_event_title(self, original_title: str, agenda_config: Optional[Dict[str, Any]], parameters: Dict[str, Any]) -> str:
@@ -649,7 +654,40 @@ class WorkflowManager:
             # 9. Agregar attendees al evento (DESPUÉS de crear, como funcionaba antes)
             await self._add_event_attendees(calendar_service, event_result['event_id'], parameters, calendar_owner_email, context)
             
-            
+            # 10. Guardar evento en base de datos local para persistencia
+            try:
+                local_event_data = CalendarEventLocalCreate(
+                    project_id=context.project_id,
+                    google_event_id=event_result['event_id'],
+                    title=personalized_title,
+                    description=parameters.get('description', ''),
+                    start_datetime=parameters['start_datetime'],
+                    end_datetime=parameters.get('end_datetime'),
+                    attendee_email=parameters.get('attendee_email', ''),
+                    attendee_name=parameters.get('attendee_name', ''),
+                    attendee_phone=parameters.get('attendee_phone', ''),
+                    google_meet_url=event_result.get('meet_url', ''),
+                    event_url=event_result.get('event_url', ''),
+                    status='confirmed',
+                    created_by_user_id=context.user_id,
+                    conversation_summary=parameters.get('conversation_summary', ''),
+                    metadata={
+                        'workflow_type': WorkflowType.AGENDA_COMPLETA.value,
+                        'execution_id': context.execution_id,
+                        'force_created': bool(conflicts and (parameters.get('force_create', False) or auto_force_create)),
+                        'auto_include_meet': include_meet_final,
+                        'had_conflicts': bool(conflicts)
+                    }
+                )
+                
+                saved_event = await self.persistence_service.save_event(local_event_data)
+                if saved_event:
+                    self.logger.info(f"Evento guardado en BD local: {saved_event.id}")
+                else:
+                    self.logger.warning("No se pudo guardar el evento en BD local, pero el evento de Google Calendar fue creado exitosamente")
+                    
+            except Exception as e:
+                self.logger.error(f"Error guardando evento en BD local: {str(e)} - El evento de Google Calendar fue creado exitosamente")
             
             return {
                 'success': True,
@@ -716,6 +754,55 @@ class WorkflowManager:
                 user_id=context.user_id
             )
             
+            # Actualizar evento en base de datos local
+            try:
+                # Buscar evento local por Google ID
+                local_event = await self.persistence_service.get_event_by_google_id(event_id)
+                
+                if local_event:
+                    # Preparar datos de actualización
+                    update_data = CalendarEventLocalUpdate()
+                    
+                    # Actualizar campos que pueden haber cambiado
+                    if 'title' in parameters:
+                        update_data.title = parameters['title']
+                    if 'description' in parameters:
+                        update_data.description = parameters['description']
+                    if 'start_datetime' in parameters:
+                        update_data.start_datetime = parameters['start_datetime']
+                    if 'end_datetime' in parameters:
+                        update_data.end_datetime = parameters['end_datetime']
+                    if 'attendee_email' in parameters:
+                        update_data.attendee_email = parameters['attendee_email']
+                    if 'attendee_name' in parameters:
+                        update_data.attendee_name = parameters['attendee_name']
+                    if 'attendee_phone' in parameters:
+                        update_data.attendee_phone = parameters['attendee_phone']
+                    
+                    # Actualizar metadata con información del workflow
+                    if local_event.metadata:
+                        metadata = local_event.metadata.copy()
+                    else:
+                        metadata = {}
+                    
+                    metadata.update({
+                        'last_update_workflow': WorkflowType.ACTUALIZACION_COMPLETA.value,
+                        'last_update_execution_id': context.execution_id,
+                        'last_updated_by': context.user_id
+                    })
+                    update_data.metadata = metadata
+                    
+                    updated_event = await self.persistence_service.update_event(str(local_event.id), update_data)
+                    if updated_event:
+                        self.logger.info(f"Evento local actualizado: {updated_event.id}")
+                    else:
+                        self.logger.warning("No se pudo actualizar el evento en BD local")
+                else:
+                    self.logger.warning(f"Evento local no encontrado para Google ID: {event_id}")
+                    
+            except Exception as e:
+                self.logger.error(f"Error actualizando evento en BD local: {str(e)}")
+            
             return {
                 'success': True,
                 'workflow_type': WorkflowType.ACTUALIZACION_COMPLETA.value,
@@ -776,6 +863,41 @@ class WorkflowManager:
                 project_id=context.project_id,
                 user_id=context.user_id
             )
+            
+            # Cancelar evento en base de datos local (soft delete)
+            try:
+                # Buscar evento local por Google ID
+                local_event = await self.persistence_service.get_event_by_google_id(event_id)
+                
+                if local_event:
+                    # Marcar como cancelado (soft delete)
+                    success = await self.persistence_service.delete_event(str(local_event.id), soft_delete=True)
+                    if success:
+                        self.logger.info(f"Evento local cancelado: {local_event.id}")
+                    else:
+                        self.logger.warning("No se pudo cancelar el evento en BD local")
+                        
+                    # Actualizar metadata con información de la cancelación
+                    if local_event.metadata:
+                        metadata = local_event.metadata.copy()
+                    else:
+                        metadata = {}
+                    
+                    metadata.update({
+                        'cancelled_workflow': WorkflowType.CANCELACION_WORKFLOW.value,
+                        'cancelled_execution_id': context.execution_id,
+                        'cancelled_by': context.user_id,
+                        'cancelled_at': context.timestamp.isoformat()
+                    })
+                    
+                    update_data = CalendarEventLocalUpdate(metadata=metadata)
+                    await self.persistence_service.update_event(str(local_event.id), update_data)
+                    
+                else:
+                    self.logger.warning(f"Evento local no encontrado para Google ID: {event_id}")
+                    
+            except Exception as e:
+                self.logger.error(f"Error cancelando evento en BD local: {str(e)}")
             
             return {
                 'success': True,
@@ -931,3 +1053,59 @@ class WorkflowManager:
             'active_workflows': len(self.active_workflows),
             'workflow_types': list(WorkflowType.__members__.keys())
         }
+    
+    async def get_event_statistics(self, project_id: str, 
+                                 start_date: Optional[datetime] = None,
+                                 end_date: Optional[datetime] = None) -> Dict[str, Any]:
+        """
+        Obtiene estadísticas de eventos de un proyecto.
+        
+        Args:
+            project_id: ID del proyecto
+            start_date: Fecha de inicio (opcional)
+            end_date: Fecha de fin (opcional)
+            
+        Returns:
+            Diccionario con estadísticas de eventos
+        """
+        try:
+            return await self.persistence_service.get_event_statistics(
+                project_id=project_id,
+                start_date=start_date,
+                end_date=end_date
+            )
+        except Exception as e:
+            self.logger.error(f"Error obteniendo estadísticas de eventos: {str(e)}")
+            return {
+                "total_events": 0,
+                "confirmed_events": 0,
+                "cancelled_events": 0,
+                "tentative_events": 0,
+                "events_with_attendees": 0,
+                "events_with_meet": 0,
+                "unique_attendees": 0,
+                "error": str(e)
+            }
+    
+    async def get_events_by_project(self, project_id: str, **kwargs) -> Dict[str, Any]:
+        """
+        Método de conveniencia para obtener eventos de un proyecto.
+        
+        Args:
+            project_id: ID del proyecto
+            **kwargs: Argumentos adicionales para filtrado
+            
+        Returns:
+            Lista de eventos con metadatos
+        """
+        try:
+            return await self.persistence_service.get_events_by_project(project_id, **kwargs)
+        except Exception as e:
+            self.logger.error(f"Error obteniendo eventos del proyecto: {str(e)}")
+            return {
+                "events": [],
+                "total_count": 0,
+                "page": kwargs.get("page", 1),
+                "page_size": kwargs.get("page_size", 50),
+                "error": str(e)
+            }

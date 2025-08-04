@@ -257,7 +257,7 @@ async def get_instagram_user_info(instagram_id: str, access_token: str) -> Dict[
             url = f"{INSTAGRAM_API_BASE_URL}/{instagram_id}"
             params = {
                 "access_token": access_token,
-                "fields": "id"
+                "fields": "id,username,name"
             }
             
             response = await client.get(url, params=params)
@@ -352,9 +352,35 @@ async def process_instagram_message_content(message: Dict[str, Any], project_id:
         
         logger.info(f"📝 Procesando contenido del mensaje - Tipo: {message_type}, Usuario: {sender_id}")
         
+        # Obtener información del usuario de Instagram
         username = "Instagram User"
         user_id = sender_id
         source_id = message.get("recipient_id")
+        
+        # Intentar obtener el nombre de usuario real
+        try:
+            db = SupabaseDatabase()
+            instagram_config = db.find_one(INSTAGRAM_COLLECTION, {"instagram_page_id": recipient_id, "active": True})
+            if instagram_config and instagram_config.get("access_token"):
+                access_token = instagram_config.get("access_token")
+                user_info = await get_instagram_user_info(sender_id, access_token)
+                
+                if not user_info.get("error"):
+                    # Usar username si está disponible, sino usar name, sino usar el ID
+                    if user_info.get("username"):
+                        username = f"@{user_info['username']}"
+                    elif user_info.get("name"):
+                        username = user_info["name"]
+                    else:
+                        username = f"Instagram User {sender_id}"
+                    logger.info(f"👤 Usuario obtenido: {username}")
+                else:
+                    logger.warning(f"❌ Error obteniendo info del usuario: {user_info['error']['message']}")
+            else:
+                logger.warning("⚠️ No se encontró access_token para obtener info del usuario")
+        except Exception as e:
+            logger.warning(f"❌ Error obteniendo nombre de usuario de Instagram: {e}")
+            # Mantener el valor por defecto
         
         # Preparar el mensaje y la imagen
         text_message = message.get("text", "")
