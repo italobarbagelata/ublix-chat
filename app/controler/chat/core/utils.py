@@ -228,9 +228,9 @@ def clean_response_from_image_patterns(response_text: str) -> str:
     pattern = r'!\[[^\]]*\]\([^)]+\)'
     cleaned_text = re.sub(pattern, '', response_text, flags=re.IGNORECASE)
     
-    # Remover líneas vacías y espacios en blanco excesivos que puedan quedar
-    cleaned_text = re.sub(r'\n\s*\n', '\n', cleaned_text)  # Múltiples saltos de línea
-    cleaned_text = re.sub(r'\s+', ' ', cleaned_text)  # Múltiples espacios
+    # Remover líneas vacías excesivas pero conservar saltos de línea simples
+    cleaned_text = re.sub(r'\n\s*\n\s*\n+', '\n\n', cleaned_text)  # Múltiples saltos de línea a máximo 2
+    cleaned_text = re.sub(r'[ \t]+', ' ', cleaned_text)  # Múltiples espacios/tabs (pero NO saltos de línea)
     cleaned_text = cleaned_text.strip()
     
     return cleaned_text
