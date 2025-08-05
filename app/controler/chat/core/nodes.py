@@ -82,6 +82,11 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
         - Si el calendario devuelve más de 3 horarios, muestra solo los primeros 3 y menciona que hay más disponibles.
         - Si el usuario dice "más horarios", "más tarde", "ver más opciones" o similar, vuelve a buscar horarios del mismo día y muestra los siguientes 3.
         - Nunca muestres listas largas de más de 3 horarios en una sola respuesta.
+        
+        FORMATO OBLIGATORIO PARA HORARIOS:
+        - NUNCA uses markdown (asteriscos, negritas, cursivas)
+        - SIEMPRE usa texto plano: "1. Lunes 5 de agosto de 2025 de 09:00 - 10:00"
+        - NO escribas: "**Lunes 5 De Agosto De 2025**" - ESTÁ PROHIBIDO
         """
             
         if "email" in project.enabled_tools:
@@ -118,17 +123,17 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
             
             2. `AGENDA_COMPLETA`: Confirma y agenda UNA SOLA cita final.
                - Requiere: `start_datetime` exacto elegido + información del contacto
-               - **IMPORTANTE**: SOLO usar cuando el usuario confirmó UN horario específico
-               - **NUNCA** llamar múltiples veces en una sola respuesta
-               - **Si el contacto tiene campos adicionales, debes pasarlos también**
+               - IMPORTANTE: SOLO usar cuando el usuario confirmó UN horario específico
+               - NUNCA llamar múltiples veces en una sola respuesta
+               - Si el contacto tiene campos adicionales, debes pasarlos también
             
-            🚨 REGLAS CRÍTICAS DE AGENDAMIENTO:
+            REGLAS CRÍTICAS DE AGENDAMIENTO:
             - AGENDA_COMPLETA se ejecuta SOLO UNA VEZ por conversación
             - Si el usuario menciona múltiples horarios, pregúntale cuál prefiere
             - Si no estás seguro de cuál horario quiere, usa BUSQUEDA_HORARIOS
             - Confirma EXPLÍCITAMENTE antes de usar AGENDA_COMPLETA
-            - **⚠️ NUNCA confirmes al usuario que la cita fue agendada sin ejecutar primero agenda_tool(AGENDA_COMPLETA)**
-            - **🚨 OBLIGATORIO:** Debes ejecutar agenda_tool antes de decir "Su hora ha sido agendada"
+            - NUNCA confirmes al usuario que la cita fue agendada sin ejecutar primero agenda_tool(AGENDA_COMPLETA)
+            - OBLIGATORIO: Debes ejecutar agenda_tool antes de decir "Su hora ha sido agendada"
             
             Usa `current_datetime_tool` y `check_chile_holiday_tool` para validar fechas antes de buscar horarios.
             Las instrucciones específicas del proyecto te indicarán el flujo exacto a seguir para solicitar datos y confirmar la cita.
@@ -168,6 +173,9 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
         #    logging.info(f"📝 PROMPT COMPLETO FINAL:\n{prompt_general_skeleton}")
                 
         messages.insert(0, SystemMessage(content=prompt_general_skeleton))
+        
+        #log prompt
+        logging.info(f"{unique_id} Prompt:\n{prompt_general_skeleton}")
 
         tool_names = [getattr(tool, 'name', getattr(tool, '__name__', str(tool))) for tool in tools]
         logging.info(f"{unique_id} Agent executing with {len(tools)} tools available: {tool_names}")
