@@ -257,6 +257,18 @@ async def process_message_content(message: Dict[str, Any], project_id: str):
         user_id = sender_id
         source_id = message.get("recipient_id")
         
+        # Crear o actualizar el lead
+        from app.controler.chat.services.lead_service import LeadService
+        lead_service = LeadService()
+        await lead_service.create_or_update_lead(
+            project_id=project_id,
+            platform="instagram",
+            platform_user_id=sender_id,
+            username=user_info.get("username"),
+            full_name=user_info.get("name"),
+            profile_data=user_info
+        )
+        
         text_message = message.get("text", "")
         image_url = None
         
