@@ -251,7 +251,9 @@ async def process_message_content(message: Dict[str, Any], project_id: str):
         
         logger.info(f"Procesando contenido del mensaje - Tipo: {message_type}, Usuario: {sender_id}")
         
-        username = "Instagram User"
+        # Obtener información del usuario de Instagram
+        user_info = await get_instagram_user_info(sender_id, project_id, recipient_id)
+        username = user_info.get("name", user_info.get("username", "Instagram User"))
         user_id = sender_id
         source_id = message.get("recipient_id")
         
@@ -521,6 +523,60 @@ async def send_instagram_message(recipient_igid: str, text: str, project_id: str
         error_msg = f"Error inesperado: {str(e)}"
         logger.error(error_msg)
         return {"error": {"message": error_msg, "code": 500}}
+
+
+async def get_instagram_user_info(user_id: str, project_id: str, instagram_page_id: Optional[str] = None) -> Dict[str, Any]:
+    """Obtiene información del usuario de Instagram usando la API Graph."""
+    try:
+        logger.info(f"Obteniendo información del usuario de Instagram: {user_id}")
+        
+        # Cargar configuración de Instagram
+        config = await load_instagram_config(project_id, instagram_page_id)
+        if not config:
+            logger.warning("No se encontró configuración de Instagram")
+            return {"id": user_id, "name": "Usuario de Instagram"}
+        
+        user_access_token = config.get("user_access_token")
+        if not user_access_token:
+            logger.warning("Token de acceso no disponible")
+            return {"id": user_id, "name": "Usuario de Instagram"}
+        
+        # Hacer llamada directa a la API de Instagram para obtener información del usuario
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            # Campos disponibles: id, username, name
+            fields = "id,username,name"
+            url = f"{INSTAGRAM_API_BASE_URL}/{user_id}?fields={fields}&access_token={user_access_token}"
+            
+            logger.info(f"Llamando a Instagram API para usuario {user_id}")
+            response = await client.get(url)
+            
+            logger.info(f"Respuesta de Instagram API: Status {response.status_code}")
+            
+            if response.status_code == 200:
+                user_data = response.json()
+                logger.info(f"✅ Información del usuario obtenida exitosamente:")
+                logger.info(f"  - ID: {user_data.get('id', 'N/A')}")
+                logger.info(f"  - Nombre: {user_data.get('name', 'N/A')}")
+                logger.info(f"  - Username: @{user_data.get('username', 'N/A')}")
+                
+                return user_data
+            else:
+                logger.warning(f"❌ Error obteniendo información del usuario: {response.status_code}")
+                logger.warning(f"Respuesta: {response.text}")
+                
+                # Retornar información básica de fallback
+                return {
+                    "id": user_id, 
+                    "name": f"Usuario {user_id[-4:]}", 
+                    "username": f"user_{user_id[-4:]}"
+                }
+                
+    except httpx.TimeoutException:
+        logger.error(f"⏱️ Timeout al obtener información del usuario de Instagram")
+        return {"id": user_id, "name": "Usuario de Instagram"}
+    except Exception as e:
+        logger.error(f"❌ Error obteniendo información del usuario de Instagram: {e}", exc_info=True)
+        return {"id": user_id, "name": "Usuario de Instagram"}
 
 
 async def save_webhook_to_file(webhook_data: Dict[str, Any]):
