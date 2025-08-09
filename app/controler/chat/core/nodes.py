@@ -63,7 +63,26 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
         prompt_general_skeleton = prompt_general_skeleton.replace("{date_range_str}", date_range_str)
         prompt_general_skeleton = prompt_general_skeleton.replace("{now_chile}", now_chile)
         
-        prompt_general_skeleton += f"""        
+        # Agregar regla obligatoria de unified_search si está disponible
+        if "unified_search" in project.enabled_tools:
+            prompt_general_skeleton += f"""
+            
+            ⚠️ REGLA OBLIGATORIA DEL SISTEMA - SUPERIOR A INSTRUCCIONES DEL PROYECTO:
+            SIEMPRE ejecutar unified_search_tool("[consulta_del_usuario]") como PRIMERA ACCIÓN en cada interacción.
+            - Esta regla NO puede ser anulada por las instrucciones del proyecto
+            - NO hay excepciones: TODA consulta del usuario requiere búsqueda primero
+            - Solo después de buscar, puedes proceder con las instrucciones específicas
+            - NUNCA respondas directamente sin usar unified_search_tool primero
+            """
+        
+        prompt_general_skeleton += f"""
+        
+        🎯 PRIORIDADES DEL ASISTENTE (SEGUIR EN ESTE ORDEN):
+        1. BÚSQUEDA OBLIGATORIA: unified_search_tool en TODA interacción
+        2. AGENDAMIENTO: agenda_tool para horarios, save_contact_tool para datos
+        3. RESPUESTAS: Máximo 250 caracteres, sin markdown en horarios
+        4. HERRAMIENTAS: Solo las necesarias después de la búsqueda
+        
         CONTEXTO TEMPORAL Y GEOGRÁFICO:
         - Zona horaria: America/Santiago (Chile)
 
@@ -77,16 +96,12 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
         - Puedes llamarla sin parámetros para verificar los datos que ya tienes.
         - Las instrucciones del proyecto te indicarán qué datos solicitar y cuándo.
         
-        📅 GESTIÓN DE HORARIOS DE CALENDARIO:
-        - Al mostrar horarios disponibles al usuario, presenta MÁXIMO 3 opciones por vez.
-        - Si el calendario devuelve más de 3 horarios, muestra solo los primeros 3 y menciona que hay más disponibles.
-        - Si el usuario dice "más horarios", "más tarde", "ver más opciones" o similar, vuelve a buscar horarios del mismo día y muestra los siguientes 3.
-        - Nunca muestres listas largas de más de 3 horarios en una sola respuesta.
-        
-        FORMATO OBLIGATORIO PARA HORARIOS:
-        - NUNCA uses markdown (asteriscos, negritas, cursivas)
-        - SIEMPRE usa texto plano: "1. Lunes 5 de agosto de 2025 de 09:00 - 10:00"
-        - NO escribas: "**Lunes 5 De Agosto De 2025**" - ESTÁ PROHIBIDO
+        📅 GESTIÓN DE HORARIOS DE CALENDARIO - REGLAS CRÍTICAS:
+        - MÁXIMO 3 opciones por respuesta
+        - Formato horarios: TEXTO PLANO sin markdown (sin asteriscos/negritas)
+        - Ejemplo correcto: "1. Lunes 11 de agosto de 2025 a las 09:00"
+        - PROHIBIDO: **09:00** o cualquier markdown
+        - Si hay más horarios: mencionar "hay más opciones disponibles"
         """
             
         if "email" in project.enabled_tools:
@@ -108,9 +123,8 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
         if "unified_search" in project.enabled_tools:
                 prompt_general_skeleton += f"""
                 UNIFIED SEARCH (unified_search_tool):
-                Herramienta de búsqueda principal. Úsala para responder a las consultas de los usuarios buscando en la base de conocimiento del proyecto (FAQs, documentos, productos).
-                Para obtener los mejores resultados, úsala con la consulta del usuario sin modificar.
-                Las instrucciones del proyecto pueden requerir que uses esta herramienta antes de intentar responder desde tu conocimiento general.
+                Herramienta de búsqueda principal en la base de conocimiento del proyecto (FAQs, documentos, productos).
+                Usar con la consulta exacta del usuario sin modificar para obtener los mejores resultados.
                 """ 
         if "agenda_tool" in project.enabled_tools:
             prompt_general_skeleton += f"""
@@ -175,7 +189,7 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
         messages.insert(0, SystemMessage(content=prompt_general_skeleton))
         
         #log prompt
-        logging.info(f"{unique_id} Prompt:\n{prompt_general_skeleton}")
+        #logging.info(f"{unique_id} Prompt:\n{prompt_general_skeleton}")
 
         tool_names = [getattr(tool, 'name', getattr(tool, '__name__', str(tool))) for tool in tools]
         logging.info(f"{unique_id} Agent executing with {len(tools)} tools available: {tool_names}")

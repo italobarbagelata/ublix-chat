@@ -487,3 +487,27 @@ CREATE TABLE public.whatsapp_web_conversation_states (
   created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT whatsapp_web_conversation_states_pkey PRIMARY KEY (id)
 );
+ CREATE TABLE public.leads (
+      id uuid NOT NULL DEFAULT uuid_generate_v4(),
+      project_id uuid NOT NULL,
+      platform character varying NOT NULL, -- 'instagram', 'whatsapp', 'facebook'
+      platform_user_id text NOT NULL, -- ID del usuario en la plataforma
+      username text,
+      full_name text,
+      email text,
+      phone_number text,
+      profile_data jsonb DEFAULT '{}'::jsonb, -- Datos adicionales de la plataforma
+      first_message_id uuid, -- Primera interacción
+      last_message_id uuid, -- Última interacción
+      total_messages integer DEFAULT 0,
+      lead_status character varying DEFAULT 'new', -- 'new', 'engaged', 'qualified', 'converted'
+      tags jsonb DEFAULT '[]'::jsonb,
+      created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+      updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+      last_interaction_at timestamp with time zone,
+      CONSTRAINT leads_pkey PRIMARY KEY (id),
+      CONSTRAINT leads_project_id_fkey FOREIGN KEY (project_id) REFERENCES public.projects(project_id),
+      CONSTRAINT leads_first_message_fkey FOREIGN KEY (first_message_id) REFERENCES public.messages(id),
+      CONSTRAINT leads_last_message_fkey FOREIGN KEY (last_message_id) REFERENCES public.messages(id),
+      CONSTRAINT unique_lead_per_platform UNIQUE (project_id, platform, platform_user_id)
+  );

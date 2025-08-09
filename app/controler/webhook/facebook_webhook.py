@@ -261,6 +261,42 @@ async def process_message(message: Dict[str, Any], background_tasks: BackgroundT
         
         user_id = message["sender_id"]
         source_id = message["page_id"]
+        
+        # Obtener access_token de la página para las operaciones
+        pages = config.get("pages", [])
+        if isinstance(pages, str):
+            try:
+                pages = json.loads(pages)
+            except json.JSONDecodeError:
+                logger.error(f"Error parseando pages como JSON: {pages}")
+                return
+        
+        page_config = next((page for page in pages if page.get("id") == source_id), None)
+        if not page_config:
+            logger.error(f"No se encontró configuración de página para page_id: {source_id}")
+            return
+        
+        access_token = page_config.get("access_token")
+        if not access_token:
+            logger.error("Falta access_token en la configuración de la página")
+            return
+        
+        # Obtener información del usuario de Facebook
+        user_info = await get_facebook_user_info(user_id, access_token)
+        username = user_info.get("name", "Usuario de Facebook")
+        
+        # Crear o actualizar el lead
+        from app.controler.chat.services.lead_service import LeadService
+        lead_service = LeadService()
+        await lead_service.create_or_update_lead(
+            project_id=project_id,
+            platform="facebook",
+            platform_user_id=user_id,
+            username=f"{user_info.get('first_name', '')} {user_info.get('last_name', '')}".strip() or None,
+            full_name=user_info.get("name"),
+            profile_data=user_info
+        )
+        
         final_message = None
         image_url = None
         
@@ -399,7 +435,7 @@ async def process_message(message: Dict[str, Any], background_tasks: BackgroundT
             message=final_message,
             project_id=project_id,
             user_id=user_id,
-            name=user_id,  # Usamos el user_id como nombre por defecto
+            name=username,  # Ahora usamos el nombre real del usuario obtenido de Facebook
             source="messenger",
             source_id=source_id,
             number_phone_agent="no number",
@@ -422,6 +458,72 @@ async def process_message(message: Dict[str, Any], background_tasks: BackgroundT
         logger.info(f"Mensaje procesado de {user_id} y respuesta enviada")
     except Exception as e:
         logger.error(f"Error procesando mensaje: {e}", exc_info=True)
+
+async def get_facebook_user_info(user_id: str, access_token: str) -> Dict[str, Any]:
+    """
+    Obtiene información del usuario de Facebook usando la API Graph.
+    
+    Args:
+        user_id: ID del usuario de Facebook
+        access_token: Token de acceso de la página
+        
+    Returns:
+        Diccionario con información del usuario
+    """
+    try:
+        logger.info(f"Obteniendo información del usuario de Facebook: {user_id}")
+        
+        # Hacer llamada a la API de Facebook para obtener información del usuario
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            # Campos disponibles: id, first_name, last_name, profile_pic, locale, timezone, gender
+            fields = "id,first_name,last_name,profile_pic,locale,timezone,gender"
+            url = f"https://graph.facebook.com/v22.0/{user_id}?fields={fields}&access_token={access_token}"
+            
+            logger.info(f"Llamando a Facebook API para usuario {user_id}")
+            response = await client.get(url)
+            
+            logger.info(f"Respuesta de Facebook API: Status {response.status_code}")
+            
+            if response.status_code == 200:
+                user_data = response.json()
+                logger.info(f"✅ Información del usuario obtenida exitosamente:")
+                logger.info(f"  - ID: {user_data.get('id', 'N/A')}")
+                logger.info(f"  - Nombre: {user_data.get('first_name', 'N/A')} {user_data.get('last_name', 'N/A')}")
+                logger.info(f"  - Locale: {user_data.get('locale', 'N/A')}")
+                
+                # Construir nombre completo
+                first_name = user_data.get('first_name', '')
+                last_name = user_data.get('last_name', '')
+                full_name = f"{first_name} {last_name}".strip() if first_name or last_name else f"Usuario {user_id[-4:]}"
+                
+                return {
+                    "id": user_data.get('id', user_id),
+                    "first_name": first_name,
+                    "last_name": last_name,
+                    "name": full_name,
+                    "profile_pic": user_data.get('profile_pic'),
+                    "locale": user_data.get('locale'),
+                    "timezone": user_data.get('timezone'),
+                    "gender": user_data.get('gender')
+                }
+            else:
+                logger.warning(f"❌ Error obteniendo información del usuario: {response.status_code}")
+                logger.warning(f"Respuesta: {response.text}")
+                
+                # Retornar información básica de fallback
+                return {
+                    "id": user_id,
+                    "name": f"Usuario {user_id[-4:]}",
+                    "first_name": f"Usuario",
+                    "last_name": f"{user_id[-4:]}"
+                }
+                
+    except httpx.TimeoutException:
+        logger.error(f"⏱️ Timeout al obtener información del usuario de Facebook")
+        return {"id": user_id, "name": "Usuario de Facebook"}
+    except Exception as e:
+        logger.error(f"❌ Error obteniendo información del usuario de Facebook: {e}", exc_info=True)
+        return {"id": user_id, "name": "Usuario de Facebook"}
 
 async def send_messenger_message(project_id: str, recipient_id: str, message_text: str, page_id: str):
     """
