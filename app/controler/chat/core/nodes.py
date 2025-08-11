@@ -6,7 +6,6 @@ import pytz
 import concurrent.futures
 from app.controler.chat.core.state import CustomState
 from app.controler.chat.core.tools import agent_tools
-from app.controler.chat.core.tools_cache import ToolsCache, cached_tools
 from app.controler.chat.core.utils import decorate_message, filter_and_prepare_messages_for_agent_node, filter_and_prepare_messages_for_summary_node
 from app.controler.chat.store.persistence import Persist
 from app.controler.chat.core.llm_adapter import LLMAdapter
@@ -214,27 +213,27 @@ def get_tools_summary(enabled_tools: list) -> str:
     Genera un resumen dinámico de las herramientas habilitadas basado en enabled_tools
     """
     tools_descriptions = {
-        "unified_search": "🔍 unified_search_tool: Búsqueda unificada en documentos, FAQs y productos",
-        "retriever": "📚 document_retriever: Búsqueda en documentos específicos del proyecto",
-        "faq_retriever": "❓ faq_retriever: Búsqueda en preguntas frecuentes",
-        "products_search": "🛍️ search_products_unified: Búsqueda de productos en el catálogo",
-        "calendar": "📅 google_calendar_tool: Gestión completa de calendario Google",
-        "email": "📧 send_email: Envío de emails profesionales",
-        "contact": "👤 save_contact_tool: Gestión de información de contacto",
-        "tienda": "🏪 Herramientas de tienda: buscar_productos_tienda, consultar_info_tienda, gestionar_carrito",
-        "openai_vector": "🤖 openai_vector_search: Búsqueda vectorial en documentos",
-        "api": "🔌 API Tools: Herramientas dinámicas generadas según configuración del proyecto",
-        "image_processor": "🖼️ image_processor: Análisis y procesamiento de imágenes",
-        "mongo_db": "🗄️ mongo_db_tool: Operaciones en base de datos MongoDB",
-        "agenda_tool": "🗓️ agenda_tool: Gestión de horarios y agendamiento con Google Calendar",
-        "agenda_smart_booking_tool": "🗓️ agenda_smart_booking_tool: Gestión de horarios y agendamiento con Google Calendar"
+        "unified_search": "unified_search_tool: Búsqueda unificada en documentos, FAQs y productos",
+        "retriever": "document_retriever: Búsqueda en documentos específicos del proyecto",
+        "faq_retriever": "faq_retriever: Búsqueda en preguntas frecuentes",
+        "products_search": "search_products_unified: Búsqueda de productos en el catálogo",
+        "calendar": "google_calendar_tool: Gestión completa de calendario Google",
+        "email": "send_email: Envío de emails profesionales",
+        "contact": "save_contact_tool: Gestión de información de contacto",
+        "tienda": "Herramientas de tienda: buscar_productos_tienda, consultar_info_tienda, gestionar_carrito",
+        "openai_vector": "openai_vector_search: Búsqueda vectorial en documentos",
+        "api": "API Tools: Herramientas dinámicas generadas según configuración del proyecto",
+        "image_processor": "image_processor: Análisis y procesamiento de imágenes",
+        "mongo_db": "mongo_db_tool: Operaciones en base de datos MongoDB",
+        "agenda_tool": "agenda_tool: Gestión de horarios y agendamiento con Google Calendar",
+        "agenda_smart_booking_tool": "agenda_smart_booking_tool: Gestión de horarios y agendamiento con Google Calendar"
     }
     
     # Herramientas que siempre están disponibles
     always_available = [
-        "📅 current_datetime_tool, week_info_tool: Información de fecha y hora actual",
-        "🎌 check_chile_holiday_tool, next_chile_holidays_tool: Verificación de feriados chilenos",
-        "👤 save_contact_tool: Gestión de contactos"
+        "current_datetime_tool, week_info_tool: Información de fecha y hora actual",
+        "check_chile_holiday_tool, next_chile_holidays_tool: Verificación de feriados chilenos",
+        "save_contact_tool: Gestión de contactos"
     ]
     
     summary = []

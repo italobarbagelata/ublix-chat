@@ -23,9 +23,6 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from typing import List
 from app.controler.chat.store.persistence import Project
-from app.controler.chat.core.tools_cache import cached_tools
-
-@cached_tools(ttl_hours=24)
 async def agent_tools(project_id: str, user_id: str, name: str, number_phone_agent: str, unique_id: str, project: Project) -> List:
     """Versión simplificada de la función que retorna las tools para el agente"""
     

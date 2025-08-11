@@ -4,7 +4,7 @@ from app.controler.webhook.instagram_webhook import process_webhook_instagram, v
 from app.controler.webhook.facebook_webhook import verify_webhook_facebook, process_webhook_facebook
 from app.controler.webhook.whatsapp_webhook import verify_webhook_whatsapp, process_webhook_whatsapp
 from app.models import ChatRequest
-from app.controler.chat import chat, chat_stream, get_queue_status, get_system_stats, cancel_user_queue
+from app.controler.chat import chat, chat_stream
 from fastapi.responses import JSONResponse
 from fastapi import HTTPException
 
@@ -34,48 +34,6 @@ async def chat_with_agent_stream(request: Request, background_tasks: BackgroundT
     """🆕 Chat with the server using streaming for real-time responses."""
     return await chat_stream(request, background_tasks)
 
-##########################
-# Queue Management & Monitoring
-##########################
-
-@chat_router.get("/queue/status", operation_id="get_queue_status")
-async def get_user_queue_status(request: Request):
-    """📊 Obtiene el estado de la cola de un usuario específico."""
-    return await get_queue_status(request)
-
-@chat_router.get("/system/stats", operation_id="get_system_stats") 
-async def get_chat_system_stats(request: Request):
-    """📈 Obtiene estadísticas generales del sistema de chat."""
-    return await get_system_stats(request)
-
-@chat_router.post("/queue/cancel", operation_id="cancel_user_queue")
-async def cancel_user_messages(request: Request):
-    """🚫 Cancela todos los mensajes pendientes de un usuario."""
-    try:
-        req_body = await request.json()
-        user_id = req_body.get("user_id")
-        project_id = req_body.get("project_id")
-        if not user_id:
-            raise HTTPException(status_code=400, detail="user_id es requerido")
-        if not project_id:
-            raise HTTPException(status_code=400, detail="project_id es requerido")
-        
-        from app.controler.chat.core.message_queue import message_queue
-        
-        # Cancelar mensajes en cola
-        cancelled_count = await message_queue.cancel_user_messages(user_id, project_id)
-        
-        return JSONResponse(
-            status_code=200,
-            content={
-                "success": True,
-                "messages_cancelled": cancelled_count,
-                "message": f"Se cancelaron {cancelled_count} mensajes pendientes"
-            }
-        )
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail="Error interno del servidor")
 
 ##########################
 # Context Management
