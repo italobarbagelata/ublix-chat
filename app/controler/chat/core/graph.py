@@ -136,7 +136,7 @@ class Graph():
                 "username": self.name,
                 "source_id": self.source_id,
                 "source": self.source,
-                "summary": ""
+                "summary": "",
             },
             {"configurable": {"thread_id": user_id}}
         )

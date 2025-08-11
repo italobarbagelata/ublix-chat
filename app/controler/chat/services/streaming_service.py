@@ -174,7 +174,7 @@ class StreamingService:
         """
         try:
             # Obtener modelo con streaming habilitado
-            model = LLMAdapter.get_llm(model_name, 0)
+            model = LLMAdapter.get_llm(model_name)  # Sin temperature para compatibilidad
             
             # Verificar y habilitar streaming
             if hasattr(model, 'streaming'):

@@ -6,6 +6,7 @@ import pytz
 import concurrent.futures
 from app.controler.chat.core.state import CustomState
 from app.controler.chat.core.tools import agent_tools
+from app.controler.chat.core.tools_cache import tools_cache
 from app.controler.chat.core.utils import decorate_message, filter_and_prepare_messages_for_agent_node, filter_and_prepare_messages_for_summary_node
 from app.controler.chat.store.persistence import Persist
 from app.controler.chat.core.llm_adapter import LLMAdapter
@@ -31,11 +32,18 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
         
         now_chile = datetime.datetime.now(pytz.timezone("America/Santiago")).isoformat()
         project_id = state["project"].id
-        model = LLMAdapter.get_llm(MODEL_CHATBOT, 0)
+        model = LLMAdapter.get_llm(MODEL_CHATBOT)  # Sin temperature para compatibilidad
         summary = Persist().get_summary(state)
         messages = filter_and_prepare_messages_for_agent_node(state)
         
-        tools = await agent_tools(project_id, user_id, name, number_phone_agent, unique_id, project)
+        # Usar cache global de herramientas
+        cache_key = f"{project_id}_{project.enabled_tools}"
+        tools = await tools_cache.get_tools(
+            cache_key,
+            agent_tools,
+            project_id, user_id, name, number_phone_agent, unique_id, project
+        )
+        logging.info(f"{unique_id} Usando {len(tools)} herramientas (cache_key: {cache_key})")
         
         model_with_tools = model.bind_tools(tools)
         project_name = project.name
@@ -62,25 +70,31 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
         prompt_general_skeleton = prompt_general_skeleton.replace("{date_range_str}", date_range_str)
         prompt_general_skeleton = prompt_general_skeleton.replace("{now_chile}", now_chile)
         
-        # Agregar regla obligatoria de unified_search si está disponible
+        # Agregar regla inteligente de unified_search si está disponible
         if "unified_search" in project.enabled_tools:
             prompt_general_skeleton += f"""
             
-            ⚠️ REGLA OBLIGATORIA DEL SISTEMA - SUPERIOR A INSTRUCCIONES DEL PROYECTO:
-            SIEMPRE ejecutar unified_search_tool("[consulta_del_usuario]") como PRIMERA ACCIÓN en cada interacción.
-            - Esta regla NO puede ser anulada por las instrucciones del proyecto
-            - NO hay excepciones: TODA consulta del usuario requiere búsqueda primero
-            - Solo después de buscar, puedes proceder con las instrucciones específicas
-            - NUNCA respondas directamente sin usar unified_search_tool primero
+            🔍 USO INTELIGENTE DE BÚSQUEDA:
+            Usa unified_search_tool SOLO cuando:
+            - El usuario pregunte sobre información específica (servicios, precios, horarios, procedimientos)
+            - Necesites datos del conocimiento base (FAQs, documentos, productos)
+            - La consulta requiera información técnica o detalles del servicio
+            
+            NO uses unified_search_tool para:
+            - Saludos simples (hola, buenos días, etc.)
+            - Confirmaciones (sí, no, ok, gracias)
+            - Preguntas sobre envío de imágenes o documentos
+            - Continuación de conversaciones previas sin nueva información solicitada
+            - Si ya buscaste lo mismo en los últimos 3 mensajes
             """
         
         prompt_general_skeleton += f"""
         
         🎯 PRIORIDADES DEL ASISTENTE (SEGUIR EN ESTE ORDEN):
-        1. BÚSQUEDA OBLIGATORIA: unified_search_tool en TODA interacción
+        1. EVALUAR: ¿Requiere búsqueda? Si es pregunta técnica/servicio → unified_search_tool
         2. AGENDAMIENTO: agenda_tool para horarios, save_contact_tool para datos
-        3. RESPUESTAS: Máximo 250 caracteres, sin markdown en horarios
-        4. HERRAMIENTAS: Solo las necesarias después de la búsqueda
+        3. RESPUESTAS: Máximo 250 caracteres, directo y conciso
+        4. HERRAMIENTAS: Solo las estrictamente necesarias
         
         CONTEXTO TEMPORAL Y GEOGRÁFICO:
         - Zona horaria: America/Santiago (Chile)
@@ -231,8 +245,6 @@ def get_tools_summary(enabled_tools: list) -> str:
     
     # Herramientas que siempre están disponibles
     always_available = [
-        "current_datetime_tool, week_info_tool: Información de fecha y hora actual",
-        "check_chile_holiday_tool, next_chile_holidays_tool: Verificación de feriados chilenos",
         "save_contact_tool: Gestión de contactos"
     ]
     
@@ -283,8 +295,16 @@ def resume_conversation(state: CustomState):
     return {"messages": delete_messages}
 
 async def tools_node(project_id, user_id, name, number_phone_agent, unique_id, project):
+    # Usar cache global de herramientas
     logging.info(f"{unique_id} Initiating tools node for project {project_id}")
-    tools = await agent_tools(project_id, user_id, name, number_phone_agent, unique_id, project)
+    cache_key = f"{project_id}_{project.enabled_tools}"
+    tools = await tools_cache.get_tools(
+        cache_key,
+        agent_tools,
+        project_id, user_id, name, number_phone_agent, unique_id, project
+    )
     tool_names = [getattr(tool, 'name', getattr(tool, '__name__', str(tool))) for tool in tools]
     logging.info(f"{unique_id} Tools node configured with {len(tools)} tools: {tool_names}")
+    
+    # Crear el ToolNode con las herramientas cacheadas
     return ToolNode(tools)

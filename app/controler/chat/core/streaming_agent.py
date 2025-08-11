@@ -46,7 +46,7 @@ def create_streaming_agent(user_id, name, number_phone_agent, source):
         MODEL_CHATBOT = project.model if project else MODEL_CHATBOT
 
         # 🎯 CLAVE: Inicializar modelo con streaming habilitado
-        model = LLMAdapter.get_llm(MODEL_CHATBOT, 0)
+        model = LLMAdapter.get_llm(MODEL_CHATBOT)  # Sin temperature para compatibilidad
         
         # Verificar si el modelo soporta streaming
         if hasattr(model, 'streaming') and not model.streaming:

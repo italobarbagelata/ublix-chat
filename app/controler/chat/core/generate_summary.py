@@ -47,7 +47,7 @@ def generate_summary(payload: SummaryPayload):
         Current conversation summary: {previous_summary}
     """
 
-    model_summary = LLMAdapter.get_llm(MODEL_CHATBOT, 0)
+    model_summary = LLMAdapter.get_llm(MODEL_CHATBOT)  # Sin temperature para compatibilidad
     messages = [
         {"role": "system", "content": summary_message},
         {"role": "user", "content": payload.message},

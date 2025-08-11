@@ -144,7 +144,7 @@ def unified_search_tool(
         if not response.data:
             logger.warning(f"No se encontró contenido relevante para query='{query}', project_id={project.id}, types={content_types}")
             # Log adicional para debugging
-            logger.info(f"Parámetros RPC utilizados: {rpc_params}")
+            #logger.info(f"Parámetros RPC utilizados: {rpc_params}")
             return "No se encontraron productos con esas características. ¿Te gustaría ver otros productos disponibles?"
 
         # Organizar resultados por tipo
