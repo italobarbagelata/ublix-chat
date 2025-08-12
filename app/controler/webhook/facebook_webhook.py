@@ -285,10 +285,8 @@ async def process_message(message: Dict[str, Any], background_tasks: BackgroundT
         user_info = await get_facebook_user_info(user_id, access_token)
         username = user_info.get("name", "Usuario de Facebook")
         
-        # Crear o actualizar el lead
-        from app.controler.chat.services.lead_service import LeadService
-        lead_service = LeadService()
-        await lead_service.create_or_update_lead(
+        # Crear o actualizar el contacto
+        await create_or_update_contact(
             project_id=project_id,
             platform="facebook",
             platform_user_id=user_id,
@@ -623,3 +621,45 @@ async def send_messenger_message(project_id: str, recipient_id: str, message_tex
             logger.info(f"Mensaje enviado exitosamente a {recipient_id}")
     except Exception as e:
         logger.error(f"Error enviando mensaje de Messenger: {e}", exc_info=True)
+
+
+async def create_or_update_contact(project_id: str, platform: str, platform_user_id: str, username: str = None, full_name: str = None, profile_data: dict = None):
+    """Crea o actualiza un contacto en la tabla contacts."""
+    try:
+        from datetime import datetime
+        db = SupabaseDatabase()
+        
+        # Buscar contacto existente
+        existing_contact = db.find_one("contacts", {
+            "project_id": project_id,
+            "platform": platform,
+            "platform_user_id": platform_user_id
+        })
+        
+        contact_data = {
+            "project_id": project_id,
+            "platform": platform,
+            "platform_user_id": platform_user_id,
+            "username": username,
+            "name": full_name or username or f"Usuario {platform}",
+            "profile_data": profile_data or {},
+            "last_interaction_at": datetime.now().isoformat(),
+            "updated_at": datetime.now().isoformat()
+        }
+        
+        if existing_contact:
+            # Actualizar contacto existente
+            contact_data["total_messages"] = existing_contact.get("total_messages", 0) + 1
+            db.update("contacts", {"id": existing_contact["id"]}, contact_data)
+            logger.info(f"Contacto actualizado: {platform_user_id}")
+        else:
+            # Crear nuevo contacto
+            contact_data["total_messages"] = 1
+            contact_data["lead_status"] = "new"
+            contact_data["tags"] = []
+            contact_data["created_at"] = datetime.now().isoformat()
+            db.insert("contacts", contact_data)
+            logger.info(f"Nuevo contacto creado: {platform_user_id}")
+            
+    except Exception as e:
+        logger.error(f"Error creando/actualizando contacto: {e}", exc_info=True)

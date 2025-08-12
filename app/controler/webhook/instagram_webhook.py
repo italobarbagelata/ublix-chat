@@ -74,7 +74,6 @@ async def process_webhook_instagram(request: Request, background_tasks: Backgrou
             logger.debug(f"Programando procesamiento asíncrono para mensaje: {message.get('message_id', 'unknown')}")
             background_tasks.add_task(process_message_async, message)
         
-        background_tasks.add_task(save_webhook_to_file, body)
         
         logger.info(f"Webhook procesado exitosamente. {total_messages} mensajes programados para procesamiento asíncrono")
         return {
@@ -257,10 +256,8 @@ async def process_message_content(message: Dict[str, Any], project_id: str):
         user_id = sender_id
         source_id = message.get("recipient_id")
         
-        # Crear o actualizar el lead
-        from app.controler.chat.services.lead_service import LeadService
-        lead_service = LeadService()
-        await lead_service.create_or_update_lead(
+        # Crear o actualizar el contacto
+        await create_or_update_contact(
             project_id=project_id,
             platform="instagram",
             platform_user_id=sender_id,
@@ -591,21 +588,45 @@ async def get_instagram_user_info(user_id: str, project_id: str, instagram_page_
         return {"id": user_id, "name": "Usuario de Instagram"}
 
 
-async def save_webhook_to_file(webhook_data: Dict[str, Any]):
-    """Guarda un webhook en un archivo para referencia futura."""
+async def create_or_update_contact(project_id: str, platform: str, platform_user_id: str, username: str = None, full_name: str = None, profile_data: dict = None):
+    """Crea o actualiza un contacto en la tabla contacts."""
     try:
-        import os
         from datetime import datetime
+        db = SupabaseDatabase()
         
-        imports_dir = os.path.join(os.getcwd(), "imports")
-        if not os.path.exists(imports_dir):
-            os.makedirs(imports_dir)
-            
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        file_path = os.path.join(imports_dir, f"instagram_webhook_{timestamp}.json")
+        # Buscar contacto existente
+        existing_contact = db.find_one("contacts", {
+            "project_id": project_id,
+            "platform": platform,
+            "platform_user_id": platform_user_id
+        })
         
-        with open(file_path, 'w') as f:
-            json.dump(webhook_data, f, indent=2)
+        contact_data = {
+            "project_id": project_id,
+            "platform": platform,
+            "platform_user_id": platform_user_id,
+            "username": username,
+            "name": full_name or username or f"Usuario {platform}",
+            "profile_data": profile_data or {},
+            "last_interaction_at": datetime.now().isoformat(),
+            "updated_at": datetime.now().isoformat()
+        }
+        
+        if existing_contact:
+            # Actualizar contacto existente
+            contact_data["total_messages"] = existing_contact.get("total_messages", 0) + 1
+            db.update("contacts", {"id": existing_contact["id"]}, contact_data)
+            logger.info(f"Contacto actualizado: {platform_user_id}")
+        else:
+            # Crear nuevo contacto
+            contact_data["total_messages"] = 1
+            contact_data["lead_status"] = "new"
+            contact_data["tags"] = []
+            contact_data["created_at"] = datetime.now().isoformat()
+            db.insert("contacts", contact_data)
+            logger.info(f"Nuevo contacto creado: {platform_user_id}")
             
     except Exception as e:
-        logger.warning(f"Error guardando webhook en archivo: {e}")
+        logger.error(f"Error creando/actualizando contacto: {e}", exc_info=True)
+
+
