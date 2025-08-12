@@ -6,7 +6,7 @@ from typing import Dict, Any, List, Optional
 from fastapi import Request, HTTPException, BackgroundTasks
 from fastapi.responses import PlainTextResponse
 from dotenv import load_dotenv
-from datetime import datetime, timedelta
+from datetime import datetime
 from app.controler.chat.store.persistence import SupabaseDatabase
 from app.models import ChatRequest
 from app.chatbot import chatbot
@@ -261,8 +261,8 @@ async def process_message_content(message: Dict[str, Any], project_id: str):
             project_id=project_id,
             platform="instagram",
             platform_user_id=sender_id,
-            username=user_info.get("username"),
-            full_name=user_info.get("name"),
+            username=user_info.get("username"),  # @usuario de IG
+            platform_username=user_info.get("name"),  # Nombre real del usuario
             profile_data=user_info
         )
         
@@ -588,7 +588,7 @@ async def get_instagram_user_info(user_id: str, project_id: str, instagram_page_
         return {"id": user_id, "name": "Usuario de Instagram"}
 
 
-async def create_or_update_contact(project_id: str, platform: str, platform_user_id: str, username: str = None, full_name: str = None, profile_data: dict = None):
+async def create_or_update_contact(project_id: str, platform: str, platform_user_id: str, username: str = None, platform_username: str = None, profile_data: dict = None):
     """Crea o actualiza un contacto en la tabla contacts."""
     try:
         from datetime import datetime
@@ -605,8 +605,8 @@ async def create_or_update_contact(project_id: str, platform: str, platform_user
             "project_id": project_id,
             "platform": platform,
             "platform_user_id": platform_user_id,
-            "username": username,
-            "name": full_name or username or f"Usuario {platform}",
+            "username": username,  # @usuario de IG
+            "platform_username": platform_username,  # Nombre real del usuario
             "profile_data": profile_data or {},
             "last_interaction_at": datetime.now().isoformat(),
             "updated_at": datetime.now().isoformat()
@@ -616,7 +616,7 @@ async def create_or_update_contact(project_id: str, platform: str, platform_user
             # Actualizar contacto existente
             contact_data["total_messages"] = existing_contact.get("total_messages", 0) + 1
             db.update("contacts", {"id": existing_contact["id"]}, contact_data)
-            logger.info(f"Contacto actualizado: {platform_user_id}")
+            logger.info(f"Contacto actualizado: {platform_user_id} - @{username} - {platform_username}")
         else:
             # Crear nuevo contacto
             contact_data["total_messages"] = 1
@@ -624,7 +624,7 @@ async def create_or_update_contact(project_id: str, platform: str, platform_user
             contact_data["tags"] = []
             contact_data["created_at"] = datetime.now().isoformat()
             db.insert("contacts", contact_data)
-            logger.info(f"Nuevo contacto creado: {platform_user_id}")
+            logger.info(f"Nuevo contacto creado: {platform_user_id} - @{username} - {platform_username}")
             
     except Exception as e:
         logger.error(f"Error creando/actualizando contacto: {e}", exc_info=True)

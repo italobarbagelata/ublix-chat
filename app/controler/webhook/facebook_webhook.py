@@ -290,8 +290,8 @@ async def process_message(message: Dict[str, Any], background_tasks: BackgroundT
             project_id=project_id,
             platform="facebook",
             platform_user_id=user_id,
-            username=f"{user_info.get('first_name', '')} {user_info.get('last_name', '')}".strip() or None,
-            full_name=user_info.get("name"),
+            username=None,  # Facebook no tiene @username
+            platform_username=user_info.get("name"),  # Nombre completo del usuario
             profile_data=user_info
         )
         
@@ -623,7 +623,7 @@ async def send_messenger_message(project_id: str, recipient_id: str, message_tex
         logger.error(f"Error enviando mensaje de Messenger: {e}", exc_info=True)
 
 
-async def create_or_update_contact(project_id: str, platform: str, platform_user_id: str, username: str = None, full_name: str = None, profile_data: dict = None):
+async def create_or_update_contact(project_id: str, platform: str, platform_user_id: str, username: str = None, platform_username: str = None, profile_data: dict = None):
     """Crea o actualiza un contacto en la tabla contacts."""
     try:
         from datetime import datetime
@@ -640,8 +640,8 @@ async def create_or_update_contact(project_id: str, platform: str, platform_user
             "project_id": project_id,
             "platform": platform,
             "platform_user_id": platform_user_id,
-            "username": username,
-            "name": full_name or username or f"Usuario {platform}",
+            "username": username,  # @username (solo IG tiene esto)
+            "platform_username": platform_username,  # Nombre real del usuario
             "profile_data": profile_data or {},
             "last_interaction_at": datetime.now().isoformat(),
             "updated_at": datetime.now().isoformat()
@@ -651,7 +651,7 @@ async def create_or_update_contact(project_id: str, platform: str, platform_user
             # Actualizar contacto existente
             contact_data["total_messages"] = existing_contact.get("total_messages", 0) + 1
             db.update("contacts", {"id": existing_contact["id"]}, contact_data)
-            logger.info(f"Contacto actualizado: {platform_user_id}")
+            logger.info(f"Contacto actualizado: {platform_user_id} - {platform_username}")
         else:
             # Crear nuevo contacto
             contact_data["total_messages"] = 1
@@ -659,7 +659,7 @@ async def create_or_update_contact(project_id: str, platform: str, platform_user
             contact_data["tags"] = []
             contact_data["created_at"] = datetime.now().isoformat()
             db.insert("contacts", contact_data)
-            logger.info(f"Nuevo contacto creado: {platform_user_id}")
+            logger.info(f"Nuevo contacto creado: {platform_user_id} - {platform_username}")
             
     except Exception as e:
         logger.error(f"Error creando/actualizando contacto: {e}", exc_info=True)
