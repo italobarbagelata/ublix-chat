@@ -291,8 +291,7 @@ async def process_message(message: Dict[str, Any], background_tasks: BackgroundT
             platform="facebook",
             platform_user_id=user_id,
             username=None,  # Facebook no tiene @username
-            platform_username=user_info.get("name"),  # Nombre completo del usuario
-            profile_data=user_info
+            platform_username=user_info.get("name")  # Nombre completo del usuario
         )
         
         final_message = None
@@ -623,7 +622,7 @@ async def send_messenger_message(project_id: str, recipient_id: str, message_tex
         logger.error(f"Error enviando mensaje de Messenger: {e}", exc_info=True)
 
 
-async def create_or_update_contact(project_id: str, platform: str, platform_user_id: str, username: str = None, platform_username: str = None, profile_data: dict = None):
+async def create_or_update_contact(project_id: str, platform: str, platform_user_id: str, username: str = None, platform_username: str = None):
     """Crea o actualiza un contacto en la tabla contacts."""
     try:
         from datetime import datetime
@@ -640,9 +639,9 @@ async def create_or_update_contact(project_id: str, platform: str, platform_user
             "project_id": project_id,
             "platform": platform,
             "platform_user_id": platform_user_id,
+            "user_id": platform_user_id,  # Copiar platform_user_id a user_id
             "username": username,  # @username (solo IG tiene esto)
             "platform_username": platform_username,  # Nombre real del usuario
-            "profile_data": profile_data or {},
             "last_interaction_at": datetime.now().isoformat(),
             "updated_at": datetime.now().isoformat()
         }

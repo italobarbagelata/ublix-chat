@@ -262,8 +262,7 @@ async def process_message_content(message: Dict[str, Any], project_id: str):
             platform="instagram",
             platform_user_id=sender_id,
             username=user_info.get("username"),  # @usuario de IG
-            platform_username=user_info.get("name"),  # Nombre real del usuario
-            profile_data=user_info
+            platform_username=user_info.get("name")  # Nombre real del usuario
         )
         
         text_message = message.get("text", "")
@@ -588,7 +587,7 @@ async def get_instagram_user_info(user_id: str, project_id: str, instagram_page_
         return {"id": user_id, "name": "Usuario de Instagram"}
 
 
-async def create_or_update_contact(project_id: str, platform: str, platform_user_id: str, username: str = None, platform_username: str = None, profile_data: dict = None):
+async def create_or_update_contact(project_id: str, platform: str, platform_user_id: str, username: str = None, platform_username: str = None):
     """Crea o actualiza un contacto en la tabla contacts."""
     try:
         from datetime import datetime
@@ -605,9 +604,9 @@ async def create_or_update_contact(project_id: str, platform: str, platform_user
             "project_id": project_id,
             "platform": platform,
             "platform_user_id": platform_user_id,
+            "user_id": platform_user_id,  # Copiar platform_user_id a user_id
             "username": username,  # @usuario de IG
             "platform_username": platform_username,  # Nombre real del usuario
-            "profile_data": profile_data or {},
             "last_interaction_at": datetime.now().isoformat(),
             "updated_at": datetime.now().isoformat()
         }
