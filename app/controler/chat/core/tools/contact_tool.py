@@ -56,6 +56,7 @@ async def save_contact_async(
     name: Optional[str] = None,
     email: Optional[str] = None,
     phone_number: Optional[str] = None,
+    lead_status: Optional[str] = None,
     additional_fields: Optional[Dict[str, Any]] = None
 ) -> Optional[Dict[str, Any]]:
     """
@@ -68,6 +69,7 @@ async def save_contact_async(
     - name: Nombre del contacto (opcional)
     - email: Email del contacto (opcional)
     - phone_number: Teléfono del contacto (opcional)
+    - lead_status: Estado del lead ('new', 'engaged', 'qualified', 'converted') (opcional)
     - additional_fields: Campos adicionales como dict (opcional)
     
     Retorna:
@@ -108,7 +110,7 @@ async def save_contact_async(
             # Si no hay configuración del proyecto, no guardar campos adicionales
             
         return await contact_service.save_or_update_contact(
-            project_id, user_id, name, phone_number, email, filtered_additional_fields
+            project_id, user_id, name, phone_number, email, lead_status, filtered_additional_fields
         )
     except Exception as e:
         logging.error(f"Error guardando contacto: {str(e)}")
@@ -252,6 +254,7 @@ def save_contact_sync(
     name: Optional[str] = None,
     email: Optional[str] = None,
     phone_number: Optional[str] = None,
+    lead_status: Optional[str] = None,
     additional_fields: Optional[Dict[str, Any]] = None
 ) -> Optional[Dict[str, Any]]:
     """
@@ -266,13 +269,13 @@ def save_contact_sync(
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 future = executor.submit(
                     lambda: asyncio.run(save_contact_async(
-                        project_id, user_id, name, email, phone_number, additional_fields
+                        project_id, user_id, name, email, phone_number, lead_status, additional_fields
                     ))
                 )
                 return future.result()
         else:
             return asyncio.run(save_contact_async(
-                project_id, user_id, name, email, phone_number, additional_fields
+                project_id, user_id, name, email, phone_number, lead_status, additional_fields
             ))
     except Exception as e:
         logging.error(f"Error en save_contact_sync: {str(e)}")
@@ -294,7 +297,8 @@ def format_contact_info(contact: Optional[Dict[str, Any]]) -> str:
     base_info = f""" INFORMACIÓN DE CONTACTO:
  Nombre: {contact.get('name', 'No disponible')}
  Email: {contact.get('email', 'No disponible')}
- Teléfono: {contact.get('phone_number', 'No disponible')}"""
+ Teléfono: {contact.get('phone_number', 'No disponible')}
+ Estado del Lead: {contact.get('lead_status', 'new')}"""
 
     # Agregar campos adicionales si existen
     additional_fields = contact.get('additional_fields', {})
@@ -338,7 +342,7 @@ class SaveContactTool(BaseTool):
             name="save_contact_tool",
             coroutine=self._arun,  # Usar método asíncrono por defecto para mejor rendimiento
             description="""
-             HERRAMIENTA INTELIGENTE DE GESTIÓN DE CONTACTOS CON CONTROL DE CALIDAD
+             HERRAMIENTA INTELIGENTE DE GESTIÓN DE CONTACTOS CON CONTROL DE CALIDAD Y LEAD TRACKING
             
             🚨 IMPORTANTE PARA EL ASISTENTE:
             - Si el usuario envía SOLO un número (ej: "312321312", "987654321"), 
@@ -361,6 +365,7 @@ class SaveContactTool(BaseTool):
             • Nombre completo del usuario
             • Email de contacto  
             • Número de teléfono
+            • Lead Status: 'new' → 'engaged' → 'qualified' → 'converted'
             
              CAMPOS DINÁMICOS (CONFIGURADOS EN contact_field_configs):
             • SOLO campos definidos en la tabla contact_field_configs del proyecto
@@ -389,6 +394,9 @@ class SaveContactTool(BaseTool):
             save_contact_tool(email="juan@email.com")
             save_contact_tool(phone_number="123456789")
             save_contact_tool(name="Juan", email="juan@email.com", phone_number="123456789")
+            save_contact_tool(lead_status="engaged")  # Usuario muestra interés
+            save_contact_tool(lead_status="qualified")  # Usuario pregunta precios/detalles
+            save_contact_tool(lead_status="converted")  # Usuario compra/contrata
             
              3. CAMPOS DINÁMICOS (SOLO CONFIGURADOS):
             save_contact_tool(additional_fields='{"direccion": "Santiago", "edad": 30, "ha_invertido": true}')
@@ -474,6 +482,7 @@ class SaveContactTool(BaseTool):
             - name: Nombre completo del usuario
             - email: Dirección de correo electrónico válida  
             - phone_number: Número de teléfono en cualquier formato
+            - lead_status: Estado del lead ('new', 'engaged', 'qualified', 'converted')
             - additional_fields: JSON string con campos adicionales {"campo": "valor"}
             - conversation_text: Texto de conversación para extraer información
             - field_config: JSON string con configuración de campos a extraer
@@ -514,6 +523,127 @@ class SaveContactTool(BaseTool):
         # Por ahora, retornar None para que use conversation_text si está disponible
         # En el futuro, esto se puede conectar al contexto real de la conversación
         return None
+    
+    def _validate_status_transition(self, current_status: str, new_status: str) -> bool:
+        """
+        Valida que la transición de estado sea lógica.
+        Retorna True si la transición es válida, False si no lo es.
+        """
+        # Definir transiciones válidas
+        valid_transitions = {
+            'nuevo_chat': ['eligiendo_servicio', 'recopilando_datos'],
+            'eligiendo_servicio': ['eligiendo_horario', 'recopilando_datos'],
+            'eligiendo_horario': ['recopilando_datos', 'esperando_confirmacion'],
+            'recopilando_datos': ['esperando_confirmacion', 'eligiendo_servicio', 'eligiendo_horario'],
+            'esperando_confirmacion': ['reservado', 'eligiendo_horario'],
+            'reservado': []  # Estado final, no debería cambiar
+        }
+        
+        # Si no hay estado actual, cualquier estado es válido
+        if not current_status:
+            return True
+            
+        # Si el estado actual es el mismo que el nuevo, es válido
+        if current_status == new_status:
+            return True
+            
+        # Verificar si la transición está en la lista de transiciones válidas
+        return new_status in valid_transitions.get(current_status, [])
+    
+    def _get_next_expected_status(self, current_status: str) -> str:
+        """
+        Retorna el próximo estado esperado en el flujo.
+        """
+        next_status_map = {
+            'nuevo_chat': 'eligiendo_servicio',
+            'eligiendo_servicio': 'eligiendo_horario',
+            'eligiendo_horario': 'recopilando_datos',
+            'recopilando_datos': 'esperando_confirmacion',
+            'esperando_confirmacion': 'reservado',
+            'reservado': 'reservado'
+        }
+        return next_status_map.get(current_status, 'nuevo_chat')
+    
+    def _detect_lead_status(self, message: str) -> Optional[str]:
+        """
+        Detecta automáticamente el estado del lead basado en el contenido del mensaje.
+        
+        Estados para sistema de agendamiento:
+            'nuevo_chat': Usuario inició contacto
+            'eligiendo_servicio': Usuario está eligiendo qué servicio necesita
+            'eligiendo_horario': Usuario está seleccionando fecha y hora
+            'recopilando_datos': Usuario está dando sus datos personales
+            'esperando_confirmacion': Cita armada, esperando confirmación
+            'reservado': Cita confirmada y agendada
+        """
+        if not message:
+            return None
+            
+        message_lower = message.lower()
+        
+        # Patrones para 'reservado' (confirmación final)
+        reservado_patterns = [
+            'confirmo', 'sí acepto', 'perfecto', 'de acuerdo',
+            'está bien', 'confirmado', 'lo confirmo', 'si, confirmo',
+            'sí, por favor', 'adelante', 'procedamos'
+        ]
+        
+        # Patrones para 'recopilando_datos' (dando información personal)
+        datos_patterns = [
+            'mi nombre es', 'me llamo', 'mi correo', 'mi email',
+            'mi teléfono', 'mi número', '@', 'gmail', 'hotmail'
+        ]
+        
+        # Patrones para 'eligiendo_horario' (combina fecha y hora)
+        horario_patterns = [
+            # Horarios
+            'mañana', 'tarde', 'noche', ':00', ':30', ':15', ':45',
+            'a las', 'prefiero', 'disponible', 'horario',
+            'temprano', 'después de', 'antes de',
+            # Fechas
+            'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo',
+            'pasado mañana', 'próxima semana', 'este mes',
+            'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+            'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
+            'hoy', 'fecha', 'día', 'cuando', 'cuándo'
+        ]
+        
+        # Patrones para 'eligiendo_servicio'
+        servicio_patterns = [
+            'servicio', 'necesito', 'quiero', 'quisiera', 'me interesa',
+            'consulta', 'cita', 'turno', 'reserva', 'agendar',
+            'qué ofrecen', 'opciones', 'tipos de'
+        ]
+        
+        # Verificar patrones en orden de prioridad (de más específico a menos)
+        import re
+        
+        # Verificar si tiene formato de email
+        if re.search(r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}', message):
+            return 'recopilando_datos'
+        
+        # Verificar si tiene número de teléfono
+        if re.search(r'\b\d{8,12}\b', message):
+            return 'recopilando_datos'
+        
+        for pattern in reservado_patterns:
+            if pattern in message_lower:
+                return 'reservado'
+                
+        for pattern in datos_patterns:
+            if pattern in message_lower:
+                return 'recopilando_datos'
+                
+        for pattern in horario_patterns:
+            if pattern in message_lower:
+                return 'eligiendo_horario'
+                
+        for pattern in servicio_patterns:
+            if pattern in message_lower:
+                return 'eligiendo_servicio'
+                
+        # Si no se detecta ningún patrón específico, es un nuevo chat
+        return 'nuevo_chat'
     
     def _extract_basic_contact_info(self, message: str) -> Dict[str, Optional[str]]:
         """
@@ -579,6 +709,8 @@ class SaveContactTool(BaseTool):
             changes.append(f" Email: {existing.get('email', 'No disponible')} → {updated['email']}")
         if updated.get('phone_number') and updated['phone_number'] != existing.get('phone_number'):
             changes.append(f" Teléfono: {existing.get('phone_number', 'No disponible')} → {updated['phone_number']}")
+        if updated.get('lead_status') and updated['lead_status'] != existing.get('lead_status'):
+            changes.append(f" Estado del Lead: {existing.get('lead_status', 'new')} → {updated['lead_status']}")
         
         # Cambios en campos adicionales
         existing_additional = existing.get('additional_fields', {})
@@ -618,6 +750,7 @@ class SaveContactTool(BaseTool):
         name: Optional[str] = None, 
         email: Optional[str] = None, 
         phone_number: Optional[str] = None,
+        lead_status: Optional[str] = None,
         additional_fields: Optional[str] = None,
         conversation_text: Optional[str] = None,
         field_config: Optional[str] = None,
@@ -634,11 +767,11 @@ class SaveContactTool(BaseTool):
                 # Si estamos en un contexto asíncrono, usar ThreadPoolExecutor
                 import concurrent.futures
                 with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(self._run_sync_helper, name, email, phone_number, additional_fields, conversation_text, field_config, auto_extract)
+                    future = executor.submit(self._run_sync_helper, name, email, phone_number, lead_status, additional_fields, conversation_text, field_config, auto_extract)
                     return future.result()
             else:
                 # Contexto síncrono, usar directamente
-                return self._run_sync_helper(name, email, phone_number, additional_fields, conversation_text, field_config, auto_extract)
+                return self._run_sync_helper(name, email, phone_number, lead_status, additional_fields, conversation_text, field_config, auto_extract)
                 
         except Exception as e:
             return f" Error al procesar contacto: {str(e)}"
@@ -648,6 +781,7 @@ class SaveContactTool(BaseTool):
         name: Optional[str] = None, 
         email: Optional[str] = None, 
         phone_number: Optional[str] = None,
+        lead_status: Optional[str] = None,
         additional_fields: Optional[str] = None,
         conversation_text: Optional[str] = None,
         field_config: Optional[str] = None,
@@ -692,7 +826,7 @@ class SaveContactTool(BaseTool):
                 additional_fields_dict = self._parse_additional_fields(additional_fields)
             
             # Modo 2: Si no se proporcionó información directa, intentar extracción automática
-            if not any([name, email, phone_number, additional_fields_dict]):
+            if not any([name, email, phone_number, lead_status, additional_fields_dict]):
                 # CRÍTICO: Intentar extracción automática del último mensaje del usuario
                 # Esto es especialmente importante para números de teléfono enviados como texto simple
                 try:
@@ -717,7 +851,8 @@ class SaveContactTool(BaseTool):
                                 self.user_id,
                                 name=basic_extraction.get('name'),
                                 email=basic_extraction.get('email'), 
-                                phone_number=basic_extraction.get('phone_number')
+                                phone_number=basic_extraction.get('phone_number'),
+                                lead_status=self._detect_lead_status(recent_message) if not lead_status else lead_status
                             ))
                             if extraction_result:
                                 return ""
@@ -763,12 +898,26 @@ extrae esa información y úsala para guardar los datos."""
             except Exception as e:
                 existing_contact = None
             
+            # Validar transición de estado si se proporciona lead_status
+            if lead_status and existing_contact:
+                current_status = existing_contact.get('lead_status', 'nuevo_chat')
+                if not self._validate_status_transition(current_status, lead_status):
+                    next_expected = self._get_next_expected_status(current_status)
+                    return f"""⚠️ Transición de estado no válida.
+                    
+Estado actual: {current_status}
+Estado solicitado: {lead_status}
+Próximo estado esperado: {next_expected}
+
+Para forzar el cambio, primero actualiza al estado intermedio correspondiente."""
+            
             contact = asyncio.run(save_contact_async(
                 self.project_id, 
                 self.user_id, 
                 name, 
                 email,
                 phone_number,
+                lead_status,
                 additional_fields_dict
             ))
             
@@ -790,6 +939,7 @@ extrae esa información y úsala para guardar los datos."""
         name: Optional[str] = None, 
         email: Optional[str] = None, 
         phone_number: Optional[str] = None,
+        lead_status: Optional[str] = None,
         additional_fields: Optional[str] = None,
         conversation_text: Optional[str] = None,
         field_config: Optional[str] = None,
@@ -825,7 +975,7 @@ extrae esa información y úsala para guardar los datos."""
                 additional_fields_dict = self._parse_additional_fields(additional_fields)
 
             # Si no hay datos nuevos, intentar extracción automática o mostrar información existente
-            if not any([name, email, phone_number, additional_fields_dict]):
+            if not any([name, email, phone_number, lead_status, additional_fields_dict]):
                 # CRÍTICO: Intentar extracción automática del texto de conversación
                 if conversation_text:
                     basic_extraction = self._extract_basic_contact_info(conversation_text)
@@ -835,7 +985,8 @@ extrae esa información y úsala para guardar los datos."""
                             self.user_id,
                             name=basic_extraction.get('name'),
                             email=basic_extraction.get('email'), 
-                            phone_number=basic_extraction.get('phone_number')
+                            phone_number=basic_extraction.get('phone_number'),
+                            lead_status=self._detect_lead_status(conversation_text) if not lead_status else lead_status
                         )
                         if extraction_result:
                                 return ""
@@ -851,7 +1002,7 @@ extrae esa información y úsala para guardar los datos."""
 use los parámetros correspondientes del tool (phone_number, email, name)."""
 
             # Guardar o actualizar información
-            if any([name, email, phone_number, additional_fields_dict]):
+            if any([name, email, phone_number, lead_status, additional_fields_dict]):
                 # Obtener contacto existente para determinar si es creación o actualización
                 try:
                     existing_contact = await self._get_existing_contact()
@@ -864,6 +1015,7 @@ use los parámetros correspondientes del tool (phone_number, email, name)."""
                     name=name,
                     email=email,
                     phone_number=phone_number,
+                    lead_status=lead_status,
                     additional_fields=additional_fields_dict
                 )
                 

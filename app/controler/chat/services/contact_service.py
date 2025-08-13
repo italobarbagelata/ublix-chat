@@ -288,6 +288,7 @@ class ContactService:
         name: Optional[str] = None,
         phone_number: Optional[str] = None,
         email: Optional[str] = None,
+        lead_status: Optional[str] = None,
         additional_fields: Optional[Dict[str, Any]] = None
     ) -> Optional[dict]:
         """
@@ -296,13 +297,14 @@ class ContactService:
         Retorna None si no hay suficiente información para guardar.
         
         Args:
+            lead_status: Estado del lead ('new', 'engaged', 'qualified', 'converted')
             additional_fields: Campos adicionales como JSON (ej: {"direccion": "Santiago", "edad": 30})
         """
         import logging
         logger = logging.getLogger(__name__)
-        logger.info(f"🔄 Intentando guardar contacto - user_id={user_id}, project_id={project_id}, name={name}, phone={phone_number}, email={email}, additional_fields={additional_fields}")
+        logger.info(f"🔄 Intentando guardar contacto - user_id={user_id}, project_id={project_id}, name={name}, phone={phone_number}, email={email}, lead_status={lead_status}, additional_fields={additional_fields}")
         
-        if not any([name, phone_number, email, additional_fields]):
+        if not any([name, phone_number, email, lead_status, additional_fields]):
             logger.warning(f"⚠️ No hay datos suficientes para guardar contacto - user_id={user_id}")
             return None
 
@@ -316,6 +318,7 @@ class ContactService:
                     "name": name if name else contact.get("name", "Usuario"),
                     "phone_number": phone_number if phone_number else contact.get("phone_number"),
                     "email": email if email else contact.get("email"),
+                    "lead_status": lead_status if lead_status else contact.get("lead_status"),
                     "updated_at": datetime.utcnow().isoformat()
                 }
                 
@@ -354,6 +357,7 @@ class ContactService:
                     "name": name if name else "Usuario",
                     "phone_number": phone_number,
                     "email": email,
+                    "lead_status": lead_status if lead_status else "nuevo_chat",
                     "created_at": datetime.utcnow().isoformat(),
                     "updated_at": datetime.utcnow().isoformat()
                 }

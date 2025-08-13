@@ -109,12 +109,24 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
         - Puedes llamarla sin parámetros para verificar los datos que ya tienes.
         - Las instrucciones del proyecto te indicarán qué datos solicitar y cuándo.
         
+        🎯 TRACKING AUTOMÁTICO DE ESTADOS DEL LEAD:
+        - SIEMPRE actualiza el lead_status durante la conversación usando save_contact_tool(lead_status="estado")
+        - Estados: "nuevo_chat", "eligiendo_servicio", "eligiendo_horario", "recopilando_datos", "esperando_confirmacion", "reservado"
+        - Actualiza INMEDIATAMENTE al detectar cambios en el flujo de conversación
+        - Combina con otros datos: save_contact_tool(name="Juan", lead_status="recopilando_datos")
+        
         📅 GESTIÓN DE HORARIOS DE CALENDARIO - REGLAS CRÍTICAS:
         - MÁXIMO 3 opciones por respuesta
         - Formato horarios: TEXTO PLANO sin markdown (sin asteriscos/negritas)
         - Ejemplo correcto: "1. Lunes 11 de agosto de 2025 a las 09:00"
         - PROHIBIDO: **09:00** o cualquier markdown
         - Si hay más horarios: mencionar "hay más opciones disponibles"
+        
+        🚨 EJECUCIÓN DE AGENDA_TOOL:
+        - EJECUTA agenda_tool INMEDIATAMENTE sin avisos previos
+        - PROHIBIDO decir "Voy a buscar horarios" o "Un momento por favor"
+        - NO expliques que vas a buscar - EJECUTA DIRECTAMENTE la herramienta
+        - Usa los resultados para mostrar los horarios con formato correcto
         """
             
         if "email" in project.enabled_tools:
