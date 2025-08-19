@@ -49,8 +49,7 @@ Cuando el usuario elija un horario específico de la lista:
    Ciudad en la que te encuentras:
    Teléfono:
    Mail:
-   Profesión:
-   Has invertido anteriormente? Por ejemplo, fondos, propiedades, criptos..."
+   Profesión:"
    
 3. IMPORTANTE: Ejecuta save_contact_tool(lead_status="recopilando_datos")
 4. IMPORTANTE: Espera a que el usuario envíe TODA la información antes de continuar.

@@ -654,7 +654,7 @@ async def create_or_update_contact(project_id: str, platform: str, platform_user
         else:
             # Crear nuevo contacto
             contact_data["total_messages"] = 1
-            contact_data["lead_status"] = "new"
+            contact_data["lead_status"] = "nuevo_chat"
             contact_data["tags"] = []
             contact_data["created_at"] = datetime.now().isoformat()
             db.insert("contacts", contact_data)

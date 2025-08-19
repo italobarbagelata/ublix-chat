@@ -318,15 +318,6 @@ def format_contact_info(contact: Optional[Dict[str, Any]]) -> str:
     
     return base_info
 
-def get_field_config_examples() -> Dict[str, Dict]:
-    """
-    Función para obtener ejemplos de configuraciones de campos.
-    
-    Retorna:
-    - Dict con ejemplos de configuraciones para diferentes tipos de bot
-    """
-    contact_service = ContactService()
-    return contact_service.get_field_configuration_examples()
 
 # ===========================
 # HERRAMIENTA PRINCIPAL EXTENDIDA
@@ -365,7 +356,7 @@ class SaveContactTool(BaseTool):
             • Nombre completo del usuario
             • Email de contacto  
             • Número de teléfono
-            • Lead Status: 'new' → 'engaged' → 'qualified' → 'converted'
+            • Lead Status según FLUJO MEJORADO: nuevo_chat → eligiendo_servicio → eligiendo_horario → esperando_confirmacion → recopilando_datos → reservado
             
              CAMPOS DINÁMICOS (CONFIGURADOS EN contact_field_configs):
             • SOLO campos definidos en la tabla contact_field_configs del proyecto
@@ -394,9 +385,12 @@ class SaveContactTool(BaseTool):
             save_contact_tool(email="juan@email.com")
             save_contact_tool(phone_number="123456789")
             save_contact_tool(name="Juan", email="juan@email.com", phone_number="123456789")
-            save_contact_tool(lead_status="engaged")  # Usuario muestra interés
-            save_contact_tool(lead_status="qualified")  # Usuario pregunta precios/detalles
-            save_contact_tool(lead_status="converted")  # Usuario compra/contrata
+            save_contact_tool(lead_status="nuevo_chat")          # Usuario inicia conversación
+            save_contact_tool(lead_status="eligiendo_servicio")  # Usuario muestra interés
+            save_contact_tool(lead_status="eligiendo_horario")   # Usuario quiere agendar
+            save_contact_tool(lead_status="esperando_confirmacion")  # Usuario eligió horario
+            save_contact_tool(lead_status="recopilando_datos")   # Solicitando datos del usuario
+            save_contact_tool(lead_status="reservado")           # Cita confirmada
             
              3. CAMPOS DINÁMICOS (SOLO CONFIGURADOS):
             save_contact_tool(additional_fields='{"direccion": "Santiago", "edad": 30, "ha_invertido": true}')
@@ -415,33 +409,6 @@ class SaveContactTool(BaseTool):
                 field_config='{"edad": {"keywords": ["tengo", "años"], "type": "number"}, "ciudad": {"keywords": ["vivo en"], "type": "string"}, "ha_invertido": {"keywords": ["he invertido", "inversión"], "type": "boolean"}}'
             )
             
-            =====================================================================
-             CONFIGURACIONES PREDEFINIDAS POR TIPO DE BOT:
-            =====================================================================
-            
-             BOT DE INVERSIONES:
-            {
-                "direccion": {"keywords": ["vivo en", "mi dirección"], "type": "string"},
-                "ciudad": {"keywords": ["ciudad", "vivo en"], "type": "string"},  
-                "edad": {"keywords": ["tengo", "años"], "type": "number"},
-                "ha_invertido": {"keywords": ["he invertido", "inversión", "broker"], "type": "boolean"},
-                "experiencia_inversion": {"keywords": ["experiencia", "años invirtiendo"], "type": "string"}
-            }
-            
-             BOT DE E-COMMERCE:
-            {
-                "producto_interes": {"keywords": ["me interesa", "quiero", "busco"], "type": "string"},
-                "presupuesto": {"keywords": ["presupuesto", "puedo pagar"], "type": "number"},
-                "fecha_compra": {"keywords": ["cuando", "fecha", "para cuándo"], "type": "string"},
-                "metodo_pago": {"keywords": ["pago", "transferencia", "tarjeta"], "type": "string"}
-            }
-            
-             BOT DE SERVICIOS:
-            {
-                "tipo_servicio": {"keywords": ["necesito", "servicio", "requiero"], "type": "string"},
-                "urgencia": {"keywords": ["urgente", "pronto", "rápido"], "type": "string"},
-                "disponibilidad": {"keywords": ["disponible", "horario", "prefiero"], "type": "string"}
-            }
             
             =====================================================================
              EJEMPLOS DE USO PRÁCTICOS:
@@ -482,7 +449,7 @@ class SaveContactTool(BaseTool):
             - name: Nombre completo del usuario
             - email: Dirección de correo electrónico válida  
             - phone_number: Número de teléfono en cualquier formato
-            - lead_status: Estado del lead ('new', 'engaged', 'qualified', 'converted')
+            - lead_status: Estado del lead según FLUJO MEJORADO ('nuevo_chat', 'eligiendo_servicio', 'eligiendo_horario', 'esperando_confirmacion', 'recopilando_datos', 'reservado')
             - additional_fields: JSON string con campos adicionales {"campo": "valor"}
             - conversation_text: Texto de conversación para extraer información
             - field_config: JSON string con configuración de campos a extraer
@@ -524,126 +491,8 @@ class SaveContactTool(BaseTool):
         # En el futuro, esto se puede conectar al contexto real de la conversación
         return None
     
-    def _validate_status_transition(self, current_status: str, new_status: str) -> bool:
-        """
-        Valida que la transición de estado sea lógica.
-        Retorna True si la transición es válida, False si no lo es.
-        """
-        # Definir transiciones válidas
-        valid_transitions = {
-            'nuevo_chat': ['eligiendo_servicio', 'recopilando_datos'],
-            'eligiendo_servicio': ['eligiendo_horario', 'recopilando_datos'],
-            'eligiendo_horario': ['recopilando_datos', 'esperando_confirmacion'],
-            'recopilando_datos': ['esperando_confirmacion', 'eligiendo_servicio', 'eligiendo_horario'],
-            'esperando_confirmacion': ['reservado', 'eligiendo_horario'],
-            'reservado': []  # Estado final, no debería cambiar
-        }
-        
-        # Si no hay estado actual, cualquier estado es válido
-        if not current_status:
-            return True
-            
-        # Si el estado actual es el mismo que el nuevo, es válido
-        if current_status == new_status:
-            return True
-            
-        # Verificar si la transición está en la lista de transiciones válidas
-        return new_status in valid_transitions.get(current_status, [])
     
-    def _get_next_expected_status(self, current_status: str) -> str:
-        """
-        Retorna el próximo estado esperado en el flujo.
-        """
-        next_status_map = {
-            'nuevo_chat': 'eligiendo_servicio',
-            'eligiendo_servicio': 'eligiendo_horario',
-            'eligiendo_horario': 'recopilando_datos',
-            'recopilando_datos': 'esperando_confirmacion',
-            'esperando_confirmacion': 'reservado',
-            'reservado': 'reservado'
-        }
-        return next_status_map.get(current_status, 'nuevo_chat')
     
-    def _detect_lead_status(self, message: str) -> Optional[str]:
-        """
-        Detecta automáticamente el estado del lead basado en el contenido del mensaje.
-        
-        Estados para sistema de agendamiento:
-            'nuevo_chat': Usuario inició contacto
-            'eligiendo_servicio': Usuario está eligiendo qué servicio necesita
-            'eligiendo_horario': Usuario está seleccionando fecha y hora
-            'recopilando_datos': Usuario está dando sus datos personales
-            'esperando_confirmacion': Cita armada, esperando confirmación
-            'reservado': Cita confirmada y agendada
-        """
-        if not message:
-            return None
-            
-        message_lower = message.lower()
-        
-        # Patrones para 'reservado' (confirmación final)
-        reservado_patterns = [
-            'confirmo', 'sí acepto', 'perfecto', 'de acuerdo',
-            'está bien', 'confirmado', 'lo confirmo', 'si, confirmo',
-            'sí, por favor', 'adelante', 'procedamos'
-        ]
-        
-        # Patrones para 'recopilando_datos' (dando información personal)
-        datos_patterns = [
-            'mi nombre es', 'me llamo', 'mi correo', 'mi email',
-            'mi teléfono', 'mi número', '@', 'gmail', 'hotmail'
-        ]
-        
-        # Patrones para 'eligiendo_horario' (combina fecha y hora)
-        horario_patterns = [
-            # Horarios
-            'mañana', 'tarde', 'noche', ':00', ':30', ':15', ':45',
-            'a las', 'prefiero', 'disponible', 'horario',
-            'temprano', 'después de', 'antes de',
-            # Fechas
-            'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo',
-            'pasado mañana', 'próxima semana', 'este mes',
-            'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
-            'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
-            'hoy', 'fecha', 'día', 'cuando', 'cuándo'
-        ]
-        
-        # Patrones para 'eligiendo_servicio'
-        servicio_patterns = [
-            'servicio', 'necesito', 'quiero', 'quisiera', 'me interesa',
-            'consulta', 'cita', 'turno', 'reserva', 'agendar',
-            'qué ofrecen', 'opciones', 'tipos de'
-        ]
-        
-        # Verificar patrones en orden de prioridad (de más específico a menos)
-        import re
-        
-        # Verificar si tiene formato de email
-        if re.search(r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}', message):
-            return 'recopilando_datos'
-        
-        # Verificar si tiene número de teléfono
-        if re.search(r'\b\d{8,12}\b', message):
-            return 'recopilando_datos'
-        
-        for pattern in reservado_patterns:
-            if pattern in message_lower:
-                return 'reservado'
-                
-        for pattern in datos_patterns:
-            if pattern in message_lower:
-                return 'recopilando_datos'
-                
-        for pattern in horario_patterns:
-            if pattern in message_lower:
-                return 'eligiendo_horario'
-                
-        for pattern in servicio_patterns:
-            if pattern in message_lower:
-                return 'eligiendo_servicio'
-                
-        # Si no se detecta ningún patrón específico, es un nuevo chat
-        return 'nuevo_chat'
     
     def _extract_basic_contact_info(self, message: str) -> Dict[str, Optional[str]]:
         """
@@ -852,7 +701,7 @@ class SaveContactTool(BaseTool):
                                 name=basic_extraction.get('name'),
                                 email=basic_extraction.get('email'), 
                                 phone_number=basic_extraction.get('phone_number'),
-                                lead_status=self._detect_lead_status(recent_message) if not lead_status else lead_status
+                                lead_status=lead_status  # Solo usar lead_status si se proporciona explícitamente
                             ))
                             if extraction_result:
                                 return ""
@@ -865,8 +714,7 @@ class SaveContactTool(BaseTool):
                 if contact:
                     return self._format_contact_info(contact)
                 else:
-                    examples = get_field_config_examples()
-                    return f""" NO HAY INFORMACIÓN DE CONTACTO GUARDADA AÚN
+                    return """ NO HAY INFORMACIÓN DE CONTACTO GUARDADA AÚN
                     
  FORMAS DE GUARDAR INFORMACIÓN:
 
@@ -876,18 +724,13 @@ class SaveContactTool(BaseTool):
 • save_contact_tool(phone_number="123456789")
 
  2. CAMPOS DINÁMICOS:
-• save_contact_tool(additional_fields='{{"direccion": "Santiago", "edad": 30}}')
+• save_contact_tool(additional_fields='{"direccion": "Santiago", "edad": 30}')
 
  3. EXTRACCIÓN AUTOMÁTICA:
 • save_contact_tool(
     conversation_text="texto de la conversación",
-    field_config='{{"edad": {{"keywords": ["tengo", "años"], "type": "number"}}}}'
+    field_config='{"edad": {"keywords": ["tengo", "años"], "type": "number"}}'
 )
-
- CONFIGURACIONES PREDEFINIDAS:
-• Bot de Inversiones: {list(examples['bot_inversiones'].keys())}
-• Bot de E-commerce: {list(examples['bot_ecommerce'].keys())}
-• Bot de Servicios: {list(examples['bot_servicios'].keys())}
 
 IMPORTANTE: Si el usuario ha mencionado información de contacto en la conversación, 
 extrae esa información y úsala para guardar los datos."""
@@ -898,18 +741,6 @@ extrae esa información y úsala para guardar los datos."""
             except Exception as e:
                 existing_contact = None
             
-            # Validar transición de estado si se proporciona lead_status
-            if lead_status and existing_contact:
-                current_status = existing_contact.get('lead_status', 'nuevo_chat')
-                if not self._validate_status_transition(current_status, lead_status):
-                    next_expected = self._get_next_expected_status(current_status)
-                    return f"""⚠️ Transición de estado no válida.
-                    
-Estado actual: {current_status}
-Estado solicitado: {lead_status}
-Próximo estado esperado: {next_expected}
-
-Para forzar el cambio, primero actualiza al estado intermedio correspondiente."""
             
             contact = asyncio.run(save_contact_async(
                 self.project_id, 
@@ -986,7 +817,7 @@ Para forzar el cambio, primero actualiza al estado intermedio correspondiente.""
                             name=basic_extraction.get('name'),
                             email=basic_extraction.get('email'), 
                             phone_number=basic_extraction.get('phone_number'),
-                            lead_status=self._detect_lead_status(conversation_text) if not lead_status else lead_status
+                            lead_status=lead_status  # Solo usar lead_status si se proporciona explícitamente
                         )
                         if extraction_result:
                                 return ""

@@ -6,7 +6,6 @@ import pytz
 import concurrent.futures
 from app.controler.chat.core.state import CustomState
 from app.controler.chat.core.tools import agent_tools
-from app.controler.chat.core.tools_cache import tools_cache
 from app.controler.chat.core.utils import decorate_message, filter_and_prepare_messages_for_agent_node, filter_and_prepare_messages_for_summary_node
 from app.controler.chat.store.persistence import Persist
 from app.controler.chat.core.llm_adapter import LLMAdapter
@@ -36,14 +35,11 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
         summary = Persist().get_summary(state)
         messages = filter_and_prepare_messages_for_agent_node(state)
         
-        # Usar cache global de herramientas
-        cache_key = f"{project_id}_{project.enabled_tools}"
-        tools = await tools_cache.get_tools(
-            cache_key,
-            agent_tools,
+        # Obtener herramientas directamente sin caché
+        tools = await agent_tools(
             project_id, user_id, name, number_phone_agent, unique_id, project
         )
-        logging.info(f"{unique_id} Usando {len(tools)} herramientas (cache_key: {cache_key})")
+        logging.info(f"{unique_id} Usando {len(tools)} herramientas")
         
         model_with_tools = model.bind_tools(tools)
         project_name = project.name
@@ -307,16 +303,13 @@ def resume_conversation(state: CustomState):
     return {"messages": delete_messages}
 
 async def tools_node(project_id, user_id, name, number_phone_agent, unique_id, project):
-    # Usar cache global de herramientas
+    # Obtener herramientas directamente sin caché
     logging.info(f"{unique_id} Initiating tools node for project {project_id}")
-    cache_key = f"{project_id}_{project.enabled_tools}"
-    tools = await tools_cache.get_tools(
-        cache_key,
-        agent_tools,
+    tools = await agent_tools(
         project_id, user_id, name, number_phone_agent, unique_id, project
     )
     tool_names = [getattr(tool, 'name', getattr(tool, '__name__', str(tool))) for tool in tools]
     logging.info(f"{unique_id} Tools node configured with {len(tools)} tools: {tool_names}")
     
-    # Crear el ToolNode con las herramientas cacheadas
+    # Crear el ToolNode con las herramientas
     return ToolNode(tools)
