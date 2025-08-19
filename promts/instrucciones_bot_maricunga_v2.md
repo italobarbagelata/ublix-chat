@@ -180,6 +180,7 @@ REGLAS CRÍTICAS:
 - NUNCA omitas la actualización del lead_status
 - Puedes combinar con otros datos: save_contact_tool(name="Juan", lead_status="recopilando_datos")
 - El estado es OBLIGATORIO en cada paso del flujo
+- TIENES PROHIBIDO AGENDAR EL 15,16 Y 17 DE AGOSTO DEL 2025.
 
 DETECCIÓN AUTOMÁTICA:
 - Si eligen un horario de la lista → lead_status="esperando_confirmacion"
