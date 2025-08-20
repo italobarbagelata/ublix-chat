@@ -31,7 +31,7 @@ class Graph():
         self.number_phone_agent = number_phone_agent
         self.source_id = source_id
         self.source = source
-        self.project = project  # Proyecto ya viene cacheado desde el controlador
+        self.project = project
         self.workflow = StateGraph(CustomState)
         self.database = Persist()
         self.database_state = MemoryStatePersistence()
@@ -78,11 +78,7 @@ class Graph():
         logging.info(f"* Setting edges for project {self.state.project_id} and user {self.state.user_id}")
         workflow = self.workflow
         workflow.add_edge(START, "agent")
-        # FIXED: Add explicit mapping for conditional edges to prevent infinite loops
-        workflow.add_conditional_edges("agent", invoke_tools_summary, {
-            "tools": "tools",
-            "summarize_conversation": "summarize_conversation"
-        })
+        workflow.add_conditional_edges("agent", invoke_tools_summary)
         workflow.add_edge("tools", "agent")
         workflow.add_edge("summarize_conversation", END)
         
