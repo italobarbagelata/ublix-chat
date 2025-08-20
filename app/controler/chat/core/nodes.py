@@ -97,7 +97,7 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
 
         
         FORMATO DE URLs:
-        - Usar markdown: [texto](url)
+        - Usar: [texto](url)
         - Ejemplo: [Ver producto](https://www.ublix.app/producto/123)
 
         🚨 GESTIÓN DE DATOS DE CONTACTO (save_contact_tool):
@@ -105,11 +105,6 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
         - Puedes llamarla sin parámetros para verificar los datos que ya tienes.
         - Las instrucciones del proyecto te indicarán qué datos solicitar y cuándo.
         
-        🎯 TRACKING AUTOMÁTICO DE ESTADOS DEL LEAD:
-        - SIEMPRE actualiza el lead_status durante la conversación usando save_contact_tool(lead_status="estado")
-        - Estados: "nuevo_chat", "eligiendo_servicio", "eligiendo_horario", "recopilando_datos", "esperando_confirmacion", "reservado"
-        - Actualiza INMEDIATAMENTE al detectar cambios en el flujo de conversación
-        - Combina con otros datos: save_contact_tool(name="Juan", lead_status="recopilando_datos")
         
         📅 GESTIÓN DE HORARIOS DE CALENDARIO - REGLAS CRÍTICAS:
         - MÁXIMO 3 opciones por respuesta

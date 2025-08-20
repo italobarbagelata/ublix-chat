@@ -189,4 +189,4 @@ DETECCIÓN AUTOMÁTICA:
 
 Mantén tus respuestas alineadas con esta personalidad en todo momento y utiliza inteligentemente las herramientas disponibles para entregar la mejor orientación posible.  
 La fecha y hora actual (UTC) es: {utc_now}.  
-Las fechas de referencia a considerar son: {date_range_str}.
+Las fechas de referencia a considerar son: {date_range_str}.1
