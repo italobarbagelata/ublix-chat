@@ -16,6 +16,7 @@ from collections import OrderedDict
 from app.controler.chat.core.generate_summary import generate_summary, SummaryPayload
 from uuid import uuid4
 import time
+from app.core.logger_config import get_conversation_logger
 
 
 class Graph():
@@ -75,7 +76,7 @@ class Graph():
 
         
     def __set_edges(self):
-        logging.info(f"* Setting edges for project {self.state.project_id} and user {self.state.user_id}")
+        # Configuración interna del grafo - no necesita log
         workflow = self.workflow
         workflow.add_edge(START, "agent")
         workflow.add_conditional_edges("agent", invoke_tools_summary)
@@ -83,41 +84,40 @@ class Graph():
         workflow.add_edge("summarize_conversation", END)
         
     async def __set_memory(self):
-        self.logger.info("init memory")
         memory = MemorySaver()
         state = await self.database_state.fetch_state(
             self.state.project_id, self.state.user_id)
         if state:
             if isinstance(state.get("state"), dict):
                  memory.storage[self.state.user_id] = state["state"]
-                 self.logger.info(f"Loaded state from DB for user {self.state.user_id}, memory keys: {list(state['state'].keys())}")
+                 self.logger.debug(f"Memoria cargada para usuario {self.state.user_id}")
             else:
-                 self.logger.warning(f"Formato de estado inválido recuperado para {self.state.user_id}. Tipo: {type(state.get('state'))}")
+                 self.logger.warning(f"Estado con formato inválido para usuario {self.state.user_id}")
         else:
-            self.logger.info(f"No previous state found for user {self.state.user_id}. Starting with empty memory.")
+            self.logger.debug(f"Primera conversación del usuario {self.state.user_id}")
         return memory
     
         
-    async def execute(self, message, debug=False):
+    async def execute(self, message):
         unique_id = self.unique_id
         start_time = time.time()
-        logging.info(f"{unique_id} Graph execution started for project {self.state.project_id}, user {self.state.user_id}")
+        conversation_id = str(uuid4())
+        
+        # Logger de conversación
+        conv_logger = get_conversation_logger(conversation_id, self.state.user_id)
+        conv_logger.log_procesamiento_ia()
+        
         loop = asyncio.get_event_loop()
-
-        # Usar el proyecto ya cargado desde el controlador
 
         # Preparar datos iniciales
         user_id = self.state.user_id
         initial_time = self.state.datetime
-        conversation_id = str(uuid4())
 
         human_message = HumanMessage(content=message)
         decorate_message(human_message, initial_time, conversation_id)
 
         # Proyecto ya disponible
         project = self.project
-
-        logging.info(f"{unique_id} Invoking LangGraph with initial message: '{message[:100]}...'" if len(message) > 100 else f"{unique_id} Invoking LangGraph with message: '{message}'")
 
         # Ejecutar el graph (esto no se puede paralelizar fácilmente)
         final_state = await self.graph.ainvoke(
@@ -136,8 +136,6 @@ class Graph():
             {"configurable": {"thread_id": user_id}}
         )
 
-        logging.info(f"{unique_id} Graph execution completed successfully")
-
         # Procesar el estado de memoria
         final_memory_state = self.graph.checkpointer.storage.get(user_id)
         self.state.state = final_memory_state
@@ -150,14 +148,12 @@ class Graph():
             nested_dict = OrderedDict(nested_dict)
 
         # Sistema de memoria simplificado
-        # Mantener solo la lógica básica de estado
         self.state.state = state_dict
 
-        logging.info(unique_id + " saving state")
-        # 1. Tareas CRÍTICAS: save_state - usando MemoryStatePersistence asíncrono
+        # Guardar estado en segundo plano
         asyncio.create_task(self.database_state.save_state(self.state))
         
-        logging.info(unique_id + " sending to summary")
+        # Generar resumen en segundo plano
         loop.run_in_executor(
             self.executor,
             generate_summary,
@@ -173,10 +169,10 @@ class Graph():
 
         # Calcular tiempo de procesamiento
         processing_time = time.time() - start_time
-
-        logging.info(f"{unique_id} Graph execution completed successfully")
-        logging.info(unique_id + " Response: " + ai_response.content)
-        logging.info(unique_id + f" Processing time: {processing_time:.2f}s")
+        
+        # Log de finalización con el logger de conversación
+        conv_logger.log_respuesta_generada(ai_response.content, processing_time)
+        conv_logger.log_estado_guardado()
 
         response = {
             'response': ai_response.content,
@@ -186,149 +182,4 @@ class Graph():
         }
 
         return response
-
-    async def execute_stream(self, message, background_tasks):
-        """
-        Ejecuta el grafo en modo streaming, devolviendo chunks de respuesta en tiempo real.
-        
-        Args:
-            message (str): Mensaje del usuario
-            background_tasks (BackgroundTasks): Tareas en segundo plano de FastAPI
-            
-        Yields:
-            dict: Chunks de respuesta con el formato:
-                {
-                    "type": "content_chunk" | "error" | "completion",
-                    "content": str,  # Solo para content_chunk
-                    "error": str,    # Solo para error
-                    "is_complete": bool,
-                    "message_id": str | None
-                }
-        """
-        unique_id = self.unique_id
-        logging.info(f"{unique_id} Iniciando ejecución en modo streaming")
-        
-        try:
-            
-            # Preparar datos iniciales
-            user_id = self.state.user_id
-            initial_time = self.state.datetime
-            conversation_id = str(uuid4())
-            
-            # Crear mensaje humano
-            human_message = HumanMessage(content=message)
-            decorate_message(human_message, initial_time, conversation_id)
-            
-            # Estado inicial para el grafo
-            initial_state = {
-                "messages": [human_message],
-                "user_id": user_id,
-                "project": self.project,
-                "exec_init": initial_time,
-                "conversation_id": conversation_id,
-                "unique_id": unique_id,
-                "username": self.name,
-                "source_id": self.source_id,
-                "source": self.source,
-                "summary": ""
-            }
-            
-            # Configuración para el grafo
-            config = {"configurable": {"thread_id": user_id}}
-            
-            # Usar el servicio de streaming
-            from app.controler.chat.services.streaming_service import StreamingService
-            streaming_service = StreamingService()
-            
-            # Stream de respuesta con memoria
-            async for chunk in streaming_service.stream_graph_response_with_memory(
-                self.graph,
-                initial_state,
-                config
-            ):
-                yield chunk
-                
-            # Guardar estado final
-            final_memory_state = self.graph.checkpointer.storage.get(user_id)
-            self.state.state = final_memory_state
-            
-            # Procesar y limpiar el estado
-            state_dict = self.state.state
-            nested_dict = state_dict.get('', {})
-            
-            if not isinstance(nested_dict, OrderedDict):
-                nested_dict = OrderedDict(nested_dict)
-                
-            # Sistema de memoria simplificado para streaming
-            self.state.state = state_dict
-            
-            # Guardar estado y generar resumen en segundo plano
-            background_tasks.add_task(self.database_state.save_state, self.state)
-            background_tasks.add_task(
-                generate_summary,
-                SummaryPayload(
-                    project_id=self.state.project_id,
-                    phone_number=user_id,
-                    message=message
-                )
-            )
-            
-        except Exception as e:
-            logging.error(f"Error in streaming execution: {str(e)}", exc_info=True)
-            
-            # Clasificar tipo de error para mejor manejo
-            error_type = type(e).__name__
-            user_friendly_message = self._get_user_friendly_error_message(e)
-            
-            yield {
-                "type": "error",
-                "error": user_friendly_message,
-                "error_type": error_type,
-                "is_complete": True,
-                "technical_details": str(e) if logging.getLogger().isEnabledFor(logging.DEBUG) else None
-            }
-    
-    def _get_user_friendly_error_message(self, error: Exception) -> str:
-        """
-        Convierte errores técnicos en mensajes amigables para el usuario.
-        
-        Args:
-            error: Excepción original
-            
-        Returns:
-            Mensaje amigable para el usuario
-        """
-        error_type = type(error).__name__
-        error_message = str(error).lower()
-        
-        # Mapeo de errores comunes a mensajes amigables
-        if "timeout" in error_message or "timed out" in error_message:
-            return "⏱️ La operación está tomando más tiempo del esperado. Por favor intenta nuevamente."
-        
-        elif "connection" in error_message or "network" in error_message:
-            return "🌐 Hay un problema de conexión. Verifica tu conexión a internet e intenta nuevamente."
-        
-        elif "permission" in error_message or "unauthorized" in error_message:
-            return "🔒 No tienes permisos para realizar esta operación. Contacta al administrador."
-        
-        elif "not found" in error_message or "404" in error_message:
-            return "🔍 No se pudo encontrar el recurso solicitado. Verifica la información e intenta nuevamente."
-        
-        elif "rate limit" in error_message or "too many requests" in error_message:
-            return "⚡ Se han realizado demasiadas solicitudes. Por favor espera un momento e intenta nuevamente."
-        
-        elif "validation" in error_message or "invalid" in error_message:
-            return "📝 Los datos proporcionados no son válidos. Verifica la información e intenta nuevamente."
-        
-        elif error_type in ["KeyError", "AttributeError", "TypeError"]:
-            return "⚙️ Ocurrió un error interno. El equipo técnico ha sido notificado."
-        
-        elif error_type == "ValueError":
-            return "Los valores proporcionados no son correctos. Verifica la información e intenta nuevamente."
-        
-        else:
-            return "Ocurrió un error inesperado. Por favor intenta nuevamente o contacta soporte si el problema persiste."
-    
-        
-        
         

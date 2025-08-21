@@ -22,8 +22,7 @@ async def agent_tools(project_id: str, user_id: str, name: str, number_phone_age
     Carga todas las herramientas habilitadas sin usar caché.
     """
     
-    logging.info(f"Inicializando tools para project_id: {project_id}, user_id: {user_id}")
-    logging.info(f"Herramientas habilitadas: {project.enabled_tools}")
+    logging.debug(f"Cargando herramientas para usuario: {user_id}")
     
     # Lista para almacenar todas las herramientas
     tools = []
@@ -40,51 +39,51 @@ async def agent_tools(project_id: str, user_id: str, name: str, number_phone_age
         # API tools (carga asíncrona si está habilitada)
         if "api" in enabled_tools:
             try:
-                logging.info(f"{unique_id} Cargando API tools...")
+                logging.debug(f"Cargando herramientas API personalizadas")
                 loop = asyncio.get_event_loop()
                 executor = ThreadPoolExecutor(max_workers=1)
                 api_tools = await loop.run_in_executor(executor, create_api_tools, project_id, unique_id)
                 if api_tools:
                     tools.extend(tool(api_tool) for api_tool in api_tools)
-                    logging.info(f"{unique_id} API tools agregadas: {len(api_tools)}")
+                    logging.debug(f"Herramientas API cargadas: {len(api_tools)}")
             except Exception as e:
                 logging.error(f"Error cargando API tools: {str(e)}")
         
         # Herramienta de búsqueda unificada
         if "unified_search" in enabled_tools:
             tools.append(unified_search_tool)
-            logging.info("Herramienta habilitada: unified_search")
+            logging.debug("Búsqueda unificada habilitada")
         
         # Herramienta de agenda
         if "agenda_tool" in enabled_tools:
             tools.append(AgendaTool(project_id, project, user_id))
-            logging.info("Herramienta habilitada: agenda_tool")
+            logging.debug("Agenda habilitada")
         
         # Herramienta de email (optimizada para no atrasar respuestas)
         if "email" in enabled_tools:
             try:
                 email_tool = EmailTool()  # Versión optimizada con background
                 tools.append(email_tool)
-                logging.info("Herramienta habilitada: email (modo rápido)")
+                logging.debug("Email habilitado")
             except Exception as e:
                 logging.error(f"Error cargando EmailTool: {str(e)}")
         
         # Herramientas de calendario/vacaciones
         if "holidays" in enabled_tools:
             tools.extend([check_chile_holiday_tool, next_chile_holidays_tool])
-            logging.info("Herramientas de vacaciones chilenas habilitadas")
+            logging.debug("Herramientas de feriados habilitadas")
         
         # Herramienta de información de semana
         if "week_info" in enabled_tools:
             tools.append(week_info_tool)
-            logging.info("Herramienta week_info habilitada")
+            logging.debug("Información de semana habilitada")
         
         # Herramienta de procesamiento de imágenes
         if "image_processor" in enabled_tools:
             try:
                 image_tool = ImageProcessorTool()
                 tools.append(image_tool)
-                logging.info("Herramienta image_processor habilitada")
+                logging.debug("Procesador de imágenes habilitado")
             except Exception as e:
                 logging.error(f"Error cargando ImageProcessorTool: {str(e)}")
         
@@ -97,7 +96,7 @@ async def agent_tools(project_id: str, user_id: str, name: str, number_phone_age
         SaveContactTool(project_id, user_id),
     ]
     tools.extend(essential_tools)
-    logging.info(f"Herramientas esenciales agregadas: {len(essential_tools)}")
+    # Herramientas esenciales siempre disponibles
     
     # Log final con todas las herramientas cargadas
     tool_names = []
@@ -108,7 +107,6 @@ async def agent_tools(project_id: str, user_id: str, name: str, number_phone_age
         except:
             tool_names.append('unknown_tool')
     
-    logging.info(f"✅ Tools inicializadas: {tool_names}")
-    logging.info(f"✅ Total de tools creadas: {len(tools)}")
+    logging.info(f"Herramientas activas: {', '.join(tool_names) if tool_names else 'Solo herramientas básicas'}")
     
     return tools

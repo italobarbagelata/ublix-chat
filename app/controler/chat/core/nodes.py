@@ -11,12 +11,12 @@ from app.controler.chat.store.persistence import Persist
 from app.controler.chat.core.llm_adapter import LLMAdapter
 from dotenv import load_dotenv
 from app.resources.constants import DEFAULT_PROMPT, MODEL_CHATBOT
-import datetime 
+import datetime
+from app.core.logger_config import get_conversation_logger 
 
 load_dotenv()
 
-logging.basicConfig(level=logging.INFO,
-                    format='%(asctime)s - %(levelname)s - %(message)s')
+# La configuración de logging se maneja en logger_config.py
 
 # Zona horaria para Chile (Santiago)
 TIMEZONE = pytz.timezone('America/Santiago')
@@ -39,7 +39,10 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
         tools = await agent_tools(
             project_id, user_id, name, number_phone_agent, unique_id, project
         )
-        logging.info(f"{unique_id} Usando {len(tools)} herramientas")
+        # Log de herramientas disponibles para la conversación
+        conv_logger = get_conversation_logger(state.get('conversation_id', unique_id), user_id)
+        tool_names = [getattr(t, 'name', 'herramienta') for t in tools]
+        conv_logger.log_herramientas_cargadas(tool_names)
         
         model_with_tools = model.bind_tools(tools)
         project_name = project.name
@@ -56,8 +59,7 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
             
             IMPORTANTE: Usa esta información para NO repetir preguntas que ya fueron respondidas.
             """
-            logging.info(f"{unique_id} Using conversation summary: {len(summary)} characters")
-            logging.debug(f"{unique_id} Summary content: {summary[:100]}..." if len(summary) > 100 else f"{unique_id} Summary content: {summary}")
+            logging.debug(f"Resumen de conversación anterior cargado: {len(summary)} caracteres")
         
         prompt_general_skeleton = prompt_general_skeleton.replace("{name}", project_name)
         prompt_general_skeleton = prompt_general_skeleton.replace("{personality}", personality_prompt)
@@ -207,19 +209,16 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
         #log prompt
         #logging.info(f"{unique_id} Prompt:\n{prompt_general_skeleton}")
 
-        tool_names = [getattr(tool, 'name', getattr(tool, '__name__', str(tool))) for tool in tools]
-        logging.info(f"{unique_id} Agent executing with {len(tools)} tools available: {tool_names}")
-        logging.debug(f"{unique_id} Invoking LLM with {len(messages)} messages")
+        # Invocar modelo
         response = model_with_tools.invoke(messages)
         decorate_message(response, state["exec_init"], state["conversation_id"])
         
-        # Log important information about the response
+        # Log de herramientas ejecutadas si las hay
         has_tool_calls = hasattr(response, 'tool_calls') and response.tool_calls
         if has_tool_calls:
-            tool_call_names = [tc.get('name', 'unknown') if isinstance(tc, dict) else getattr(tc, 'name', 'unknown') for tc in response.tool_calls]
-            logging.info(f"{unique_id} Agent generated response with {len(response.tool_calls)} tool calls: {tool_call_names}")
-        else:
-            logging.info(f"{unique_id} Agent generated text response only (no tool calls)")
+            for tc in response.tool_calls:
+                tool_name = tc.get('name', 'unknown') if isinstance(tc, dict) else getattr(tc, 'name', 'unknown')
+                conv_logger.log_herramienta_ejecutada(tool_name)
 
         return {"messages": [response]}
 
@@ -282,29 +281,28 @@ def get_date_range() -> list:
 
 def resume_conversation(state: CustomState):
     unique_id = state.get("unique_id", "unknown")
-    logging.info(f"{unique_id} Summarizing conversation and cleaning up messages...")
-
+    
+    # Persistir conversación en segundo plano
     with concurrent.futures.ThreadPoolExecutor() as executor:
         executor.submit(Persist().persist_conversation, state)
 
+    # Limpiar mensajes antiguos si hay más de 20
     messages = state.get("messages", [])
     if len(messages) > 20:
         delete_messages = [RemoveMessage(id=m.id) for m in messages[:-20]]
-        logging.info(f"{unique_id} Removing {len(delete_messages)} old messages, keeping last 20")
+        logging.debug(f"Limpieza de memoria: eliminando {len(delete_messages)} mensajes antiguos")
     else:
         delete_messages = []
-        logging.info(f"{unique_id} No messages to remove, total: {len(messages)}")
 
     return {"messages": delete_messages}
 
 async def tools_node(project_id, user_id, name, number_phone_agent, unique_id, project):
     # Obtener herramientas directamente sin caché
-    logging.info(f"{unique_id} Initiating tools node for project {project_id}")
     tools = await agent_tools(
         project_id, user_id, name, number_phone_agent, unique_id, project
     )
-    tool_names = [getattr(tool, 'name', getattr(tool, '__name__', str(tool))) for tool in tools]
-    logging.info(f"{unique_id} Tools node configured with {len(tools)} tools: {tool_names}")
+    # Log de configuración solo en modo debug
+    logging.debug(f"Nodo de herramientas configurado con {len(tools)} herramientas")
     
     # Crear el ToolNode con las herramientas
     return ToolNode(tools)

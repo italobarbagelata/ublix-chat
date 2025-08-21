@@ -78,7 +78,7 @@ class MemoryStatePersistence:
                 binary_data = base64.b64decode(row["state"])
                 unpacked_state = msgpack.unpackb(binary_data, strict_map_key=False)
                 
-                self.logger.info(f"Estado deserializado correctamente. Tipo: {type(unpacked_state)}, keys: {list(unpacked_state.keys()) if isinstance(unpacked_state, dict) else 'N/A'}")
+                self.logger.debug(f"Estado recuperado para usuario {user_id}")
 
                 return {
                     "project_id": row["project_id"],
@@ -86,7 +86,7 @@ class MemoryStatePersistence:
                     "state": unpacked_state
                 }
             else:
-                self.logger.info(f"No se encontró estado para project_id: {project_id}, user_id: {user_id}")
+                self.logger.debug(f"Sin estado previo para usuario {user_id}")
 
             return None
             

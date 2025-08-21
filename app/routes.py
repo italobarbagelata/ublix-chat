@@ -1,10 +1,10 @@
 from fastapi import APIRouter, Request, FastAPI, BackgroundTasks, UploadFile, File
-from app.chatbot import chatbot, chat_stream
+from app.chatbot import chatbot
 from app.controler.webhook.instagram_webhook import process_webhook_instagram, verify_webhook_instagram
 from app.controler.webhook.facebook_webhook import verify_webhook_facebook, process_webhook_facebook
 from app.controler.webhook.whatsapp_webhook import verify_webhook_whatsapp, process_webhook_whatsapp
 from app.models import ChatRequest
-from app.controler.chat import chat, chat_stream
+from app.controler.chat import chat
 from fastapi.responses import JSONResponse
 from fastapi import HTTPException
 
@@ -29,10 +29,6 @@ async def chat_with_agent(
     """
     return await chat(request, background_tasks, image)
 
-@chat_router.post("/stream", operation_id="send_chat_message_stream")
-async def chat_with_agent_stream(request: Request, background_tasks: BackgroundTasks):
-    """🆕 Chat with the server using streaming for real-time responses."""
-    return await chat_stream(request, background_tasks)
 
 
 ##########################

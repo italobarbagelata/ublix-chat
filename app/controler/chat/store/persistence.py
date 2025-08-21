@@ -30,43 +30,35 @@ class Persist(object):
             else:
                 self.db.insert(table, {**filter_criteria, **data})
         except Exception as e:
-            logging.error(f"Error in upsert operation: {e}")
+            logging.error(f"Error en operación de base de datos: {e}")
             raise
 
     def delete(self, table, filter_criteria):
         """Delete records with proper error handling."""
         try:
-            logging.info(f"Deleting records from table: {table}")
-            logging.info(f"Filter criteria: {filter_criteria}")
             result = self.db.delete(table, filters=filter_criteria)
-            logging.info(f"Deletion result: {result}")
+            logging.debug(f"Registros eliminados de {table}")
             return result
         except Exception as e:
-            logging.error(f"Error in delete operation: {e}")
+            logging.error(f"Error al eliminar registros: {e}")
             raise
 
     def find_one(self, table, filter_criteria):
         """Find a single record with proper error handling."""
         try:
-            logging.info(f"Finding one record in table: {table}")
-            logging.info(f"Filter criteria: {filter_criteria}")
             results = self.db.select(table, filters=filter_criteria)
-            #logging.info(f"Query results: {results}")
             return results[0] if results else None
         except Exception as e:
-            logging.error(f"Error in find_one operation: {e}")
+            logging.error(f"Error al buscar registro: {e}")
             raise
 
     def find(self, table, filter_criteria):
         """Find multiple records with proper error handling."""
         try:
-            logging.info(f"Finding records in table: {table}")
-            logging.info(f"Filter criteria: {filter_criteria}")
             results = self.db.select(table, filters=filter_criteria)
-            #logging.info(f"Query results: {results}")
             return results if results else []
         except Exception as e:
-            logging.error(f"Error in find operation: {e}")
+            logging.error(f"Error al buscar registros: {e}")
             raise
 
     def save_state(self, state: ChatState):
@@ -81,7 +73,7 @@ class Persist(object):
                         {"project_id": state.project_id, "user_id": state.user_id},
                         state_data)
         except Exception as e:
-            logging.error(f"Error saving state: {e}")
+            logging.error(f"Error al guardar estado de conversación: {e}")
             raise
 
     def fetch_state(self, project_id, user_id):
@@ -93,7 +85,7 @@ class Persist(object):
             })
             return state["state"] if state else None
         except Exception as e:
-            logging.error(f"Error fetching state: {e}")
+            logging.error(f"Error al recuperar estado de conversación: {e}")
             raise
 
     def find_project(self, project_id) -> Project:
@@ -103,17 +95,17 @@ class Persist(object):
             project = self.find_one(PROJECTS_TABLE, {"project_id": project_id})
             
             if not project:
-                logging.error(f"Project not found in database. Project ID: {project_id}")
+                logging.error(f"Proyecto no encontrado: {project_id}")
                 raise ValueError(f"Project with id {project_id} not found in the database and table {PROJECTS_TABLE}. Please verify the project ID.")
             
-            #logging.info(f"Project found: {project}")
+            logging.info(f"Proyecto encontrado: {project_id}")
             return Project.from_dict(project)
         except Exception as e:
-            logging.error(f"Error while fetching project {project_id}: {str(e)}")
+            logging.error(f"Error al buscar proyecto {project_id}: {str(e)}")
             raise
 
     def persist_conversation(self, conversation: CustomState):
-        logging.info(f"Persisting conversation")
+        logging.debug(f"Persistiendo conversación")
         try:
             project_id = conversation["project"].id
             phone_number = conversation["user_id"]
@@ -243,7 +235,7 @@ class Persist(object):
                     for tool_message in tool_messages:
                         database.insert(AI_MESSAGE_TABLE, tool_message)
                         
-            logging.info(f"Persistencia de conversación completada para ID: {conversation_id}")
+            logging.debug(f"Conversación guardada: {conversation_id}")
                         
         except Exception as e:
             logging.error(f"Error in persist_conversation: {e}")

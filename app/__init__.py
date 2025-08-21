@@ -1,6 +1,5 @@
 """ Módulo principal de la aplicación. """
 
-import logging
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,12 +24,8 @@ def create_app():
         expose_headers=["*"]
     )
 
-    # Configurar logging
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        handlers=[logging.StreamHandler()],
-    )
+    # El logging ya está configurado en logger_config.py
+    # No necesitamos configuración adicional aquí
 
     # Incluir las rutas
     app.include_router(chat_router)
