@@ -1,89 +1,213 @@
-from typing import ClassVar
-from langchain.prompts import PromptTemplate
-import datetime
-import pytz
-
-# TODO: pedirle a ivan un prompt default
-DEFAULT_PROMPT = f"Hola, soy un asistente virtual. ¿En qué puedo ayudarte? {{information}}"
-
-# Zona horaria para Chile (Santiago)
-TIMEZONE = pytz.timezone('America/Santiago')
-
-# ===================================
-INIT_TO_USE_TOOL = """Once you got the correct Query, ALWAYS pass this query to the correct TOOL and execute or run the tool. 
-You have access to the following tools:
-    mongodb_query_executor: Execute a MongoDB query against the collection and get back the result..
-                            If the query is not correct, an error message will be returned.
-                            If an error is returned, rewrite the query, check the query, and try again until to get a correct result."""
-
-
-COLLECTION_SCHEMA = """You have access to the following Collection Schema Description. Pay attention to use it as Context. DO NOT ADD ANY OTHER CONTEXT, ONLY USE THE COLLECTION SCHEMA SHARED:"""
-
-
-MONGODB_FUNCTIONS_SUFFIX = """I should look at the collections schema description to see what I can query based on the input question.
-    In addition, I need to use query operators and/or projection operators
 """
-
-
-QUERY_SELECTORS_OPERATORS = """
-    Do not create a query aggregation pipeline, just create a query using query selectors and/or projection operators.
-    To create a query, you need to use some Query Selectors listed below:
-        Comparison:
-            $eq, $gt, $gte, $in, $lt, $lte, $ne, $nin
-        Logical:
-            $and, $not, $nor, $or
-        Element:
-            $exists, $type
-        Evaluation:
-            $expr, $jsonSchema, $mod, $regex, $text, $where
-        Array:
-            $all, $elemMatch, $meta, $slice
-    
-    You need to be smart to combine and ALWAYS CREATE A QUERY using Query Selectors and/or Projection Operators."""
-
-
-FEW_SHOT_QUERY = """
-    You need to follow the next Response Example Formats, which is between ### and is using Query Selectors for better query:
-    This is a query to use into find method of mongoDB Compass in the following format `###query###` or `query`, where query is a JSON format as follows:
-    
-    --- INIT EXAMPLE ---
-    example 1: ###{{ "name":{{ "$eq": "Alice Smith"}}}}###
-    example 2: ###{{ "age": {{ "$gt": 20 }}}}###
-    example 3: ###{{ "$and": [{{ "age": {{ "$gt": 20 }}}}, {{ "age": {{ "$lt": 30 }}}}]}}###
-    example 4: ###{{ "$and": [{{ "name": "Declan Ward" }}, {{ "age": {{ "$gt": 23 }} }}]}}###
-    --- END EXAMPLE ---"""
-
-
-COLLECTION_SCHEMA_DESCRIPTION = """
-    You are an agent designed to interact with a MongoDB Compass Database.
-    So you are an expert building queries and use it into method FIND. (Do not create query aggregation pipelines)
-    Given an input question, then create a syntactically correct MongoDB query object then use it into a tool shared, to execute the query.
-    If you get an error while executing a query, rewrite the query and try again.
-    
-    Pay attention and use this collection schema description: 
+Templates modulares para construcción de prompts
 """
+from typing import List, Dict, Any
 
-
-FIND_METHOD_CONTEXT = """
-    You are an expert in mongoDB CRUD.
-    In this case, only you have access to Read Operation of CRUD, I mean only use FIND method.
-    This is how you can use FIND method:
-        db.collection.find( <query>, <projection>)
-        where parameters mean:
-            <query>: Specifies selection filter using query operators. 
-                    To return all documents in a collection, omit this parameter or pass an empty document ({}).
-            <projection>: Specifies the fields to return in the documents that match the query filter. 
-                          To return all 5 fields in the matching documents, omit this parameter.
-"""
-
-# ===================================
-
-def get_date_range() -> list:
-    """
-    Generate a list of dates from today to 14 days ahead (inclusive)
-    Returns:
-        list: List of dates as strings in YYYY-MM-DD format
-    """
-    today = datetime.datetime.now(TIMEZONE).date()
-    date_range = [(today + datetime.timedelta(days=x)).strftime('%Y-%m-%d') for x in range(15)]
-    return date_range
+class PromptTemplateBuilder:
+    """Construye prompts modulares basados en herramientas habilitadas"""
+    
+    @staticmethod
+    def build_system_prompt(
+        project: Any, 
+        summary: str, 
+        utc_now: str,
+        date_range_str: str,
+        now_chile: str
+    ) -> str:
+        """
+        Construye el prompt del sistema principal
+        
+        Args:
+            project: Objeto del proyecto con configuración
+            summary: Resumen de conversación anterior
+            utc_now: Tiempo UTC actual en ISO format
+            date_range_str: String con rango de fechas
+            now_chile: Tiempo actual en Chile
+            
+        Returns:
+            str: Prompt del sistema completo
+        """
+        from app.resources.constants import DEFAULT_PROMPT
+        
+        # Prompt base del proyecto
+        base_prompt = project.prompt if project and project.prompt else DEFAULT_PROMPT
+        
+        # Agregar resumen si existe
+        if summary and summary.strip():
+            base_prompt += f"""
+            RESUMEN DE CONVERSACIÓN ANTERIOR:
+            
+            {summary}
+            
+            IMPORTANTE: Usa esta información para NO repetir preguntas que ya fueron respondidas.
+            """
+        
+        # Reemplazar placeholders
+        base_prompt = base_prompt.replace("{name}", project.name if project else "Asistente")
+        base_prompt = base_prompt.replace("{personality}", project.personality if project else "")
+        base_prompt = base_prompt.replace("{instructions}", project.instructions if project else "")
+        base_prompt = base_prompt.replace("{utc_now}", utc_now)
+        base_prompt = base_prompt.replace("{date_range_str}", date_range_str)
+        base_prompt = base_prompt.replace("{now_chile}", now_chile)
+        
+        # Agregar secciones específicas por herramienta
+        if project and hasattr(project, 'enabled_tools'):
+            base_prompt += PromptTemplateBuilder._get_tool_sections(project.enabled_tools)
+        
+        # Agregar reglas centrales
+        base_prompt += PromptTemplateBuilder._get_core_rules()
+        
+        return base_prompt
+    
+    @staticmethod
+    def _get_core_rules() -> str:
+        """Reglas generales del asistente (NO específicas de herramientas)"""
+        return """
+        
+        PRIORIDADES DEL ASISTENTE:
+        1. EVALUAR necesidad de herramientas según la consulta
+        2. RESPUESTAS: Máximo 250 caracteres, directo y conciso
+        3. HERRAMIENTAS: Solo las estrictamente necesarias
+        4. IDIOMA: Responder en el mismo idioma del usuario
+        
+        CONTEXTO TEMPORAL Y GEOGRÁFICO:
+        - Zona horaria: America/Santiago (Chile)
+        - Fechas en formato: DD de mes de YYYY
+        
+        FORMATO DE RESPUESTAS:
+        - URLs: [texto](url)
+        - Ejemplo: [Ver producto](https://www.ublix.app/producto/123)
+        - Horarios: TEXTO PLANO sin markdown (sin asteriscos/negritas)
+        - Listas numeradas simples cuando sea necesario
+        """
+    
+    @staticmethod
+    def _get_tool_sections(enabled_tools: List[str]) -> str:
+        """Obtiene secciones específicas de herramientas habilitadas"""
+        sections = []
+        
+        # HERRAMIENTAS SIEMPRE DISPONIBLES
+        sections.append("""
+        
+        CURRENT_DATETIME_TOOL (current_datetime_tool):
+        - SIEMPRE disponible para obtener fecha y hora actual
+        - OBLIGATORIO: Resolver días ("viernes", "próximo lunes") a fechas exactas YYYY-MM-DD
+        - Usar ANTES de agendar cuando el usuario menciona días de la semana
+        - Ejemplos: "¿qué día es hoy?", "fecha del próximo viernes", "¿qué hora es?"
+        
+        SAVE_CONTACT_TOOL (save_contact_tool):
+        - SIEMPRE disponible para gestión de contactos
+        - Guardar/actualizar: nombre, email, teléfono, campos personalizados
+        - Llamar sin parámetros para verificar datos existentes
+        
+        ESTADOS DEL LEAD DISPONIBLES:
+        - "nuevo_chat": Al iniciar conversación (Paso 1)
+        - "eligiendo_servicio": Cuando muestra interés (Paso 2)  
+        - "eligiendo_horario": Al mostrar horarios disponibles (Paso 3)
+        - "esperando_confirmacion": Cuando el usuario elige un horario específico (Paso 4)
+        - "recopilando_datos": Al solicitar información personal después de elegir horario (Paso 4-5)
+        - "reservado": Al confirmar cita final con todos los datos (Paso 6)
+        
+        - Las instrucciones del proyecto definen qué datos solicitar y cuándo usar cada estado
+        """)
+        
+        # HERRAMIENTAS CONDICIONALES
+        if "unified_search" in enabled_tools:
+            sections.append("""
+            
+            USO INTELIGENTE DE BÚSQUEDA:
+            Usa unified_search_tool SOLO cuando:
+            - El usuario pregunte sobre información específica (servicios, precios, horarios, procedimientos)
+            - Necesites datos del conocimiento base (FAQs, documentos, productos)
+            - La consulta requiera información técnica o detalles del servicio
+            
+            NO uses unified_search_tool para:
+            - Saludos simples (hola, buenos días, etc.)
+            - Confirmaciones (sí, no, ok, gracias)
+            - Preguntas sobre envío de imágenes o documentos
+            - Continuación de conversaciones previas sin nueva información solicitada
+            - Si ya buscaste lo mismo en los últimos 3 mensajes
+            
+            UNIFIED SEARCH (unified_search_tool):
+            Herramienta de búsqueda principal en la base de conocimiento del proyecto (FAQs, documentos, productos).
+            Usar con la consulta exacta del usuario sin modificar para obtener los mejores resultados.
+            """)
+        
+        if "email" in enabled_tools:
+            sections.append("""
+                EMAIL (send_email):
+                Herramienta para enviar correos.
+                - Parámetros: from_email, to, subject, html/text, cc, bcc, reply_to.
+                - El `from_email` por defecto es "noreply@ublix.app".
+                - El parámetro `to` puede recibir múltiples correos separados por coma.
+                """)
+        
+        if "api" in enabled_tools:
+            sections.append("""
+                API TOOLS DINÁMICAS (api_tool):
+                Herramientas API personalizadas configuradas específicamente para este proyecto.
+                Las funciones disponibles se generan dinámicamente basadas en las configuraciones de API almacenadas.
+                Cada API tiene su propia configuración de endpoints, parámetros y métodos HTTP.
+                Usa estas herramientas cuando necesites interactuar con APIs externas específicas del proyecto.
+                """)
+        
+        if "agenda_tool" in enabled_tools:
+            sections.append("""
+            
+            AGENDA_TOOL (agenda_tool):
+            Herramienta para gestión de citas con workflows específicos:
+            
+            WORKFLOWS DISPONIBLES (workflow_type):
+            1. BUSQUEDA_HORARIOS: Buscar disponibilidad
+               - Parámetros: specific_date="YYYY-MM-DD" o sin fecha para próximos días
+               - Mostrar MÁXIMO 3 opciones, formato texto plano
+               - Mencionar si hay más opciones disponibles
+            
+            2. AGENDA_COMPLETA: Confirmar y agendar cita DEFINITIVA
+               - Requiere: start_datetime, attendee_email, attendee_name, title
+               - EJECUTAR UNA SOLA VEZ cuando el usuario confirme UN horario específico
+               - NUNCA agendar sin confirmación explícita del usuario
+            
+            3. CANCELACION_WORKFLOW: Cancelar cita existente
+               - Requiere: event_id
+            
+            REGLAS CRÍTICAS:
+            - EJECUTAR INMEDIATAMENTE sin avisos tipo "voy a buscar"
+            - Usar current_datetime_tool ANTES si mencionan días de la semana
+            - PROHIBIDO decir "cita agendada" sin ejecutar AGENDA_COMPLETA primero
+            - Las instrucciones del proyecto definen el flujo específico
+            """)
+        
+        if "image_processor" in enabled_tools:
+            sections.append("""
+            
+            IMAGE_PROCESSOR (image_processor):
+            Procesa imágenes para extraer texto visible.
+            
+            DETECCIÓN AUTOMÁTICA OBLIGATORIA:
+            - Patrón a detectar: ![Imagen](URL)
+            - Extraer URL y llamar INMEDIATAMENTE: image_processor(image_url="URL")
+            - PROHIBIDO responder sin procesar primero
+            - SIEMPRE mencionar el texto extraído en tu respuesta
+            - Seguir instrucciones del proyecto con el texto obtenido
+            """)
+        
+        if "holidays" in enabled_tools:
+            sections.append("""
+            
+            HOLIDAYS TOOLS (check_chile_holiday_tool, next_chile_holidays_tool):
+            - check_chile_holiday_tool: Verifica si una fecha es feriado
+            - next_chile_holidays_tool: Lista próximos feriados de Chile
+            - USAR ANTES de agendar para evitar días feriados
+            """)
+        
+        if "week_info" in enabled_tools:
+            sections.append("""
+            
+            WEEK_INFO_TOOL (week_info_tool):
+            - Información sobre semanas del año
+            - "¿En qué semana estamos?", "días de esta semana"
+            - Útil para contexto temporal en conversaciones
+            """)
+        
+        return "".join(sections)

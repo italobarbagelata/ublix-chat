@@ -17,8 +17,8 @@ class LLMAdapter:
             model_name: The model to use (e.g., 'gpt-4', 'gpt-5-mini')
             temperature: Optional temperature override. If None, uses model-specific defaults
         """
-        ChatOpenAI.model_rebuild()
-        
+        # ChatOpenAI.model_rebuild()  # Comentado temporalmente - causa error con proxy
+
         # Si se especifica temperature explícita, usarla
         if temperature is not None:
             logger.info(f"Using explicit temperature {temperature} for {model_name}")

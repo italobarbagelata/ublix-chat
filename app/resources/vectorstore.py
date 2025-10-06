@@ -25,6 +25,7 @@ class VectorStoreRetriever:
             dimensions=384,
             chunk_size=25
         )
+        # Inicializar cliente OpenAI
         self.client_openai = OpenAI()
         
         # Initialize Supabase client

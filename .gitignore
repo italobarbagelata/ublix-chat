@@ -1,5 +1,7 @@
 # Ignorar entornos virtuales en cualquier subdirectorio
 **/venv/
+**/.venv/
+.venv/
 
 # Archivos de configuración de entorno
 .env.local
