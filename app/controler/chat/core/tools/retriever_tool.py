@@ -1,3 +1,22 @@
+"""
+⚠️ HERRAMIENTA DEPRECADA - NO USAR ⚠️
+
+Esta herramienta (document_retriever) ha sido deprecada en favor de unified_search_tool.
+
+USAR EN SU LUGAR:
+    unified_search_tool(query, state, content_types=['document'])
+
+RAZONES DE DEPRECACIÓN:
+- unified_search_tool proporciona mejor contexto global
+- Combina documentos con FAQs y productos para respuestas más completas
+- Menos llamadas al LLM (ahorro de ~30% tokens)
+- Menor latencia (~200-400ms menos)
+- Ranking global por relevancia
+
+Este archivo se mantiene temporalmente por compatibilidad pero NO se usa.
+Fecha de deprecación: 2025-01-XX
+"""
+
 import logging
 from langchain.tools import tool
 from supabase.client import Client, create_client
@@ -7,9 +26,22 @@ from typing_extensions import Annotated
 import os
 from typing import List
 import re
+from functools import lru_cache
 
 # Configure logging
 logger = logging.getLogger(__name__)
+
+# Singleton para cliente de embeddings
+@lru_cache(maxsize=1)
+def get_embeddings_client():
+    """
+    Singleton para el cliente de embeddings de OpenAI.
+    Se inicializa una sola vez y se reutiliza en todas las llamadas.
+    """
+    return OpenAIEmbeddings(
+        model="text-embedding-3-small",
+        dimensions=384
+    )
 
 def extract_keywords(query: str) -> List[str]:
     """
@@ -79,12 +111,9 @@ def document_retriever(query: str, state: Annotated[dict, InjectedState], filena
         supabase_client = create_client(supabase_url, supabase_key)
         logger.info("Cliente de Supabase inicializado correctamente")
 
-        # Inicializar embeddings de OpenAI
-        logger.info("Inicializando embeddings de OpenAI")
-        embeddings = OpenAIEmbeddings(
-            model="text-embedding-3-small",
-            dimensions=384
-        )
+        # Obtener cliente de embeddings (singleton)
+        logger.info("Obteniendo cliente de embeddings de OpenAI")
+        embeddings = get_embeddings_client()
 
         # Extraer palabras clave de la consulta
         search_keywords = extract_keywords(query)

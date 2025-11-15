@@ -7,9 +7,22 @@ from typing_extensions import Annotated
 import os
 from typing import List, Optional, Dict, Any
 import re
+from functools import lru_cache
 
 # Configure logging
 logger = logging.getLogger(__name__)
+
+# Singleton para cliente de embeddings
+@lru_cache(maxsize=1)
+def get_embeddings_client():
+    """
+    Singleton para el cliente de embeddings de OpenAI.
+    Se inicializa una sola vez y se reutiliza en todas las llamadas.
+    """
+    return OpenAIEmbeddings(
+        model="text-embedding-3-small",
+        dimensions=384
+    )
 
 def extract_keywords(query: str) -> List[str]:
     """
@@ -91,12 +104,9 @@ def unified_search_tool(
         supabase_client = create_client(supabase_url, supabase_key)
         logger.info("Cliente de Supabase inicializado correctamente")
 
-        # Inicializar embeddings de OpenAI
-        logger.info("Inicializando embeddings de OpenAI")
-        embeddings = OpenAIEmbeddings(
-            model="text-embedding-3-small",
-            dimensions=384
-        )
+        # Obtener cliente de embeddings (singleton)
+        logger.info("Obteniendo cliente de embeddings de OpenAI")
+        embeddings = get_embeddings_client()
 
         # Extraer palabras clave de la consulta
         search_keywords = extract_keywords(query)

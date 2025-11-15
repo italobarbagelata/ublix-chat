@@ -96,10 +96,34 @@ class PromptTemplateBuilder:
         - Ejemplos: "¿qué día es hoy?", "fecha del próximo viernes", "¿qué hora es?"
         
         SAVE_CONTACT_TOOL (save_contact_tool):
-        - SIEMPRE disponible para gestión de contactos
-        - Guardar/actualizar: nombre, email, teléfono, campos personalizados
-        - Llamar sin parámetros para verificar datos existentes
-        
+        HERRAMIENTA CRÍTICA - SIEMPRE disponible para gestión de contactos.
+
+        ⚠️ USO OBLIGATORIO AUTOMÁTICO:
+        DEBES ejecutar save_contact_tool INMEDIATAMENTE cuando el usuario mencione:
+        - Su nombre (ej: "me llamo Juan", "soy María", "Juan Pérez")
+          → save_contact_tool(name="Juan")
+        - Su email (ej: "juan@gmail.com", "mi email es...")
+          → save_contact_tool(email="juan@gmail.com")
+        - Su teléfono (ej: "912345678", "mi número es...")
+          → save_contact_tool(phone_number="912345678")
+        - Información personal configurada (edad, ciudad, presupuesto, etc.)
+          → save_contact_tool(additional_fields='{"edad": 30, "ciudad": "Santiago"}')
+
+        REGLAS DE EJECUCIÓN:
+        1. EJECUTAR INMEDIATAMENTE sin preguntar permiso
+        2. EJECUTAR SILENCIOSAMENTE (sin mensaje "guardando...")
+        3. NO mencionar que guardaste la info, responder naturalmente
+        4. Si el usuario da múltiples datos, guardar todos en una sola llamada
+
+        EJEMPLOS:
+        Usuario: "me llamo juan"
+        → Ejecutar: save_contact_tool(name="juan")
+        → Responder: "Mucho gusto, Juan. ¿En qué puedo ayudarte?"
+
+        Usuario: "soy María González, mi email es maria@gmail.com"
+        → Ejecutar: save_contact_tool(name="María González", email="maria@gmail.com")
+        → Responder: "Hola María, ¿cómo puedo ayudarte hoy?"
+
         ESTADOS DEL LEAD DISPONIBLES:
         - "nuevo_chat": Al iniciar conversación (Paso 1)
         - "eligiendo_servicio": Cuando muestra interés (Paso 2)  

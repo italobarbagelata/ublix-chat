@@ -147,7 +147,8 @@ class Persist(object):
                 last_execution = message.additional_kwargs["end_timestamp"]
                 
                 if isinstance(message, HumanMessage):
-                    messages_to_insert.append({
+                    # Preparar payload del mensaje
+                    human_message_payload = {
                         "conversation_id": conversation_id,
                         "project_id": project_id,
                         "phone_number": phone_number,
@@ -157,7 +158,9 @@ class Persist(object):
                         "type": "human",
                         "content": message.content,
                         "latency": execution_duration
-                    })
+                    }
+
+                    messages_to_insert.append(human_message_payload)
                     
                 elif isinstance(message, AIMessage):
                     is_ai_response = i == len(conversation["messages"]) - 1
@@ -234,9 +237,13 @@ class Persist(object):
                     # Fallback a inserción individual
                     for tool_message in tool_messages:
                         database.insert(AI_MESSAGE_TABLE, tool_message)
-                        
+
+            # Analizar sentimiento en segundo plano (no bloquea respuesta)
+            if inserted_messages:
+                self.analyze_sentiment_background(inserted_messages, conversation_id)
+
             logging.debug(f"Conversación guardada: {conversation_id}")
-                        
+
         except Exception as e:
             logging.error(f"Error in persist_conversation: {e}")
         
@@ -270,13 +277,81 @@ class Persist(object):
                 "completion_tokens": 0,
             }
 
+    def analyze_sentiment_background(self, messages, conversation_id):
+        """
+        Analiza el sentimiento de mensajes humanos en segundo plano.
+        No bloquea el flujo principal de respuesta.
+        """
+        threading.Thread(
+            target=self._analyze_sentiment_thread,
+            args=(messages, conversation_id),
+            daemon=True
+        ).start()
+
+    def _analyze_sentiment_thread(self, messages, conversation_id):
+        """Método interno que se ejecuta en un hilo separado para analizar sentimiento."""
+        try:
+            from app.controler.chat.services.sentiment_service import get_sentiment_service
+            import asyncio
+
+            sentiment_service = get_sentiment_service()
+            database = SupabaseDatabase()
+
+            # Filtrar solo mensajes humanos de la lista insertada
+            for msg in messages if isinstance(messages, list) else [messages]:
+                # Verificar que sea mensaje humano y tenga contenido
+                if not isinstance(msg, dict):
+                    continue
+
+                message_id = msg.get("id")
+                message_type = msg.get("type")
+                message_content = msg.get("content")
+
+                if not message_id or message_type != "human" or not message_content:
+                    continue
+
+                # Verificar si debe analizar
+                if not sentiment_service.should_analyze(message_type, message_content):
+                    continue
+
+                # Analizar sentimiento
+                try:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    sentiment = loop.run_until_complete(
+                        sentiment_service.analyze_sentiment(message_content)
+                    )
+                    loop.close()
+
+                    # Actualizar mensaje en BD con sentimiento
+                    database.update(
+                        MESSAGES_TABLE,
+                        {
+                            "sentiment": sentiment.label,
+                            "sentiment_score": sentiment.score,
+                            "sentiment_confidence": sentiment.confidence
+                        },
+                        {"id": message_id}
+                    )
+
+                    logging.info(
+                        f"Sentimiento analizado en background: {sentiment.label} "
+                        f"(score: {sentiment.score:.2f}) para mensaje {message_id}"
+                    )
+
+                except Exception as e:
+                    logging.error(f"Error analizando sentimiento para mensaje {message_id}: {e}")
+
+        except Exception as e:
+            logging.error(f"Error en análisis de sentimiento en background: {e}")
+
     def update_summary(self, conversation: CustomState):
         """
-        Actualiza el resumen de la conversación. 
+        Actualiza el resumen de la conversación.
         Se ejecuta en segundo plano para no bloquear el flujo principal.
         """
-        threading.Thread(target=self._update_summary_thread, 
-                         args=(conversation,), 
+        threading.Thread(target=self._update_summary_thread,
+                         args=(conversation,),
                          daemon=True).start()
         return None
         

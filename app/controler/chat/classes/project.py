@@ -24,6 +24,7 @@ class Project(BaseModel):
         "disabled_patterns": [],
         "custom_patterns": []
     })
+    user_id: str = Field(default="")  # Owner del proyecto (para facturación)
 
     @classmethod
     def from_dict(cls, data: dict) -> "Project":
@@ -45,5 +46,6 @@ class Project(BaseModel):
                 "enabled_patterns": [],
                 "disabled_patterns": [],
                 "custom_patterns": []
-            })
+            }),
+            user_id=data.get('user_id', '')  # Owner del proyecto
         )

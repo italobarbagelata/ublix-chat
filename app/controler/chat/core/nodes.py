@@ -8,6 +8,8 @@ from app.controler.chat.core.state import CustomState
 from app.controler.chat.core.tools import agent_tools
 from app.controler.chat.core.utils import decorate_message, filter_and_prepare_messages_for_agent_node, filter_and_prepare_messages_for_summary_node
 from app.controler.chat.store.persistence import Persist
+from app.controler.chat.store.persistence_state import MemoryStatePersistence
+from app.controler.chat.classes.token_metrics import TokenMetrics
 from app.controler.chat.core.llm_adapter import LLMAdapter
 from app.controler.chat.core.prompt_templates import PromptTemplateBuilder
 from dotenv import load_dotenv
@@ -78,7 +80,44 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
         # Invocar modelo
         response = model_with_tools.invoke(messages)
         decorate_message(response, state["exec_init"], state["conversation_id"])
-        
+
+        # Guardar métricas de tokens para facturación
+        try:
+            if hasattr(response, 'usage_metadata') and response.usage_metadata:
+                usage = response.usage_metadata
+
+                # Obtener el owner_id del proyecto para facturación
+                project_owner_id = project.user_id
+
+                # Crear objeto TokenMetrics
+                token_metrics = TokenMetrics(
+                    project_id=project_id,
+                    user_id=user_id,  # Usuario que envió el mensaje (puede ser phone, UUID, etc)
+                    conversation_id=state["conversation_id"],
+                    message_id=response.id if hasattr(response, 'id') else unique_id,
+                    timestamp=datetime.datetime.now(pytz.UTC),
+                    tokens={
+                        "input": usage.get('input_tokens', 0),
+                        "output": usage.get('output_tokens', 0),
+                        "total": usage.get('total_tokens', 0),
+                        "system_prompt": 0,
+                        "context": 0,
+                        "tools": 0
+                    },
+                    source=source,
+                    cost=None,  # Se puede calcular después si es necesario
+                    project_owner_id=project_owner_id  # Para facturación
+                )
+
+                # Guardar en background para no bloquear
+                persistence = MemoryStatePersistence()
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    executor.submit(persistence.save_token_metrics, token_metrics)
+
+                logging.info(f"Token metrics guardadas: {usage.get('total_tokens', 0)} tokens")
+        except Exception as e:
+            logging.error(f"Error al guardar token metrics: {e}")
+
         # Log de herramientas ejecutadas si las hay
         has_tool_calls = hasattr(response, 'tool_calls') and response.tool_calls
         if has_tool_calls:

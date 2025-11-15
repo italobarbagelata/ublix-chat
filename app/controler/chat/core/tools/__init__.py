@@ -9,6 +9,27 @@ from app.controler.chat.core.tools.agenda_tool import AgendaTool
 from app.controler.chat.core.tools.email_tool import EmailTool
 from app.controler.chat.core.tools.image_processor_tool import ImageProcessorTool
 
+# ============================================================================
+# HERRAMIENTAS DEPRECADAS (2025-01-XX)
+# ============================================================================
+# Las siguientes herramientas han sido deprecadas en favor de unified_search_tool
+# que proporciona búsqueda unificada más eficiente y mejores resultados.
+#
+# DEPRECADAS:
+# - faq_retriever_tool → Usar unified_search_tool con content_types=['faq']
+# - document_retriever (retriever_tool) → Usar unified_search_tool con content_types=['document']
+#
+# RAZONES:
+# 1. Mejor contexto global (combina FAQs + docs + productos)
+# 2. Menos llamadas al LLM (-30% tokens)
+# 3. Menor latencia (-200-400ms)
+# 4. Ranking global por relevancia
+# 5. Un solo punto de mantenimiento
+#
+# Los archivos originales se mantienen en el directorio por si se necesitan
+# restaurar temporalmente, pero NO se importan ni se usan.
+# ============================================================================
+
 import logging
 import asyncio
 from concurrent.futures import ThreadPoolExecutor

@@ -4,7 +4,7 @@ from typing import Optional
 
 class TokenMetrics(BaseModel):
     project_id: str
-    user_id: str
+    user_id: str  # ID del usuario que envió el mensaje (puede ser phone_number, UUID, etc)
     conversation_id: str
     message_id: str
     timestamp: datetime
@@ -17,4 +17,5 @@ class TokenMetrics(BaseModel):
         "total": 0
     }
     cost: Optional[float] = None  # Podemos calcular el costo basado en los tokens
-    source: str 
+    source: str
+    project_owner_id: Optional[str] = None  # ID del dueño del proyecto (para facturación) 

@@ -5,8 +5,8 @@ Esta constante permite controlar qué timezone usa todo el sistema.
 
 # TIMEZONE GLOBAL DEL SISTEMA
 # Cambiar este valor para modificar el timezone de toda la aplicación
-SISTEMA_TIMEZONE = "-04:00"  # Horario de invierno de Chile (julio = invierno)
-# SISTEMA_TIMEZONE = "-03:00"  # Horario de verano de Chile (cambio temporal para solucionar inconsistencia)
+# SISTEMA_TIMEZONE = "-04:00"  # Horario de invierno de Chile (abril-septiembre)
+SISTEMA_TIMEZONE = "-03:00"  # Horario de verano de Chile (septiembre-abril) - ACTUAL
 
 def get_sistema_timezone() -> str:
     """

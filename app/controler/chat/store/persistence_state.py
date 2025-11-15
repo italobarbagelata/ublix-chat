@@ -94,23 +94,24 @@ class MemoryStatePersistence:
             self.logger.error(f"Error en fetch_state: {e}", exc_info=True)
             return None
 
-    async def save_token_metrics(self, metrics: TokenMetrics):
-        """Guarda las métricas de tokens en Supabase"""
+    def save_token_metrics(self, metrics: TokenMetrics):
+        """Guarda las métricas de tokens en Supabase (sincrono para executor)"""
         try:
             data = metrics.dict()
-            
+
             # Convertir el datetime a ISO format
             if 'timestamp' in data:
                 data['timestamp'] = data['timestamp'].isoformat()
-                
+
             response = self.client.table(TOKEN_METRICS_TABLE).insert(data).execute()
-            
+
             if hasattr(response, 'error') and response.error:
                 self.logger.error(f"Error de Supabase al guardar métricas: {response.error}")
                 return False
-                
+
+            self.logger.info(f"✅ Token metrics guardadas exitosamente en DB")
             return True
-            
+
         except Exception as e:
             self.logger.error(f"Error al guardar métricas: {str(e)}")
             return False
