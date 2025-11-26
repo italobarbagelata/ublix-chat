@@ -89,10 +89,8 @@ async def agent_tools(project_id: str, user_id: str, name: str, number_phone_age
             except Exception as e:
                 logging.error(f"Error cargando EmailTool: {str(e)}")
         
-        # Herramientas de calendario/vacaciones
-        if "holidays" in enabled_tools:
-            tools.extend([check_chile_holiday_tool, next_chile_holidays_tool])
-            logging.debug("Herramientas de feriados habilitadas")
+        # Herramientas de feriados ahora son esenciales (movidas a essential_tools)
+        # Ya no necesitan estar en enabled_tools para funcionar
         
         # Herramienta de información de semana
         if "week_info" in enabled_tools:
@@ -115,6 +113,8 @@ async def agent_tools(project_id: str, user_id: str, name: str, number_phone_age
     essential_tools = [
         current_datetime_tool,
         SaveContactTool(project_id, user_id),
+        check_chile_holiday_tool,  # Validación de feriados siempre activa
+        next_chile_holidays_tool,  # Consulta de feriados siempre activa
     ]
     tools.extend(essential_tools)
     # Herramientas esenciales siempre disponibles
