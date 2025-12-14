@@ -70,11 +70,9 @@ async def agent_tools(project_id: str, user_id: str, name: str, number_phone_age
             except Exception as e:
                 logging.error(f"Error cargando API tools: {str(e)}")
         
-        # Herramienta de búsqueda unificada
-        if "unified_search" in enabled_tools:
-            tools.append(unified_search_tool)
-            logging.debug("Búsqueda unificada habilitada")
-        
+        # Herramienta de búsqueda unificada (SIEMPRE activa, movida a essential_tools)
+        # Ya no se carga aquí, se agrega automáticamente al final
+
         # Herramienta de agenda
         if "agenda_tool" in enabled_tools:
             tools.append(AgendaTool(project_id, project, user_id))
@@ -111,6 +109,7 @@ async def agent_tools(project_id: str, user_id: str, name: str, number_phone_age
     
     # Herramientas esenciales SIEMPRE disponibles (no dependen de configuración)
     essential_tools = [
+        unified_search_tool,  # Búsqueda unificada SIEMPRE activa para FAQs, docs y productos
         current_datetime_tool,
         SaveContactTool(project_id, user_id),
         check_chile_holiday_tool,  # Validación de feriados siempre activa

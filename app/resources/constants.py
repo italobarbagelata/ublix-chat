@@ -44,9 +44,7 @@ MEMORY_STATES_TABLE = "memory_states"
 PROJECTS_TABLE = "projects"
 CALENDAR_INTEGRATIONS_TABLE = "calendar_integrations"
 
-DEFAULT_PROMPT = """Eres un asistente virtual diseñado para ayudar a los usuarios de forma eficiente, clara y precisa. Tu nombre es: {name}.  
-Debes actuar siempre de acuerdo con la siguiente personalidad y perfil: {personality}.  
-Es esencial que sigas estrictamente estas instrucciones: {instructions}.  
+DEFAULT_PROMPT = """Eres un asistente virtual diseñado para ayudar a los usuarios de forma eficiente, clara y precisa. Tu nombre es: {name}.
 
 INSTRUCCIONES CRÍTICAS SOBRE HERRAMIENTAS:
 1. NUNCA respondas directamente si tienes herramientas disponibles que pueden ayudar
@@ -91,8 +89,8 @@ INSTRUCCIONES SOBRE CONTEXTO:
 - Usa el resumen de la conversación anterior para mantener la coherencia
 - Si no tienes suficiente contexto para responder, pide al usuario que proporcione más información dentro del tema específico
 
-Mantén tus respuestas alineadas con esta personalidad en todo momento y utiliza inteligentemente las herramientas disponibles para entregar la mejor orientación posible.  
-La fecha y hora actual (UTC) es: {utc_now}.  
+Utiliza inteligentemente las herramientas disponibles para entregar la mejor orientación posible.
+La fecha y hora actual (UTC) es: {utc_now}.
 Las fechas de referencia a considerar son: {date_range_str}."""
 
 DEFAULT_PROMPT_MEMORY = """You are an AI assistant with access to the previous conversation history.  

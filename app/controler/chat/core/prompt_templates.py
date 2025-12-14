@@ -8,55 +8,63 @@ class PromptTemplateBuilder:
     
     @staticmethod
     def build_system_prompt(
-        project: Any, 
-        summary: str, 
+        project: Any,
+        summary: str,
         utc_now: str,
         date_range_str: str,
         now_chile: str
     ) -> str:
         """
-        Construye el prompt del sistema principal
-        
+        Construye el prompt del sistema principal (SIMPLIFICADO)
+
         Args:
             project: Objeto del proyecto con configuración
             summary: Resumen de conversación anterior
             utc_now: Tiempo UTC actual en ISO format
             date_range_str: String con rango de fechas
             now_chile: Tiempo actual en Chile
-            
+
         Returns:
             str: Prompt del sistema completo
         """
         from app.resources.constants import DEFAULT_PROMPT
-        
-        # Prompt base del proyecto
-        base_prompt = project.prompt if project and project.prompt else DEFAULT_PROMPT
-        
-        # Agregar resumen si existe
-        if summary and summary.strip():
-            base_prompt += f"""
-            RESUMEN DE CONVERSACIÓN ANTERIOR:
-            
-            {summary}
-            
-            IMPORTANTE: Usa esta información para NO repetir preguntas que ya fueron respondidas.
-            """
-        
-        # Reemplazar placeholders
+
+        # Usar el prompt base por defecto
+        base_prompt = DEFAULT_PROMPT
+
+        # Reemplazar placeholders básicos
         base_prompt = base_prompt.replace("{name}", project.name if project else "Asistente")
-        base_prompt = base_prompt.replace("{personality}", project.personality if project else "")
-        base_prompt = base_prompt.replace("{instructions}", project.instructions if project else "")
         base_prompt = base_prompt.replace("{utc_now}", utc_now)
         base_prompt = base_prompt.replace("{date_range_str}", date_range_str)
         base_prompt = base_prompt.replace("{now_chile}", now_chile)
-        
+
+        # Agregar instrucciones específicas del proyecto
+        if project and project.instructions and project.instructions.strip():
+            base_prompt += f"""
+
+INSTRUCCIONES ESPECÍFICAS DEL PROYECTO:
+
+{project.instructions}
+"""
+
+        # Agregar resumen si existe
+        if summary and summary.strip():
+            base_prompt += f"""
+
+RESUMEN DE CONVERSACIÓN ANTERIOR:
+
+{summary}
+
+IMPORTANTE: Usa esta información para NO repetir preguntas que ya fueron respondidas.
+"""
+
         # Agregar secciones específicas por herramienta
         if project and hasattr(project, 'enabled_tools'):
             base_prompt += PromptTemplateBuilder._get_tool_sections(project.enabled_tools)
-        
+
         # Agregar reglas centrales
         base_prompt += PromptTemplateBuilder._get_core_rules()
-        
+
         return base_prompt
     
     @staticmethod
@@ -65,10 +73,13 @@ class PromptTemplateBuilder:
         return """
         
         PRIORIDADES DEL ASISTENTE:
-        1. EVALUAR necesidad de herramientas según la consulta
-        2. RESPUESTAS: Máximo 250 caracteres, directo y conciso
-        3. HERRAMIENTAS: Solo las estrictamente necesarias
-        4. IDIOMA: Responder en el mismo idioma del usuario
+        1. RESPUESTAS: Máximo 250 caracteres, directo y conciso
+        2. HERRAMIENTAS: Solo usar cuando sea ABSOLUTAMENTE necesario
+        3. NUNCA llamar la misma herramienta más de 1 vez por conversación
+        4. Si ya tienes la información, NO vuelvas a buscarla
+        5. Para preguntas de PRODUCTOS → unified_search_tool (NO datetime)
+        6. Para preguntas de FECHA/HORA → current_datetime_tool (máximo 1 vez)
+        7. IDIOMA: Responder en el mismo idioma del usuario
         
         CONTEXTO TEMPORAL Y GEOGRÁFICO:
         - Zona horaria: America/Santiago (Chile)
@@ -90,10 +101,12 @@ class PromptTemplateBuilder:
         sections.append("""
         
         CURRENT_DATETIME_TOOL (current_datetime_tool):
-        - SIEMPRE disponible para obtener fecha y hora actual
-        - OBLIGATORIO: Resolver días ("viernes", "próximo lunes") a fechas exactas YYYY-MM-DD
-        - Usar ANTES de agendar cuando el usuario menciona días de la semana
-        - Ejemplos: "¿qué día es hoy?", "fecha del próximo viernes", "¿qué hora es?"
+        - SOLO usar cuando el usuario EXPLÍCITAMENTE pregunte por fecha/hora ("qué día es", "qué hora es")
+        - NUNCA llamar para preguntas sobre productos, servicios o información general
+        - MÁXIMO 1 llamada por conversación (si ya la usaste, NO vuelvas a llamarla)
+        - Si el usuario pregunta sobre productos → usa unified_search_tool, NO current_datetime_tool
+        - Ejemplo CORRECTO: "¿qué día es hoy?" → current_datetime_tool
+        - Ejemplo INCORRECTO: "¿qué parlantes venden?" → NO uses current_datetime_tool
         
         SAVE_CONTACT_TOOL (save_contact_tool):
         HERRAMIENTA CRÍTICA - SIEMPRE disponible para gestión de contactos.
@@ -134,28 +147,46 @@ class PromptTemplateBuilder:
         
         - Las instrucciones del proyecto definen qué datos solicitar y cuándo usar cada estado
         """)
-        
+
+        # HERRAMIENTA UNIFIED SEARCH (SIEMPRE ACTIVA)
+        sections.append("""
+
+        USO INTELIGENTE DE BÚSQUEDA (unified_search_tool):
+        Esta herramienta SIEMPRE está disponible para buscar en FAQs, documentos y productos.
+
+        Usa unified_search_tool CUANDO:
+        - El usuario pregunte sobre productos, servicios, precios, horarios, procedimientos
+        - Necesites información de catálogo o inventario
+        - Consultas sobre características técnicas o detalles específicos
+        - El usuario pregunte "qué", "cuál", "cuánto", "dónde" sobre tus servicios/productos
+
+        NO uses unified_search_tool para:
+        - Saludos simples (hola, buenos días, etc.)
+        - Confirmaciones (sí, no, ok, gracias)
+        - Preguntas sobre envío de imágenes o documentos
+        - Si ya buscaste lo mismo en el último mensaje
+
+        IMPORTANTE: Usa la consulta del usuario DIRECTAMENTE, no reformules.
+        Ejemplo: Si pregunta "qué parlantes venden?" → busca "parlantes"
+
+        FORMATO DE RESPUESTA PARA PRODUCTOS:
+        Cuando unified_search_tool devuelva productos, responde en este formato EXACTO:
+        "Aquí están los productos que encontré:
+        [
+          {
+            "name": "Nombre del producto",
+            "description": "Descripción corta",
+            "price": 50000,
+            "currency": "CLP",
+            "image": "URL de la imagen",
+            "url": "URL del producto",
+            "sku": "SKU123",
+            "stock": 10
+          }
+        ]"
+        """)
+
         # HERRAMIENTAS CONDICIONALES
-        if "unified_search" in enabled_tools:
-            sections.append("""
-            
-            USO INTELIGENTE DE BÚSQUEDA:
-            Usa unified_search_tool SOLO cuando:
-            - El usuario pregunte sobre información específica (servicios, precios, horarios, procedimientos)
-            - Necesites datos del conocimiento base (FAQs, documentos, productos)
-            - La consulta requiera información técnica o detalles del servicio
-            
-            NO uses unified_search_tool para:
-            - Saludos simples (hola, buenos días, etc.)
-            - Confirmaciones (sí, no, ok, gracias)
-            - Preguntas sobre envío de imágenes o documentos
-            - Continuación de conversaciones previas sin nueva información solicitada
-            - Si ya buscaste lo mismo en los últimos 3 mensajes
-            
-            UNIFIED SEARCH (unified_search_tool):
-            Herramienta de búsqueda principal en la base de conocimiento del proyecto (FAQs, documentos, productos).
-            Usar con la consulta exacta del usuario sin modificar para obtener los mejores resultados.
-            """)
         
         if "email" in enabled_tools:
             sections.append("""

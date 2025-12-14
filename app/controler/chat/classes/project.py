@@ -11,10 +11,8 @@ class Project(BaseModel):
     name: str = Field(default="")
     description: str = Field(default="")
     vstore_index: str = Field(default="")
-    personality: str = Field(default="")
     datasources: List[Datasource] = Field(default_factory=list)
     integrations: Integrations
-    prompt: str = Field(default="")
     instructions: str = Field(default="")
     prompt_memory: str = Field(default="")
     model: str = Field(default=MODEL_CHATBOT)
@@ -34,11 +32,9 @@ class Project(BaseModel):
             name=data.get('name', ''),
             description=data.get('description', ''),
             vstore_index=data.get('vstore_index', ''),
-            personality=data.get('personality', ''),
             datasources=data.get('datasources', []),
             integrations=Integrations.from_dict(data.get('integrations', {})),
-            prompt=data.get('prompt', ''),
-            instructions=data.get('instructions', 'hola'),
+            instructions=data.get('instructions', ''),
             prompt_memory=data.get('prompt_memory', ''),
             model=data.get('model', MODEL_CHATBOT),
             enabled_tools=data.get('enabled_tools', []),
