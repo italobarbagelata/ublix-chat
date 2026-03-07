@@ -5,22 +5,28 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 from uuid import UUID
 
+from app.controler.chat.store.supabase_singleton import SupabaseSingleton
+
 logger = logging.getLogger("root")
 
+
 class SupabaseClient:
-    """Client for interacting with Supabase database."""
-    
+    """
+    Client for interacting with Supabase database.
+
+    OPTIMIZACIÓN: Usa el singleton interno para evitar múltiples conexiones.
+    Todas las instancias de SupabaseClient comparten la misma conexión.
+    """
+
     def __init__(self):
-        """Initialize Supabase client with environment variables."""
-        supabase_url = os.getenv("SUPABASE_URL")
-        supabase_key = os.getenv("SUPABASE_KEY")
-        
-        if not supabase_url or not supabase_key:
-            logger.error("Supabase URL or key not found in environment variables")
-            raise ValueError("Supabase URL or key not found in environment variables")
-        
-        self.client: Client = create_client(supabase_url, supabase_key)
-        logger.info("Supabase client initialized")
+        """
+        Initialize Supabase client using singleton pattern.
+        La conexión real se crea una sola vez y se reutiliza.
+        """
+        # OPTIMIZACIÓN: Usar singleton en lugar de crear nueva conexión
+        self.client: Client = SupabaseSingleton.get_client()
+        # No logueamos cada inicialización para evitar spam en logs
+        logger.debug("SupabaseClient usando conexión singleton")
     
     def get_apis_by_project_id(self, project_id: str) -> List[Dict[str, Any]]:
         """

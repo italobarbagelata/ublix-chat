@@ -32,18 +32,114 @@ from app.controler.chat.core.tools.image_processor_tool import ImageProcessorToo
 
 import logging
 import asyncio
+import threading
 from concurrent.futures import ThreadPoolExecutor
-from typing import List
+from typing import List, Dict, Any, Tuple, Optional
+from datetime import datetime, timedelta
 from app.controler.chat.store.persistence import Project
 
+# =============================================================================
+# CACHE DE HERRAMIENTAS
+# =============================================================================
+# Caché thread-safe para herramientas por proyecto.
+# Evita recrear herramientas en cada llamada al agente.
+# TTL de 5 minutos para refrescar configuración de herramientas.
+# =============================================================================
 
-async def agent_tools(project_id: str, user_id: str, name: str, number_phone_agent: str, unique_id: str, project: Project) -> List:
+_tools_cache: Dict[str, Tuple[List, datetime]] = {}
+_cache_lock = threading.Lock()
+_CACHE_TTL = timedelta(minutes=5)
+
+
+def _get_cache_key(project_id: str) -> str:
+    """Genera la clave de caché para un proyecto."""
+    return f"tools_{project_id}"
+
+
+def get_cached_tools(project_id: str) -> Optional[List]:
+    """
+    Obtiene herramientas del caché si están disponibles y no expiraron.
+
+    Args:
+        project_id: ID del proyecto
+
+    Returns:
+        Lista de herramientas o None si no hay caché válido
+    """
+    cache_key = _get_cache_key(project_id)
+
+    with _cache_lock:
+        if cache_key in _tools_cache:
+            tools, cached_at = _tools_cache[cache_key]
+            if datetime.now() - cached_at < _CACHE_TTL:
+                logging.debug(f"Herramientas obtenidas del caché para proyecto {project_id}")
+                return tools
+            else:
+                # Caché expirado, eliminar
+                del _tools_cache[cache_key]
+                logging.debug(f"Caché de herramientas expirado para proyecto {project_id}")
+
+    return None
+
+
+def set_cached_tools(project_id: str, tools: List) -> None:
+    """
+    Guarda herramientas en el caché.
+
+    Args:
+        project_id: ID del proyecto
+        tools: Lista de herramientas a cachear
+    """
+    cache_key = _get_cache_key(project_id)
+
+    with _cache_lock:
+        _tools_cache[cache_key] = (tools, datetime.now())
+        logging.debug(f"Herramientas cacheadas para proyecto {project_id}")
+
+
+def invalidate_tools_cache(project_id: str = None) -> None:
+    """
+    Invalida el caché de herramientas.
+
+    Args:
+        project_id: Si se especifica, solo invalida ese proyecto.
+                   Si es None, invalida todo el caché.
+    """
+    with _cache_lock:
+        if project_id:
+            cache_key = _get_cache_key(project_id)
+            if cache_key in _tools_cache:
+                del _tools_cache[cache_key]
+                logging.info(f"Caché invalidado para proyecto {project_id}")
+        else:
+            _tools_cache.clear()
+            logging.info("Caché de herramientas completamente invalidado")
+
+
+async def agent_tools(project_id: str, user_id: str, name: str, number_phone_agent: str, unique_id: str, project: Project, use_cache: bool = True) -> List:
     """
     Función mejorada que retorna las herramientas para el agente.
-    Carga todas las herramientas habilitadas sin usar caché.
+    Usa caché por proyecto para evitar recrear herramientas.
+
+    Args:
+        project_id: ID del proyecto
+        user_id: ID del usuario
+        name: Nombre del usuario
+        number_phone_agent: Número de teléfono del agente
+        unique_id: ID único de la conversación
+        project: Objeto Project con configuración
+        use_cache: Si True, usa caché de herramientas (default: True)
+
+    Returns:
+        Lista de herramientas configuradas
     """
-    
-    logging.debug(f"Cargando herramientas para usuario: {user_id}")
+    # Intentar obtener del caché primero
+    if use_cache:
+        cached = get_cached_tools(project_id)
+        if cached is not None:
+            return cached
+
+    logging.debug(f"Creando herramientas para proyecto: {project_id}")
     
     # Lista para almacenar todas las herramientas
     tools = []
@@ -128,5 +224,9 @@ async def agent_tools(project_id: str, user_id: str, name: str, number_phone_age
             tool_names.append('unknown_tool')
     
     logging.info(f"Herramientas activas: {', '.join(tool_names) if tool_names else 'Solo herramientas básicas'}")
-    
+
+    # Guardar en caché para próximas llamadas
+    if use_cache:
+        set_cached_tools(project_id, tools)
+
     return tools

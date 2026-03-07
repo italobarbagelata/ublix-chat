@@ -9,6 +9,7 @@ from app.controler.chat.classes.chat_state import ChatState
 from app.controler.chat.core.edge import invoke_tools_summary
 from app.controler.chat.core.nodes import create_agent, resume_conversation, tools_node
 from app.controler.chat.core.state import CustomState
+from app.controler.chat.core.tools import agent_tools
 from app.controler.chat.core.utils import decorate_message
 from app.controler.chat.store.persistence import Persist
 from app.controler.chat.store.persistence_state import MemoryStatePersistence
@@ -53,7 +54,11 @@ class Graph():
     
     
     async def __set_nodes(self):
-        tools_node_set = await tools_node(
+        # OPTIMIZACIÓN: Cargar herramientas UNA SOLA VEZ y pasarlas a los nodos
+        # Esto evita múltiples llamadas a agent_tools() durante el ciclo del grafo
+        self.logger.debug(f"Cargando herramientas para proyecto {self.state.project_id}")
+
+        tools = await agent_tools(
             self.state.project_id,
             self.state.user_id,
             self.name,
@@ -61,13 +66,27 @@ class Graph():
             self.unique_id,
             self.project
         )
+
+        self.logger.debug(f"Herramientas cargadas: {len(tools)}")
+
+        # Crear nodos con herramientas pre-cargadas
+        tools_node_set = await tools_node(
+            self.state.project_id,
+            self.state.user_id,
+            self.name,
+            self.number_phone_agent,
+            self.unique_id,
+            self.project,
+            tools=tools  # Pasar herramientas pre-cargadas
+        )
         agent = await create_agent(
             self.state.user_id,
             self.name,
             self.number_phone_agent,
             self.source,
             self.unique_id,
-            self.project
+            self.project,
+            tools=tools  # Pasar herramientas pre-cargadas
         )
         workflow = self.workflow
         workflow.add_node("agent", agent)

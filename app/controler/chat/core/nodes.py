@@ -24,30 +24,53 @@ load_dotenv()
 # Zona horaria para Chile (Santiago)
 TIMEZONE = pytz.timezone('America/Santiago')
 
-async def create_agent(user_id, name, number_phone_agent, source, unique_id, project):
+async def create_agent(user_id, name, number_phone_agent, source, unique_id, project, tools=None):
+    """
+    Crea el nodo agente para el grafo de conversación.
+
+    Args:
+        user_id: ID del usuario
+        name: Nombre del usuario
+        number_phone_agent: Número de teléfono del agente
+        source: Fuente del mensaje (whatsapp, instagram, etc)
+        unique_id: ID único de la conversación
+        project: Objeto Project con configuración
+        tools: Lista de herramientas pre-cargadas (OPTIMIZACIÓN: evita recrear en cada llamada)
+    """
+    # Guardar referencia a las herramientas para usar dentro del closure
+    _cached_tools = tools
+
     async def agent(state: CustomState):
+        nonlocal _cached_tools
+
         # Calcular fechas actualizadas en cada interacción
         utc_now = datetime.datetime.now(pytz.UTC)
         now = utc_now.astimezone(TIMEZONE)
         date_range = [(now.date() + datetime.timedelta(days=x)).strftime('%Y-%m-%d') for x in range(15)]
         date_range_str = ", ".join(date_range)
-        
+
         now_chile = datetime.datetime.now(pytz.timezone("America/Santiago")).isoformat()
         project_id = state["project"].id
         model = LLMAdapter.get_llm(MODEL_CHATBOT)  # Sin temperature para compatibilidad
         summary = Persist().get_summary(state)
         messages = filter_and_prepare_messages_for_agent_node(state)
-        
-        # Obtener herramientas directamente sin caché
-        tools = await agent_tools(
-            project_id, user_id, name, number_phone_agent, unique_id, project
-        )
+
+        # OPTIMIZACIÓN: Usar herramientas pre-cargadas si están disponibles
+        if _cached_tools is not None:
+            tools_to_use = _cached_tools
+            logging.debug(f"Usando herramientas pre-cargadas ({len(tools_to_use)} herramientas)")
+        else:
+            # Fallback: cargar herramientas (usa caché interno)
+            tools_to_use = await agent_tools(
+                project_id, user_id, name, number_phone_agent, unique_id, project
+            )
+
         # Log de herramientas disponibles para la conversación
         conv_logger = get_conversation_logger(state.get('conversation_id', unique_id), user_id)
-        tool_names = [getattr(t, 'name', 'herramienta') for t in tools]
+        tool_names = [getattr(t, 'name', 'herramienta') for t in tools_to_use]
         conv_logger.log_herramientas_cargadas(tool_names)
         
-        model_with_tools = model.bind_tools(tools)
+        model_with_tools = model.bind_tools(tools_to_use)
         
         # Usar el template manager para construir el prompt
         prompt_general_skeleton = PromptTemplateBuilder.build_system_prompt(
@@ -146,13 +169,29 @@ def resume_conversation(state: CustomState):
 
     return {"messages": delete_messages}
 
-async def tools_node(project_id, user_id, name, number_phone_agent, unique_id, project):
-    # Obtener herramientas directamente sin caché
-    tools = await agent_tools(
-        project_id, user_id, name, number_phone_agent, unique_id, project
-    )
-    # Log de configuración solo en modo debug
-    logging.debug(f"Nodo de herramientas configurado con {len(tools)} herramientas")
-    
+async def tools_node(project_id, user_id, name, number_phone_agent, unique_id, project, tools=None):
+    """
+    Crea el nodo de herramientas para el grafo.
+
+    Args:
+        project_id: ID del proyecto
+        user_id: ID del usuario
+        name: Nombre del usuario
+        number_phone_agent: Número de teléfono del agente
+        unique_id: ID único de la conversación
+        project: Objeto Project con configuración
+        tools: Lista de herramientas pre-cargadas (OPTIMIZACIÓN)
+    """
+    # OPTIMIZACIÓN: Usar herramientas pre-cargadas si están disponibles
+    if tools is not None:
+        tools_to_use = tools
+        logging.debug(f"ToolNode usando herramientas pre-cargadas ({len(tools_to_use)})")
+    else:
+        # Fallback: cargar herramientas (usa caché interno)
+        tools_to_use = await agent_tools(
+            project_id, user_id, name, number_phone_agent, unique_id, project
+        )
+        logging.debug(f"ToolNode cargó herramientas ({len(tools_to_use)})")
+
     # Crear el ToolNode con las herramientas
-    return ToolNode(tools)
+    return ToolNode(tools_to_use)
