@@ -26,4 +26,4 @@ Thumbs.db
 # Archivos de paquetes
 *.egg-info/
 dist/
-build/
+build/.env
