@@ -28,9 +28,10 @@ def get_database_url() -> str:
     """Build the async database URL from environment variables."""
     url = os.getenv("DATABASE_URL")
     if url:
-        # Ensure it uses asyncpg driver
-        if url.startswith("postgresql://"):
-            url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        # Ensure it uses asyncpg driver - handle all possible URL schemes
+        if "postgresql+asyncpg://" not in url:
+            url = url.split("://", 1)
+            url = f"postgresql+asyncpg://{url[1]}" if len(url) > 1 else url[0]
         return url
 
     # Fallback to individual env vars
