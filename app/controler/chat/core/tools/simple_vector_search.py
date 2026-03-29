@@ -2,7 +2,7 @@ import os
 import re
 import logging
 from typing import Optional, Dict, Any, List
-from langchain.tools import tool
+from langchain_core.tools import tool
 from langgraph.prebuilt import InjectedState
 from typing_extensions import Annotated
 from openai import OpenAI

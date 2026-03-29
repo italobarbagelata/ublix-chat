@@ -251,17 +251,16 @@ class Persist(object):
     def get_tool_call(self, message):
         try:
             tool_calls = message.additional_kwargs.get("tool_calls", [])
-            tool_calls = tool_calls[0].get("function")
+            if not tool_calls:
+                return {"arguments": "{}", "name": ""}
+            function_data = tool_calls[0].get("function", {})
             return {
-                "arguments": tool_calls.get("arguments"),
-                "name": tool_calls.get("name"),
+                "arguments": function_data.get("arguments", "{}"),
+                "name": function_data.get("name", ""),
             }
         except Exception as e:
             logging.error(f"Error getting tool call: {e}")
-            return {
-                "arguments": "{}",
-                "name": "",
-            }
+            return {"arguments": "{}", "name": ""}
             
     def get_token_usage(self, message):
         try:

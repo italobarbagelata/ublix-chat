@@ -1,7 +1,8 @@
 import logging
 from langchain_core.messages import HumanMessage
 from langgraph.prebuilt import ToolNode
-from langchain_core.messages import RemoveMessage, SystemMessage
+from langchain_core.messages import SystemMessage
+# RemoveMessage no disponible en esta versión de langchain-core
 import pytz
 import concurrent.futures
 from app.controler.chat.core.state import CustomState
@@ -159,15 +160,14 @@ def resume_conversation(state: CustomState):
     with concurrent.futures.ThreadPoolExecutor() as executor:
         executor.submit(Persist().persist_conversation, state)
 
-    # Limpiar mensajes antiguos si hay más de 20
+    # NOTA: Limpieza de mensajes deshabilitada temporalmente
+    # RemoveMessage no disponible en langchain-core 0.1.x
+    # La limpieza se maneja en el checkpointer de memoria
     messages = state.get("messages", [])
     if len(messages) > 20:
-        delete_messages = [RemoveMessage(id=m.id) for m in messages[:-20]]
-        logging.debug(f"Limpieza de memoria: eliminando {len(delete_messages)} mensajes antiguos")
-    else:
-        delete_messages = []
+        logging.debug(f"Conversación con {len(messages)} mensajes (limpieza pendiente de actualización)")
 
-    return {"messages": delete_messages}
+    return {"messages": []}
 
 async def tools_node(project_id, user_id, name, number_phone_agent, unique_id, project, tools=None):
     """

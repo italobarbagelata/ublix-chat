@@ -4,6 +4,7 @@ Configuración centralizada de logging para Ublix Chat
 import logging
 import sys
 from typing import Optional
+from app.resources.constants import MODEL_CHATBOT
 
 class ChatbotLogger:
     """Logger personalizado para el chatbot con mensajes claros en español"""
@@ -45,8 +46,8 @@ class ChatbotLogger:
         logging.getLogger('httpx').setLevel(logging.WARNING)
         logging.getLogger('httpcore').setLevel(logging.WARNING)
         logging.getLogger('openai').setLevel(logging.WARNING)
-        logging.getLogger('supabase').setLevel(logging.WARNING)
-        logging.getLogger('postgrest').setLevel(logging.WARNING)
+        logging.getLogger('sqlalchemy').setLevel(logging.WARNING)
+        logging.getLogger('asyncpg').setLevel(logging.WARNING)
         
         return root_logger
 
@@ -73,9 +74,10 @@ class ConversationLogger:
         else:
             self.logger.info(f"[{self.conversation_id}] Sin herramientas adicionales activas")
     
-    def log_procesamiento_ia(self, modelo: str = "gpt-4o-mini"):
+    def log_procesamiento_ia(self, modelo: str = None):
         """Log cuando la IA procesa el mensaje"""
-        self.logger.info(f"[{self.conversation_id}] Procesando con modelo {modelo}...")
+        modelo_usado = modelo or MODEL_CHATBOT
+        self.logger.info(f"[{self.conversation_id}] Procesando con modelo {modelo_usado}...")
     
     def log_respuesta_generada(self, respuesta: str, tiempo: float):
         """Log cuando se genera la respuesta"""

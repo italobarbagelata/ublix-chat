@@ -5,7 +5,7 @@ Permite la creación y gestión de herramientas MCP de forma escalable.
 
 import logging
 from typing import Dict, List, Any, Optional
-from langchain.tools import BaseTool
+from langchain_core.tools import BaseTool
 
 from .mcp_client import MCPManager
 # Google Calendar MCP tool removed - keeping infrastructure for future MCP integrations

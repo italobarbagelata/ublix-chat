@@ -1,4 +1,4 @@
-from langchain.tools import tool
+from langchain_core.tools import tool
 
 from app.controler.chat.core.tools.api_tool import create_api_tools
 from app.controler.chat.core.tools.unified_search_tool import unified_search_tool

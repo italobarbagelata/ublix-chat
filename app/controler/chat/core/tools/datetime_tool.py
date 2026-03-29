@@ -2,7 +2,7 @@ from typing import Dict
 import dateparser
 from datetime import datetime, timedelta, date
 import logging
-from langchain.tools import tool
+from langchain_core.tools import tool
 import locale
 import pytz
 import holidays

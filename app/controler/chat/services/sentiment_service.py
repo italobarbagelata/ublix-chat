@@ -2,6 +2,7 @@ import os
 import json
 from openai import OpenAI
 from app.models.sentiment import SentimentAnalysis
+from app.resources.constants import MODEL_CHATBOT_SMALL
 from typing import Optional
 
 
@@ -10,7 +11,8 @@ class SentimentService:
 
     def __init__(self):
         self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-        self.model = "gpt-4o-mini"  # Modelo economico para analisis simple
+        # Usar modelo económico configurable (gpt-5-nano por defecto)
+        self.model = MODEL_CHATBOT_SMALL
         self.alert_threshold = -0.6  # Umbral para alertas (muy negativo)
 
     async def analyze_sentiment(self, message_text: str) -> SentimentAnalysis:

@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .routes import (chat_router, webhook_router, webhook_router_facebook, webhook_router_whatsapp)
+from .database import init_db, close_db
 
 load_dotenv()
 
@@ -23,6 +24,15 @@ def create_app():
         allow_headers=["*"],
         expose_headers=["*"]
     )
+
+    # Database lifecycle hooks
+    @app.on_event("startup")
+    async def startup():
+        await init_db()
+
+    @app.on_event("shutdown")
+    async def shutdown():
+        await close_db()
 
     # El logging ya está configurado en logger_config.py
     # No necesitamos configuración adicional aquí

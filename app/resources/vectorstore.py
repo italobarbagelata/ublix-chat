@@ -4,21 +4,19 @@ from typing import List
 import logging
 from dotenv import load_dotenv
 from langchain_openai import OpenAIEmbeddings
-from supabase import create_client, Client
+from app.database import SyncDatabase
 from uuid import uuid4
 
 class VectorStoreRetriever:
-    """Class to manage the vector store retriever using Supabase."""
+    """Class to manage the vector store retriever using direct PostgreSQL."""
 
     def __init__(self, table_name: str):
         load_dotenv()
 
         # Initialize environment variables
         self.model = os.getenv("MODEL_ENCODING")
-        self.supabase_url = os.getenv("SUPABASE_URL")
-        self.supabase_key = os.getenv("SUPABASE_KEY")
         self.table_name = table_name
-        
+
         # Initialize OpenAI and embeddings
         self.embeddings = OpenAIEmbeddings(
             model="text-embedding-3-small",
@@ -27,16 +25,16 @@ class VectorStoreRetriever:
         )
         # Inicializar cliente OpenAI
         self.client_openai = OpenAI()
-        
-        # Initialize Supabase client
-        self.supabase: Client = create_client(self.supabase_url, self.supabase_key)
-        
+
+        # Initialize database client
+        self.db = SyncDatabase()
+
         # Ensure the table exists with proper structure
         self._init_table()
-        
+
     def _init_table(self):
         """Initialize the vector table if it doesn't exist"""
-        # Note: You need to create the table manually in Supabase with:
+        # Note: You need to create the table manually in PostgreSQL with:
         # CREATE TABLE IF NOT EXISTS documents (
         #     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
         #     content TEXT,
@@ -56,9 +54,9 @@ class VectorStoreRetriever:
         pass
 
     def delete_documents(self, filename: str) -> None:
-        """Delete documents from Supabase by filename."""
+        """Delete documents from the database by filename."""
         try:
-            self.supabase.table(self.table_name)\
+            self.db.table(self.table_name)\
                 .delete()\
                 .eq('filename', filename)\
                 .execute()
@@ -69,7 +67,7 @@ class VectorStoreRetriever:
     def _process_embedding(self, query: str):
         """Get metadata of query embedded"""
         return self.client_openai.embeddings.create(
-            input=[query], 
+            input=[query],
             model="text-embedding-3-small",
             dimensions=384
         )
@@ -85,17 +83,17 @@ class VectorStoreRetriever:
             tuple[str, List[int]]: processed text and embedding result
         """
         logging.info("Init retrieve")
-        
+
         # Get query embedding
         self.embedding_result = self._process_embedding(query)
         query_embedding = self.embedding_result.data[0].embedding
 
         # Prepare filename filter
         filenames = [str(ds.get("filename", "")).strip() for ds in active_datasources]
-        
+
         try:
             # Perform vector similarity search
-            rpc_response = self.supabase.rpc(
+            rpc_response = self.db.rpc(
                 'match_documents',
                 {
                     'query_embedding': query_embedding,
@@ -120,7 +118,7 @@ class VectorStoreRetriever:
 
     def add_documents(self, documents: List[dict]) -> None:
         """Add documents to the vector store.
-        
+
         Args:
             documents (List[dict]): List of documents with content and metadata
         """
@@ -128,7 +126,7 @@ class VectorStoreRetriever:
             for doc in documents:
                 # Generate embedding for the content
                 embedding = self.embeddings.embed_query(doc['content'])
-                
+
                 # Prepare document for insertion
                 document_data = {
                     'id': str(uuid4()),
@@ -143,12 +141,12 @@ class VectorStoreRetriever:
                     'metadata': doc.get('metadata', {}),
                     'project_id': doc.get('project_id')
                 }
-                
-                # Insert document into Supabase
-                self.supabase.table(self.table_name)\
+
+                # Insert document into database
+                self.db.table(self.table_name)\
                     .insert(document_data)\
                     .execute()
-                
+
             logging.info(f"Successfully added {len(documents)} documents to the vector store")
         except Exception as e:
             logging.error(f"Error adding documents: {str(e)}")

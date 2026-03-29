@@ -2,7 +2,7 @@ from typing import Dict
 import dateparser
 from datetime import datetime
 import logging
-from langchain.tools import tool
+from langchain_core.tools import tool
 import holidays
 
 logger = logging.getLogger(__name__)

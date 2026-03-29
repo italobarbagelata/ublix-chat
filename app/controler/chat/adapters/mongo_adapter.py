@@ -9,7 +9,7 @@ from langchain.prompts import (
     HumanMessagePromptTemplate
 )
 from langchain_core.messages import AIMessage
-from app.resources.constants import OPENAI_API_KEY
+from app.resources.constants import OPENAI_API_KEY, MODEL_CHATBOT_SMALL
 
 class MongoDBTool:
 
@@ -20,9 +20,10 @@ class MongoDBTool:
     ) -> None:
         self.__schema_description = schema_description
         self.__message = message
+        # Usar modelo económico configurable para generación de queries
         self.__llm = ChatOpenAI(api_key=OPENAI_API_KEY,
                                 temperature=0.0,
-                                model="gpt-4-0125-preview")
+                                model=MODEL_CHATBOT_SMALL)
         self.__chain = self._create_dynamic_chain()
 
     def _create_dynamic_chain(self) -> str:

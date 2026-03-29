@@ -2,7 +2,7 @@ import os
 import logging
 from datetime import datetime, timedelta
 from typing_extensions import Annotated
-from langchain.tools import tool
+from langchain_core.tools import tool
 from langgraph.prebuilt import InjectedState
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build

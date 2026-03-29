@@ -1,5 +1,5 @@
 from typing import Optional, Dict, Any
-from langchain.tools import BaseTool
+from langchain_core.tools import BaseTool
 from app.controler.chat.services.contact_service import ContactService
 from pydantic import Field, PrivateAttr
 import asyncio

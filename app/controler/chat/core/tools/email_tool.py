@@ -3,8 +3,8 @@ import os
 import aiohttp
 import asyncio
 from typing import Optional, List, Dict, Any
-from langchain.tools import BaseTool
-from langchain.callbacks.manager import CallbackManagerForToolRun
+from langchain_core.tools import BaseTool
+from langchain_core.callbacks.manager import CallbackManagerForToolRun
 
 logger = logging.getLogger(__name__)
 

@@ -18,8 +18,8 @@ Fecha de deprecación: 2025-01-XX
 """
 
 import logging
-from langchain.tools import tool
-from supabase.client import Client, create_client
+from langchain_core.tools import tool
+from app.database import SyncDatabase
 from langchain_openai import OpenAIEmbeddings
 from langgraph.prebuilt import InjectedState
 from typing_extensions import Annotated
@@ -100,16 +100,9 @@ def faq_retriever(query: str, state: Annotated[dict, InjectedState], limit: int 
             logger.error("No se encontró el proyecto en el estado")
             raise ValueError("Project not found in state")
 
-        # Obtener credenciales de Supabase
-        supabase_url = os.getenv('SUPABASE_URL')
-        supabase_key = os.getenv('SUPABASE_KEY')
-        if not supabase_url or not supabase_key:
-            logger.error("No se encontraron las credenciales de Supabase en las variables de entorno")
-            raise ValueError("Supabase credentials not found in environment variables")
-
-        # Inicializar cliente de Supabase
-        supabase_client = create_client(supabase_url, supabase_key)
-        logger.info("Cliente de Supabase inicializado correctamente")
+        # Inicializar cliente de base de datos
+        db_client = SyncDatabase()
+        logger.info("Cliente de base de datos inicializado correctamente")
 
         # Obtener cliente de embeddings (singleton)
         logger.info("Obteniendo cliente de embeddings de OpenAI")
@@ -126,7 +119,7 @@ def faq_retriever(query: str, state: Annotated[dict, InjectedState], limit: int 
         query_embedding = embeddings.embed_query(query)
         
         # Buscar FAQs similares usando la función RPC search_faqs_semantic
-        response = supabase_client.rpc(
+        response = db_client.rpc(
             'search_faqs_semantic',
             {
                 'query_embedding': query_embedding,

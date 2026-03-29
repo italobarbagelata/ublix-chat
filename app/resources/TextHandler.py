@@ -4,7 +4,7 @@ import os
 import logging
 from datetime import datetime
 from typing import List
-from supabase import create_client, Client
+from app.database import SyncDatabase
 from langchain_core.prompts import PromptTemplate
 from langchain_openai import ChatOpenAI
 from langchain.output_parsers import ResponseSchema, StructuredOutputParser
@@ -23,11 +23,8 @@ from .constants import (
     DATASOURCES_COLLECTION
 )
 
-# Supabase configuration
-supabase: Client = create_client(
-    os.getenv("SUPABASE_URL"),
-    os.getenv("SUPABASE_KEY")
-)
+# Database configuration
+_db = SyncDatabase()
 
 REQUIERED_COLUMNS_FAQ = {'title', 'keywords', 'label', 'description', 'question', 'answer', 'metadata'}
 REQUIERED_COLUMNS_GENERAL_INFO = {'title', 'keywords', 'description', 'content', 'metadata'}
@@ -208,8 +205,8 @@ class TextHandler:
     
     def _save_data_into_mongodb(self, 
                               result: List[dict]):
-        """Save data into Supabase"""
-        logging.info("Saving Data into Supabase....")
+        """Save data into database"""
+        logging.info("Saving Data into database....")
         
         # Prepare the data according to the table structure
         datasource_data = {
@@ -241,7 +238,7 @@ class TextHandler:
         
         try:
             # Update existing record instead of creating a new one
-            data = supabase.table(DATASOURCES_COLLECTION)\
+            data = _db.table(DATASOURCES_COLLECTION)\
                 .update(datasource_data)\
                 .eq('datasource_id', self.datasource_id)\
                 .execute()
@@ -252,7 +249,7 @@ class TextHandler:
                 
             return (f"Data updated in {DATASOURCES_COLLECTION} table successfully", STATUS_OK)
         except Exception as e:
-            logging.error(f"Error saving data to Supabase: {str(e)}")
+            logging.error(f"Error saving data to database: {str(e)}")
             return (f"Error saving data: {str(e)}", STATUS_INTERNAL_SERVER_ERROR)
         
     

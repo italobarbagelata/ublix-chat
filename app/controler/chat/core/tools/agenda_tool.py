@@ -6,7 +6,7 @@ Utiliza servicios especializados para mejor mantenabilidad y performance.
 import logging
 import asyncio
 from typing import Optional, Dict, Any
-from langchain.tools import BaseTool
+from langchain_core.tools import BaseTool
 
 from app.controler.chat.core.agenda_workflow.workflow_manager import WorkflowManager, WorkflowContext
 from app.controler.chat.core.agenda_workflow.calendar_service import CalendarService

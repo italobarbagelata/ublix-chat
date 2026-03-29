@@ -3,14 +3,13 @@ uvicorn==0.29.0
 
 # LangChain
 langchain==0.3.1
-langchain-core==0.3.51
+langchain-core==0.3.15
 langchain-openai==0.2.1
 langchain-community==0.3.1
 langchain-google-community[calendar]
-langchain-google-community
 
 # LangGraph
-langgraph==0.2.28
+langgraph==0.2.55
 
 # MCP (Model Context Protocol)
 mcp
@@ -43,7 +42,8 @@ msgpack
 werkzeug
 itsdangerous
 pymupdf
-supabase==2.13.0
+sqlalchemy[asyncio]>=2.0.0
+asyncpg>=0.29.0
 azure-cosmos>=4.2.0
 google-api-python-client>=2.100.0
 google-auth-httplib2>=0.1.0
@@ -57,6 +57,6 @@ pyyaml==6.0.2
 requests==2.28.2
 beautifulsoup4
 playwright
-httpx
+httpx>=0.26,<0.28
 dateparser
 holidays

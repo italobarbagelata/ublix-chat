@@ -1,7 +1,7 @@
 import logging
 from typing import Optional, Dict, Any
-from langchain.tools import BaseTool
-from langchain.callbacks.manager import CallbackManagerForToolRun
+from langchain_core.tools import BaseTool
+from langchain_core.callbacks.manager import CallbackManagerForToolRun
 from openai import AsyncOpenAI
 import json
 import os

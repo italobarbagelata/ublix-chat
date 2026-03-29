@@ -1,6 +1,6 @@
 import logging
 import json
-from langchain.tools import tool
+from langchain_core.tools import tool
 from pymongo import MongoClient
 from app.controler.chat.adapters.mongo_adapter import MongoDBTool
 from langgraph.prebuilt import InjectedState
