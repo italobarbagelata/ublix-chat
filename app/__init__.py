@@ -3,6 +3,16 @@
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+# Work around langchain-openai==0.2.1 + pydantic==2.11 incompatibility.
+# Without this, instantiating ChatOpenAI inside a request raises
+# "`ChatOpenAI` is not fully defined; you should define `BaseCache`,
+# then call `ChatOpenAI.model_rebuild()`."
+from langchain_core.caches import BaseCache  # noqa: F401  (needed for rebuild)
+from langchain_core.callbacks import Callbacks  # noqa: F401
+from langchain_openai import ChatOpenAI
+ChatOpenAI.model_rebuild()
+
 from .routes import (chat_router, webhook_router, webhook_router_facebook, webhook_router_whatsapp)
 from .database import init_db, close_db
 
