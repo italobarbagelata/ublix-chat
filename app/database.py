@@ -5,23 +5,60 @@ Provides a compatible API to minimize controller changes.
 """
 
 import os
+import re
 import logging
 from typing import Dict, List, Optional, Any
-from datetime import datetime
+from datetime import datetime, date
+from uuid import UUID
 from collections import OrderedDict, defaultdict
 import base64
 
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from sqlalchemy import text
+from sqlalchemy import create_engine, text
 from dotenv import load_dotenv
 
 load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-# Global engine and session factory
-_engine = None
+# Global engines
+_engine = None  # async (asyncpg)
+_sync_engine = None  # sync (psycopg2)
 _async_session_factory = None
+
+_ISO_DATETIME_RE = re.compile(r'^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}')
+
+
+def _coerce_param(value: Any) -> Any:
+    """Coerce ISO-8601 datetime strings to datetime so the driver accepts them."""
+    if isinstance(value, str) and _ISO_DATETIME_RE.match(value):
+        try:
+            return datetime.fromisoformat(value.replace('Z', '+00:00'))
+        except ValueError:
+            return value
+    return value
+
+
+def _row_to_dict(row) -> Dict:
+    """Convert a SQLAlchemy row to a JSON-friendly dict.
+
+    asyncpg/psycopg2 deserialize uuid columns as UUID instances and
+    timestamptz columns as datetime instances. Most call sites in this
+    codebase were written against the Supabase REST client and expect
+    plain strings (they pass values straight into Pydantic models or
+    format them with `.replace(...)`/`fromisoformat`). Stringify here.
+    """
+    out = {}
+    for k, v in row._mapping.items():
+        if isinstance(v, UUID):
+            out[k] = str(v)
+        elif isinstance(v, datetime):
+            out[k] = v.isoformat()
+        elif isinstance(v, date):
+            out[k] = v.isoformat()
+        else:
+            out[k] = v
+    return out
 
 
 def get_database_url() -> str:
@@ -55,6 +92,35 @@ def get_engine():
             echo=False,
         )
     return _engine
+
+
+def _get_sync_database_url() -> str:
+    """Build a sync (psycopg2) URL from the same source as the async one."""
+    url = get_database_url()
+    if url.startswith("postgresql+asyncpg://"):
+        return url.replace("postgresql+asyncpg://", "postgresql+psycopg2://", 1)
+    if url.startswith("postgresql://"):
+        return url.replace("postgresql://", "postgresql+psycopg2://", 1)
+    return url
+
+
+def get_sync_engine():
+    """Get or create the global sync engine (psycopg2) for SyncDatabase.
+
+    Using a real sync engine avoids the broken sync-over-async pattern that
+    blew up with "asyncio.run() cannot be called from a running event loop"
+    whenever SyncDatabase was used from inside a FastAPI request.
+    """
+    global _sync_engine
+    if _sync_engine is None:
+        _sync_engine = create_engine(
+            _get_sync_database_url(),
+            pool_size=10,
+            max_overflow=10,
+            pool_pre_ping=True,
+            echo=False,
+        )
+    return _sync_engine
 
 
 def get_session_factory():
@@ -310,7 +376,7 @@ class TableQuery:
             sql += f" OFFSET {self._offset_val}"
 
         result = await session.execute(text(sql), params)
-        rows = [dict(row._mapping) for row in result.fetchall()]
+        rows = [_row_to_dict(row) for row in result.fetchall()]
 
         # Handle count if requested
         count = None
@@ -334,7 +400,7 @@ class TableQuery:
             result = await session.execute(text(sql), record)
             row = result.fetchone()
             if row:
-                all_results.append(dict(row._mapping))
+                all_results.append(_row_to_dict(row))
 
         return QueryResult(all_results)
 
@@ -351,7 +417,7 @@ class TableQuery:
         sql = f'UPDATE "{self._table}" SET {set_str}{where} RETURNING *'
 
         result = await session.execute(text(sql), params)
-        rows = [dict(row._mapping) for row in result.fetchall()]
+        rows = [_row_to_dict(row) for row in result.fetchall()]
         return QueryResult(rows)
 
     async def _execute_delete(self, session: AsyncSession) -> QueryResult:
@@ -360,7 +426,7 @@ class TableQuery:
         sql = f'DELETE FROM "{self._table}"{where} RETURNING *'
 
         result = await session.execute(text(sql), params)
-        rows = [dict(row._mapping) for row in result.fetchall()]
+        rows = [_row_to_dict(row) for row in result.fetchall()]
         return QueryResult(rows)
 
     async def _execute_upsert(self, session: AsyncSession) -> QueryResult:
@@ -393,7 +459,7 @@ class TableQuery:
             result = await session.execute(text(sql), record)
             row = result.fetchone()
             if row:
-                all_results.append(dict(row._mapping))
+                all_results.append(_row_to_dict(row))
 
         return QueryResult(all_results)
 
@@ -417,7 +483,7 @@ class RpcCaller:
                 result = await session.execute(text(sql), self._params)
 
                 try:
-                    rows = [dict(row._mapping) for row in result.fetchall()]
+                    rows = [_row_to_dict(row) for row in result.fetchall()]
                     return QueryResult(rows)
                 except Exception:
                     # For functions that return a scalar
@@ -592,42 +658,26 @@ class SyncTableQuery:
         return " WHERE " + " AND ".join(conditions)
 
     def execute(self) -> QueryResult:
-        """Execute the built query synchronously."""
-        import asyncio
-
-        async def _run():
-            async with self._engine.connect() as conn:
-                try:
-                    if self._operation == "select":
-                        return await self._execute_select(conn)
-                    elif self._operation == "insert":
-                        return await self._execute_insert(conn)
-                    elif self._operation == "update":
-                        return await self._execute_update(conn)
-                    elif self._operation == "delete":
-                        return await self._execute_delete(conn)
-                    elif self._operation == "upsert":
-                        return await self._execute_upsert(conn)
-                    else:
-                        raise ValueError(f"Unknown operation: {self._operation}")
-                except Exception as e:
-                    logger.error(f"Sync query execution error on {self._table}: {e}")
-                    raise
-
+        """Execute the built query against the sync engine (psycopg2)."""
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # We're inside an async context; create a new thread
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(asyncio.run, _run())
-                    return future.result()
-            else:
-                return loop.run_until_complete(_run())
-        except RuntimeError:
-            return asyncio.run(_run())
+            with self._engine.begin() as conn:
+                if self._operation == "select":
+                    return self._execute_select(conn)
+                elif self._operation == "insert":
+                    return self._execute_insert(conn)
+                elif self._operation == "update":
+                    return self._execute_update(conn)
+                elif self._operation == "delete":
+                    return self._execute_delete(conn)
+                elif self._operation == "upsert":
+                    return self._execute_upsert(conn)
+                else:
+                    raise ValueError(f"Unknown operation: {self._operation}")
+        except Exception as e:
+            logger.error(f"Sync query execution error on {self._table}: {e}")
+            raise
 
-    async def _execute_select(self, conn) -> QueryResult:
+    def _execute_select(self, conn) -> QueryResult:
         params = {}
         where = self._build_where_clause(params)
         cols = self._select_columns if self._select_columns != "*" else "*"
@@ -641,18 +691,18 @@ class SyncTableQuery:
         if self._offset_val is not None:
             sql += f" OFFSET {self._offset_val}"
 
-        result = await conn.execute(text(sql), params)
-        rows = [dict(row._mapping) for row in result.fetchall()]
+        result = conn.execute(text(sql), params)
+        rows = [_row_to_dict(row) for row in result.fetchall()]
 
         count = None
         if self._count_mode == "exact":
             count_sql = f'SELECT COUNT(*) as cnt FROM "{self._table}"{where}'
-            count_result = await conn.execute(text(count_sql), params)
+            count_result = conn.execute(text(count_sql), params)
             count = count_result.scalar()
 
         return QueryResult(rows, count=count)
 
-    async def _execute_insert(self, conn) -> QueryResult:
+    def _execute_insert(self, conn) -> QueryResult:
         records = self._data if isinstance(self._data, list) else [self._data]
         all_results = []
         for record in records:
@@ -660,38 +710,36 @@ class SyncTableQuery:
             col_str = ", ".join(f'"{c}"' for c in columns)
             val_str = ", ".join(f":{c}" for c in columns)
             sql = f'INSERT INTO "{self._table}" ({col_str}) VALUES ({val_str}) RETURNING *'
-            result = await conn.execute(text(sql), record)
+            coerced = {k: _coerce_param(v) for k, v in record.items()}
+            result = conn.execute(text(sql), coerced)
             row = result.fetchone()
             if row:
-                all_results.append(dict(row._mapping))
-        await conn.commit()
+                all_results.append(_row_to_dict(row))
         return QueryResult(all_results)
 
-    async def _execute_update(self, conn) -> QueryResult:
+    def _execute_update(self, conn) -> QueryResult:
         params = {}
         set_parts = []
         for key, value in self._data.items():
             param_name = f"s_{key}"
             set_parts.append(f'"{key}" = :{param_name}')
-            params[param_name] = value
+            params[param_name] = _coerce_param(value)
         where = self._build_where_clause(params)
         set_str = ", ".join(set_parts)
         sql = f'UPDATE "{self._table}" SET {set_str}{where} RETURNING *'
-        result = await conn.execute(text(sql), params)
-        rows = [dict(row._mapping) for row in result.fetchall()]
-        await conn.commit()
+        result = conn.execute(text(sql), params)
+        rows = [_row_to_dict(row) for row in result.fetchall()]
         return QueryResult(rows)
 
-    async def _execute_delete(self, conn) -> QueryResult:
+    def _execute_delete(self, conn) -> QueryResult:
         params = {}
         where = self._build_where_clause(params)
         sql = f'DELETE FROM "{self._table}"{where} RETURNING *'
-        result = await conn.execute(text(sql), params)
-        rows = [dict(row._mapping) for row in result.fetchall()]
-        await conn.commit()
+        result = conn.execute(text(sql), params)
+        rows = [_row_to_dict(row) for row in result.fetchall()]
         return QueryResult(rows)
 
-    async def _execute_upsert(self, conn) -> QueryResult:
+    def _execute_upsert(self, conn) -> QueryResult:
         records = self._data if isinstance(self._data, list) else [self._data]
         all_results = []
         for record in records:
@@ -712,11 +760,11 @@ class SyncTableQuery:
                     f'INSERT INTO "{self._table}" ({col_str}) VALUES ({val_str}) '
                     f'ON CONFLICT ({conflict_cols}) DO NOTHING RETURNING *'
                 )
-            result = await conn.execute(text(sql), record)
+            coerced = {k: _coerce_param(v) for k, v in record.items()}
+            result = conn.execute(text(sql), coerced)
             row = result.fetchone()
             if row:
-                all_results.append(dict(row._mapping))
-        await conn.commit()
+                all_results.append(_row_to_dict(row))
         return QueryResult(all_results)
 
 
@@ -729,31 +777,17 @@ class SyncRpcCaller:
         self._engine = engine
 
     def execute(self) -> QueryResult:
-        import asyncio
-
-        async def _run():
-            async with self._engine.connect() as conn:
-                param_names = list(self._params.keys())
-                param_str = ", ".join(f":{p}" for p in param_names)
-                sql = f"SELECT * FROM {self._func_name}({param_str})"
-                result = await conn.execute(text(sql), self._params)
-                try:
-                    rows = [dict(row._mapping) for row in result.fetchall()]
-                    return QueryResult(rows)
-                except Exception:
-                    return QueryResult([])
-
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(asyncio.run, _run())
-                    return future.result()
-            else:
-                return loop.run_until_complete(_run())
-        except RuntimeError:
-            return asyncio.run(_run())
+        with self._engine.begin() as conn:
+            param_names = list(self._params.keys())
+            param_str = ", ".join(f":{p}" for p in param_names)
+            sql = f"SELECT * FROM {self._func_name}({param_str})"
+            coerced = {k: _coerce_param(v) for k, v in self._params.items()}
+            result = conn.execute(text(sql), coerced)
+            try:
+                rows = [_row_to_dict(row) for row in result.fetchall()]
+                return QueryResult(rows)
+            except Exception:
+                return QueryResult([])
 
 
 class Database:
@@ -944,7 +978,7 @@ class SyncDatabase:
     """
 
     def __init__(self):
-        self._engine = get_engine()
+        self._engine = get_sync_engine()
 
     def table(self, name: str) -> SyncTableQuery:
         """Start a chained sync query on a table."""
