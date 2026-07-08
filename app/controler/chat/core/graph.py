@@ -169,8 +169,12 @@ class Graph():
         # Sistema de memoria simplificado
         self.state.state = state_dict
 
-        # Guardar estado en segundo plano
-        asyncio.create_task(self.database_state.save_state(self.state))
+        # Guardar estado de memoria de forma SÍNCRONA (await) antes de responder.
+        # Debe completarse dentro del lock de conversación: si se lanzara con
+        # create_task (fire-and-forget), un segundo mensaje del mismo usuario
+        # podría hacer fetch_state antes de que este guardado termine y leer un
+        # estado viejo -> el agente "olvida" la conversación en ráfagas rápidas.
+        await self.database_state.save_state(self.state)
         
         # Generar resumen en segundo plano
         loop.run_in_executor(
