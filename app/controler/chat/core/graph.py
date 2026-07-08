@@ -1,6 +1,5 @@
 import logging
 import asyncio
-from langgraph.checkpoint.memory import MemorySaver
 from langchain_core.messages import HumanMessage
 from langgraph.graph import StateGraph
 from langgraph.graph import END, START
@@ -12,8 +11,7 @@ from app.controler.chat.core.state import CustomState
 from app.controler.chat.core.tools import agent_tools
 from app.controler.chat.core.utils import decorate_message
 from app.controler.chat.store.persistence import Persist
-from app.controler.chat.store.persistence_state import MemoryStatePersistence
-from collections import OrderedDict
+from app.controler.chat.store.checkpointer import get_checkpointer
 from app.controler.chat.core.generate_summary import generate_summary, SummaryPayload
 from uuid import uuid4
 import time
@@ -36,13 +34,14 @@ class Graph():
         self.project = project
         self.workflow = StateGraph(CustomState)
         self.database = Persist()
-        self.database_state = MemoryStatePersistence()
         self.logger = logging.getLogger(__name__)
         
         self.unique_id = unique_id
         self.source = source
         self.executor = ThreadPoolExecutor(max_workers=3)
-        memory = await self.__set_memory()
+        # Shared native Postgres checkpointer: LangGraph persists/restores the
+        # conversation state automatically per thread_id. No manual save/fetch.
+        memory = await get_checkpointer()
         await self.__set_nodes()
         self.__set_edges()
         self.graph = self.workflow.compile(checkpointer=memory)
@@ -102,21 +101,6 @@ class Graph():
         workflow.add_edge("tools", "agent")
         workflow.add_edge("summarize_conversation", END)
         
-    async def __set_memory(self):
-        memory = MemorySaver()
-        state = await self.database_state.fetch_state(
-            self.state.project_id, self.state.user_id)
-        if state:
-            if isinstance(state.get("state"), dict):
-                 memory.storage[self.state.user_id] = state["state"]
-                 self.logger.debug(f"Memoria cargada para usuario {self.state.user_id}")
-            else:
-                 self.logger.warning(f"Estado con formato inválido para usuario {self.state.user_id}")
-        else:
-            self.logger.debug(f"Primera conversación del usuario {self.state.user_id}")
-        return memory
-    
-        
     async def execute(self, message):
         unique_id = self.unique_id
         start_time = time.time()
@@ -152,30 +136,14 @@ class Graph():
                 "source": self.source,
                 "summary": "",
             },
-            {"configurable": {"thread_id": user_id}}
+            # thread_id compuesto: aísla la memoria por proyecto + usuario
+            # (el checkpointer nativo persiste el estado automáticamente).
+            {"configurable": {"thread_id": f"{self.state.project_id}:{user_id}"}}
         )
 
-        # Procesar el estado de memoria
-        final_memory_state = self.graph.checkpointer.storage.get(user_id)
-        self.state.state = final_memory_state
+        # El estado de conversación lo persiste el checkpointer de Postgres
+        # automáticamente en cada paso del grafo. Ya no se serializa a mano.
 
-        # Procesar el diccionario de estado
-        state_dict = self.state.state
-        nested_dict = state_dict.get('', {})
-
-        if not isinstance(nested_dict, OrderedDict):
-            nested_dict = OrderedDict(nested_dict)
-
-        # Sistema de memoria simplificado
-        self.state.state = state_dict
-
-        # Guardar estado de memoria de forma SÍNCRONA (await) antes de responder.
-        # Debe completarse dentro del lock de conversación: si se lanzara con
-        # create_task (fire-and-forget), un segundo mensaje del mismo usuario
-        # podría hacer fetch_state antes de que este guardado termine y leer un
-        # estado viejo -> el agente "olvida" la conversación en ráfagas rápidas.
-        await self.database_state.save_state(self.state)
-        
         # Generar resumen en segundo plano
         loop.run_in_executor(
             self.executor,

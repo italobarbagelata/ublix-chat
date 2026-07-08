@@ -15,6 +15,7 @@ ChatOpenAI.model_rebuild()
 
 from .routes import (chat_router, webhook_router, webhook_router_facebook, webhook_router_whatsapp)
 from .database import init_db, close_db
+from .controler.chat.store.checkpointer import setup_checkpointer, close_checkpointer
 
 load_dotenv()
 
@@ -39,9 +40,12 @@ def create_app():
     @app.on_event("startup")
     async def startup():
         await init_db()
+        # Create the LangGraph checkpointer tables (idempotent).
+        await setup_checkpointer()
 
     @app.on_event("shutdown")
     async def shutdown():
+        await close_checkpointer()
         await close_db()
 
     # El logging ya está configurado en logger_config.py

@@ -10,6 +10,9 @@ langchain-google-community[calendar]
 
 # LangGraph
 langgraph==0.2.55
+# Native Postgres checkpointer for conversation memory persistence
+langgraph-checkpoint-postgres<2
+psycopg[binary,pool]
 
 # MCP (Model Context Protocol)
 mcp
