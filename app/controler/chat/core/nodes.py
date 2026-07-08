@@ -13,6 +13,7 @@ from app.controler.chat.store.persistence_state import MemoryStatePersistence
 from app.controler.chat.classes.token_metrics import TokenMetrics
 from app.controler.chat.core.llm_adapter import LLMAdapter
 from app.controler.chat.core.prompt_templates import PromptTemplateBuilder
+from app.controler.chat.services.contact_service import ContactService
 from dotenv import load_dotenv
 from app.resources.constants import DEFAULT_PROMPT, MODEL_CHATBOT
 import datetime
@@ -56,6 +57,15 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
         summary = Persist().get_summary(state)
         messages = filter_and_prepare_messages_for_agent_node(state)
 
+        # Cargar datos conocidos del usuario (nombre, edad, etc.) para inyectarlos
+        # en el prompt. Así el bot no los olvida en conversaciones largas, donde el
+        # historial crudo se degrada y el resumen excluye estos datos a propósito.
+        try:
+            contact = await ContactService().get_contact_by_user_id(project_id, user_id)
+        except Exception as e:
+            logging.error(f"Error cargando contacto para el prompt: {e}")
+            contact = None
+
         # OPTIMIZACIÓN: Usar herramientas pre-cargadas si están disponibles
         if _cached_tools is not None:
             tools_to_use = _cached_tools
@@ -79,7 +89,8 @@ async def create_agent(user_id, name, number_phone_agent, source, unique_id, pro
             summary=summary,
             utc_now=now.isoformat(),
             date_range_str=date_range_str,
-            now_chile=now_chile
+            now_chile=now_chile,
+            contact=contact
         )
         
         if summary and summary.strip():

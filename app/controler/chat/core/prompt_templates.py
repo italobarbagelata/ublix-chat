@@ -1,18 +1,20 @@
 """
 Templates modulares para construcción de prompts
 """
-from typing import List, Dict, Any
+import json
+from typing import List, Dict, Any, Optional
 
 class PromptTemplateBuilder:
     """Construye prompts modulares basados en herramientas habilitadas"""
-    
+
     @staticmethod
     def build_system_prompt(
         project: Any,
         summary: str,
         utc_now: str,
         date_range_str: str,
-        now_chile: str
+        now_chile: str,
+        contact: Optional[Dict[str, Any]] = None
     ) -> str:
         """
         Construye el prompt del sistema principal (SIMPLIFICADO)
@@ -47,6 +49,13 @@ INSTRUCCIONES ESPECÍFICAS DEL PROYECTO:
 {project.instructions}
 """
 
+        # Agregar datos conocidos del usuario (persistidos vía save_contact_tool).
+        # El resumen excluye a propósito estos datos, así que se inyectan aquí para
+        # que el bot NO los olvide en conversaciones largas.
+        contact_section = PromptTemplateBuilder._get_contact_section(contact)
+        if contact_section:
+            base_prompt += contact_section
+
         # Agregar resumen si existe
         if summary and summary.strip():
             base_prompt += f"""
@@ -67,6 +76,46 @@ IMPORTANTE: Usa esta información para NO repetir preguntas que ya fueron respon
 
         return base_prompt
     
+    @staticmethod
+    def _get_contact_section(contact: Optional[Dict[str, Any]]) -> str:
+        """Render the known contact data as a prompt section (empty if none)."""
+        if not contact:
+            return ""
+
+        labels = {
+            "name": "Nombre",
+            "email": "Email",
+            "phone_number": "Teléfono",
+            "lead_status": "Estado del lead",
+        }
+        lines: List[str] = []
+        for key, label in labels.items():
+            value = contact.get(key)
+            if value:
+                lines.append(f"- {label}: {value}")
+
+        # additional_fields (JSON) contiene datos como edad, ciudad, etc.
+        extra = contact.get("additional_fields")
+        if isinstance(extra, str):
+            try:
+                extra = json.loads(extra)
+            except (ValueError, TypeError):
+                extra = None
+        if isinstance(extra, dict):
+            for key, value in extra.items():
+                if value not in (None, "", [], {}):
+                    lines.append(f"- {key}: {value}")
+
+        if not lines:
+            return ""
+
+        return (
+            "\n\nDATOS CONOCIDOS DEL USUARIO "
+            "(ya te los proporcionó; recuérdalos y NO los vuelvas a preguntar):\n"
+            + "\n".join(lines)
+            + "\n"
+        )
+
     @staticmethod
     def _get_core_rules() -> str:
         """Reglas generales del asistente - OPTIMIZADO para reducir tokens"""
