@@ -6,6 +6,7 @@ Provides a compatible API to minimize controller changes.
 
 import os
 import re
+import json
 import logging
 from typing import Dict, List, Optional, Any
 from datetime import datetime, date
@@ -30,12 +31,19 @@ _ISO_DATETIME_RE = re.compile(r'^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}')
 
 
 def _coerce_param(value: Any) -> Any:
-    """Coerce ISO-8601 datetime strings to datetime so the driver accepts them."""
+    """Coerce Python values into types the DB driver accepts.
+
+    - ISO-8601 datetime strings -> datetime objects.
+    - list/dict -> JSON string, since neither asyncpg nor psycopg2
+      auto-serialize Python containers for json/jsonb columns.
+    """
     if isinstance(value, str) and _ISO_DATETIME_RE.match(value):
         try:
             return datetime.fromisoformat(value.replace('Z', '+00:00'))
         except ValueError:
             return value
+    if isinstance(value, (list, dict)):
+        return json.dumps(value)
     return value
 
 
@@ -397,7 +405,8 @@ class TableQuery:
             val_str = ", ".join(f":{c}" for c in columns)
             sql = f'INSERT INTO "{self._table}" ({col_str}) VALUES ({val_str}) RETURNING *'
 
-            result = await session.execute(text(sql), record)
+            coerced = {k: _coerce_param(v) for k, v in record.items()}
+            result = await session.execute(text(sql), coerced)
             row = result.fetchone()
             if row:
                 all_results.append(_row_to_dict(row))
@@ -410,7 +419,7 @@ class TableQuery:
         for key, value in self._data.items():
             param_name = f"s_{key}"
             set_parts.append(f'"{key}" = :{param_name}')
-            params[param_name] = value
+            params[param_name] = _coerce_param(value)
 
         where = self._build_where_clause(params)
         set_str = ", ".join(set_parts)
@@ -456,7 +465,8 @@ class TableQuery:
                     f'ON CONFLICT ({conflict_cols}) DO NOTHING RETURNING *'
                 )
 
-            result = await session.execute(text(sql), record)
+            coerced = {k: _coerce_param(v) for k, v in record.items()}
+            result = await session.execute(text(sql), coerced)
             row = result.fetchone()
             if row:
                 all_results.append(_row_to_dict(row))
